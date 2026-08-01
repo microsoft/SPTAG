@@ -105,6 +105,20 @@ BOOST_AUTO_TEST_CASE(ConvertDouble)
     Local::TestConvertSuccCase<double>(static_cast<double>(100), nullptr);
 }
 
+BOOST_AUTO_TEST_CASE(ConvertBool)
+{
+    bool value = false;
+    BOOST_CHECK(SPTAG::Helper::Convert::ConvertStringTo<bool>("true", value));
+    BOOST_CHECK(value);
+    BOOST_CHECK(SPTAG::Helper::Convert::ConvertStringTo<bool>("false", value));
+    BOOST_CHECK(!value);
+    BOOST_CHECK(SPTAG::Helper::Convert::ConvertStringTo<bool>("1", value));
+    BOOST_CHECK(value);
+    BOOST_CHECK(SPTAG::Helper::Convert::ConvertStringTo<bool>("0", value));
+    BOOST_CHECK(!value);
+    BOOST_CHECK(!SPTAG::Helper::Convert::ConvertStringTo<bool>("invalid", value));
+}
+
 BOOST_AUTO_TEST_CASE(ConvertIndexAlgoType)
 {
     Local::TestConvertSuccCase<SPTAG::IndexAlgoType>(SPTAG::IndexAlgoType::BKT, "BKT");

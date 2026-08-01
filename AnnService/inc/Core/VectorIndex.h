@@ -318,6 +318,9 @@ public:
             std::vector<uint32_t> m_queryTags;
             float m_filterSelectivity = 1.0f;
             std::vector<SizeType> m_directPostingIDs;
+            // Optional local head IDs whose centroid vectors must be merged with
+            // a direct posting scan. Kept separate so generic sparse-tag callers
+            // that supply arbitrary posting IDs retain their existing behavior.
             std::vector<SizeType> m_directHeadLocalIDs;
             std::vector<int> m_searchHeadBundleNodes;
             // Per-level minimum tag value (ascending, disjoint ranges) persisted at

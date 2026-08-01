@@ -13,8 +13,8 @@ swapping the dataset paths.
 
 All scripts below are committed under `Tools/benchmarks/`. Every billion-scale
 build knob lives in the native `.ini` (see **AGENTS.md → "Build Config — Native
-`.ini`"**); the launchers carry only process-loader env + the post-build
-cross-graph step.
+`.ini`"**); the launcher carries only process-loader setup and reuses the
+pre-BuildSSD cross-edge sidecar (with a legacy fallback when necessary).
 
 Conventions used in the commands:
 
@@ -106,7 +106,9 @@ python3 Tools/benchmarks/generate_query_tenant_tag_groundtruth.py \
 ## (4) Build index  —  `run_spann_attr_build.sh`
 
 Thin launcher over the native `.ini`. It derives all paths FROM the `.ini` via
-`sed`, runs `spannbuilder -c <config>`, then (gated by `[MultiTenant] CrossEdges`)
+`sed`, runs `spannbuilder -c <config>`, then reuses the cross-edge sidecar built
+before STATIC tail construction (or, for older builders, runs the fallback gated by
+`[BuildSSDIndex] CrossEdges`)
 runs the post-build `augmentheadgraph` cross-graph step and copies the OPQ
 codebook into `tenant_0/`.
 

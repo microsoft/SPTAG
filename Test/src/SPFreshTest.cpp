@@ -12,6 +12,7 @@
 #include "inc/Core/Common/IQuantizer.h"
 #include "inc/Core/Common/PQQuantizer.h"
 #include "inc/Helper/DiskIO.h"
+#include "inc/Helper/HeadCrossEdges.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/StringConvert.h"
@@ -24,6 +25,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <string>
@@ -40,6 +42,44 @@ SizeType N = 10000;
 DimensionType M = 100;
 int K = 10;
 int queries = 10;
+
+class ScopedEnvironmentVariable
+{
+public:
+    ScopedEnvironmentVariable(const char* p_name, const char* p_value)
+        : m_name(p_name)
+    {
+        const char* previous = std::getenv(p_name);
+        if (previous != nullptr) {
+            m_hadPrevious = true;
+            m_previous = previous;
+        }
+        Set(p_value);
+    }
+
+    ~ScopedEnvironmentVariable()
+    {
+        Set(m_hadPrevious ? m_previous.c_str() : nullptr);
+    }
+
+    void Set(const char* p_value)
+    {
+#ifdef _WIN32
+        _putenv_s(m_name.c_str(), p_value == nullptr ? "" : p_value);
+#else
+        if (p_value == nullptr) {
+            unsetenv(m_name.c_str());
+        } else {
+            setenv(m_name.c_str(), p_value, 1);
+        }
+#endif
+    }
+
+private:
+    std::string m_name;
+    std::string m_previous;
+    bool m_hadPrevious = false;
+};
 
 std::shared_ptr<VectorSet> ConvertToFloatVectorSet(const std::shared_ptr<VectorSet>& src)
 {
@@ -1240,41 +1280,51 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
     auto vectors = std::make_shared<BasicVectorSet>(
         bytes, VectorValueType::Float, dimension, baseCount);
 
+    const auto configure = [&](const std::shared_ptr<VectorIndex>& target) {
+        const auto set = [&](const char* section, const char* key, const std::string& value) {
+            BOOST_REQUIRE(target->SetParameter(key, value.c_str(), section) == ErrorCode::Success);
+        };
+        set("Base", "DistCalcMethod", "L2");
+        set("Base", "IndexAlgoType", "BKT");
+        set("Base", "ValueType", "Float");
+        set("Base", "Dim", std::to_string(dimension));
+        set("Base", "IndexDirectory", indexDirectory);
+        set("SelectHead", "isExecute", "true");
+        set("SelectHead", "SelectHeadType", "BKT");
+        set("SelectHead", "Ratio", "0.25");
+        set("SelectHead", "NumberOfThreads", "1");
+        set("SelectHead", "SelectThreshold", "0");
+        set("SelectHead", "SplitFactor", "0");
+        set("SelectHead", "SplitThreshold", "0");
+        set("BuildHead", "isExecute", "true");
+        set("BuildHead", "NumberOfThreads", "1");
+        set("BuildSSDIndex", "isExecute", "true");
+        set("BuildSSDIndex", "BuildSsdIndex", "true");
+        set("BuildSSDIndex", "Storage", "STATIC");
+        set("BuildSSDIndex", "InternalResultNum", "8");
+        set("BuildSSDIndex", "SearchInternalResultNum", "8");
+        set("BuildSSDIndex", "NumberOfThreads", "1");
+        set("BuildSSDIndex", "PostingPageLimit", "1");
+        set("BuildSSDIndex", "SearchPostingPageLimit", "1");
+        set("BuildSSDIndex", "SSDIndexFileNum", "1");
+        set("BuildSSDIndex", "ReplicaCount", "2");
+        set("BuildSSDIndex", "TailReplicaCount", "1");
+        set("BuildSSDIndex", "EnableUnfilterTail", "true");
+        set("BuildSSDIndex", "UnfilterTailBufferLength", "-1");
+        set("BuildSSDIndex", "CrossEdges", "1");
+        set("BuildSSDIndex", "CrossExtraEdges", "2");
+        set("BuildSSDIndex", "CrossEdgeSearchTopK", "4");
+        set("BuildSSDIndex", "CrossEdgeBuildThreads", "1");
+        set("BuildSSDIndex", "ExcludeHead", "true");
+        set("BuildSSDIndex", "NumTagsPerVec", std::to_string(tagCount));
+        set("BuildSSDIndex", "StaticACLTagCols", std::to_string(tagCount));
+    };
+
+    ScopedEnvironmentVariable persistSelectHead("SPTAG_PERSIST_SELECTHEAD", "1");
+    ScopedEnvironmentVariable resumeBuild("SPTAG_RESUME_BUILD", nullptr);
     auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
     BOOST_REQUIRE(index != nullptr);
-    const auto set = [&](const char* section, const char* key, const std::string& value) {
-        BOOST_REQUIRE(index->SetParameter(key, value.c_str(), section) == ErrorCode::Success);
-    };
-    set("Base", "DistCalcMethod", "L2");
-    set("Base", "IndexAlgoType", "BKT");
-    set("Base", "ValueType", "Float");
-    set("Base", "Dim", std::to_string(dimension));
-    set("Base", "IndexDirectory", indexDirectory);
-    set("SelectHead", "isExecute", "true");
-    set("SelectHead", "SelectHeadType", "BKT");
-    set("SelectHead", "Ratio", "0.25");
-    set("SelectHead", "NumberOfThreads", "1");
-    set("SelectHead", "SelectThreshold", "0");
-    set("SelectHead", "SplitFactor", "0");
-    set("SelectHead", "SplitThreshold", "0");
-    set("BuildHead", "isExecute", "true");
-    set("BuildHead", "NumberOfThreads", "1");
-    set("BuildSSDIndex", "isExecute", "true");
-    set("BuildSSDIndex", "BuildSsdIndex", "true");
-    set("BuildSSDIndex", "Storage", "STATIC");
-    set("BuildSSDIndex", "InternalResultNum", "8");
-    set("BuildSSDIndex", "SearchInternalResultNum", "8");
-    set("BuildSSDIndex", "NumberOfThreads", "1");
-    set("BuildSSDIndex", "PostingPageLimit", "1");
-    set("BuildSSDIndex", "SearchPostingPageLimit", "1");
-    set("BuildSSDIndex", "SSDIndexFileNum", "1");
-    set("BuildSSDIndex", "ReplicaCount", "2");
-    set("BuildSSDIndex", "TailReplicaCount", "1");
-    set("BuildSSDIndex", "EnableUnfilterTail", "true");
-    set("BuildSSDIndex", "UnfilterTailBufferLength", "-1");
-    set("BuildSSDIndex", "ExcludeHead", "true");
-    set("BuildSSDIndex", "NumTagsPerVec", std::to_string(tagCount));
-    set("BuildSSDIndex", "StaticACLTagCols", std::to_string(tagCount));
+    configure(index);
 
     auto* spann = dynamic_cast<SPANN::ISPANNIndex*>(index.get());
     BOOST_REQUIRE(spann != nullptr);
@@ -1306,8 +1356,80 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
                       0) == ErrorCode::Success);
     BOOST_CHECK_GE(genericRoutingQuery.GetResult(0)->VID, 0);
 
-    BOOST_REQUIRE(index->SaveIndex(indexDirectory) == ErrorCode::Success);
+    const std::string headDirectory = indexDirectory + "/HeadIndex";
+    const std::string nodeGraph = headDirectory + "/node_0/graph.bin";
+    const std::string crossEdges = headDirectory + "/head_cross_edges.bin";
+    BOOST_REQUIRE(std::filesystem::exists(indexDirectory + "/head_select_state.bin"));
+    BOOST_REQUIRE(std::filesystem::exists(nodeGraph));
+    BOOST_REQUIRE(std::filesystem::exists(headDirectory + "/head_bundle_manifest.bin"));
+    BOOST_REQUIRE(std::filesystem::exists(headDirectory + "/head_metaonly.bin"));
+    BOOST_REQUIRE(std::filesystem::exists(crossEdges));
+    BOOST_CHECK_GT(std::filesystem::file_size(crossEdges), 0);
+    const auto nodeGraphWriteTime = std::filesystem::last_write_time(nodeGraph);
+    const auto crossEdgesWriteTime = std::filesystem::last_write_time(crossEdges);
+
     index.reset();
+    root.reset();
+    BOOST_REQUIRE(std::filesystem::remove(headDirectory + "/head_bundle_manifest.bin"));
+    BOOST_REQUIRE(std::filesystem::remove(headDirectory + "/head_metaonly.bin"));
+    std::filesystem::remove(indexDirectory + "/SPTAGFullList.bin");
+    std::filesystem::remove(indexDirectory + "/DeletedIDs.bin");
+    std::filesystem::remove(indexDirectory + "/indexloader.ini");
+
+    resumeBuild.Set("1");
+    auto resumed = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
+    BOOST_REQUIRE(resumed != nullptr);
+    configure(resumed);
+    auto* resumedSpann = dynamic_cast<SPANN::ISPANNIndex*>(resumed.get());
+    BOOST_REQUIRE(resumedSpann != nullptr);
+    resumedSpann->SetVectorTags(tags.data(), baseCount, tagCount);
+    resumedSpann->SetNodeVectorAssignments(nodeAssignments);
+    resumedSpann->SetPrimaryNodeVectorAssignments(nodeAssignments);
+    BOOST_REQUIRE(resumed->BuildIndex(vectors, nullptr, true, false, false) == ErrorCode::Success);
+    BOOST_CHECK(std::filesystem::last_write_time(nodeGraph) == nodeGraphWriteTime);
+    auto* resumedMetadataRoot = dynamic_cast<KDT::Index<float>*>(
+        resumedSpann->GetMemoryIndex().get());
+    BOOST_REQUIRE(resumedMetadataRoot != nullptr);
+    BOOST_CHECK(resumedMetadataRoot->IsMetadataOnly());
+    BOOST_REQUIRE(std::filesystem::exists(headDirectory + "/head_bundle_manifest.bin"));
+    BOOST_REQUIRE(std::filesystem::exists(headDirectory + "/head_metaonly.bin"));
+    BOOST_REQUIRE(std::filesystem::exists(crossEdges));
+    BOOST_CHECK(std::filesystem::last_write_time(crossEdges) == crossEdgesWriteTime);
+
+    resumed.reset();
+    BOOST_REQUIRE(std::filesystem::remove(headDirectory + "/head_bundle_manifest.bin"));
+    BOOST_REQUIRE(std::filesystem::remove(headDirectory + "/head_metaonly.bin"));
+    std::filesystem::remove(indexDirectory + "/SPTAGFullList.bin");
+    std::filesystem::remove(indexDirectory + "/DeletedIDs.bin");
+    std::filesystem::remove(indexDirectory + "/indexloader.ini");
+    {
+        std::fstream corrupt(crossEdges, std::ios::in | std::ios::out | std::ios::binary);
+        BOOST_REQUIRE(corrupt.good());
+        const std::uint32_t invalidMagic = 0;
+        corrupt.write(
+            reinterpret_cast<const char*>(&invalidMagic), sizeof(invalidMagic));
+        BOOST_REQUIRE(corrupt.good());
+    }
+
+    auto recovered = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
+    BOOST_REQUIRE(recovered != nullptr);
+    configure(recovered);
+    auto* recoveredSpann = dynamic_cast<SPANN::ISPANNIndex*>(recovered.get());
+    BOOST_REQUIRE(recoveredSpann != nullptr);
+    recoveredSpann->SetVectorTags(tags.data(), baseCount, tagCount);
+    recoveredSpann->SetNodeVectorAssignments(nodeAssignments);
+    recoveredSpann->SetPrimaryNodeVectorAssignments(nodeAssignments);
+    BOOST_REQUIRE(recovered->BuildIndex(vectors, nullptr, true, false, false) == ErrorCode::Success);
+    BOOST_CHECK(std::filesystem::last_write_time(nodeGraph) == nodeGraphWriteTime);
+    std::ifstream rebuiltCrossEdges(crossEdges, std::ios::binary);
+    std::uint32_t rebuiltMagic = 0;
+    rebuiltCrossEdges.read(
+        reinterpret_cast<char*>(&rebuiltMagic), sizeof(rebuiltMagic));
+    BOOST_REQUIRE(rebuiltCrossEdges.good());
+    BOOST_CHECK_EQUAL(rebuiltMagic, Helper::kHeadCrossEdgesMagic);
+
+    BOOST_REQUIRE(recovered->SaveIndex(indexDirectory) == ErrorCode::Success);
+    recovered.reset();
     std::shared_ptr<VectorIndex> reloaded;
     BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, reloaded) == ErrorCode::Success);
     auto* reloadedSpann = dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get());

@@ -226,6 +226,11 @@ This fork adds production-grade multi-tenant support on top of SPANN:
 ### ACL/Tag Filtered Search
 - **STM1 static metadata**: static records store `[VID | tags[N] | vector]`;
   flat ACL checks are exact and scan only each posting's pure prefix.
+- **Trailing numeric attributes**: if tags include numeric columns after categorical
+  ACL columns, set `[BuildSSDIndex] StaticACLTagCols=<categorical-column-count>`
+  (SIFT tags5 uses `4`). The default `0` checks every tag column and is only safe
+  when their value domains do not overlap. The same prefix defines STM1's
+  hierarchical posting-mask inputs.
 - **Optional exact posting prefilter**: `[SearchSSDIndex] EnableHierPostingFilter=true`
   uses a member-OR hierarchical mask built from STM1 pure records. It is an I/O
   hint only; per-vector ACL checking remains authoritative.

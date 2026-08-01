@@ -33,6 +33,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 
 namespace SPTAG
 {
@@ -210,7 +211,10 @@ namespace SPTAG
             std::vector<std::vector<SizeType>> m_pendingNodeUExtraSelections;
             std::vector<uint8_t> m_pendingHeadRoles;
 
- 
+            ErrorCode InitializeHeadBundleNodesFromSelections();
+            ErrorCode LoadTopLevelHeadIDMap(SizeType p_expectedHeadCount);
+            ErrorCode ActivateMetadataOnlyBundleRoot();
+            ErrorCode TryResumeCompletedBundleHeads(bool& p_resumed);
 
         public:
             Index()
@@ -366,6 +370,12 @@ namespace SPTAG
             ErrorCode SetupMetadataOnlyHeadStore(const std::string& p_baseDir);
             ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;
             ErrorCode LoadHeadCrossEdges() const;
+            ErrorCode EnsureStaticTailCrossEdges();
+            bool SearchStaticTailCrossGraph(
+                const T* p_target,
+                int p_ownerNode,
+                int p_candidateCount,
+                std::vector<std::pair<SizeType, float>>& p_candidates) const;
 
             // Multi-BKT cross-subgraph unified best-first traversal. Used when
             // a query tag scope spans multiple routing nodes and cross-edge
@@ -447,10 +457,24 @@ namespace SPTAG
             bool PopulateHeadNodeGlobalVIDsFromBundles()
             {
                 if (m_index == nullptr || !m_index->HasHeadNodeMeta()) return false;
+                const SizeType metaCount = m_index->GetHeadNodeMetaSampleCount();
+
+                // Ordinary monolithic head indexes retain the authoritative
+                // local-head -> global-VID map. Bundle maps are only required
+                // by the metadata-only root used for partitioned head stores.
+                if (!m_metadataOnlyHeadStore &&
+                    static_cast<SizeType>(m_vectorTranslateMap.R()) >= metaCount) {
+                    for (SizeType localHeadId = 0; localHeadId < metaCount; ++localHeadId) {
+                        m_index->SetHeadNodeGlobalVID(
+                            localHeadId,
+                            static_cast<SizeType>(*(m_vectorTranslateMap[localHeadId])));
+                    }
+                    return true;
+                }
+
                 std::lock_guard<std::mutex> lock(m_globalVIDToBundleLocMutex);
                 if (m_globalVIDToBundleLoc.empty() || m_headBundleLocalToGlobalHIDs.empty())
                     return false;
-                const SizeType metaCount = m_index->GetHeadNodeMetaSampleCount();
                 for (const auto& kv : m_globalVIDToBundleLoc)
                 {
                     SizeType globalVID = kv.first;

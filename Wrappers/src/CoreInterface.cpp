@@ -132,6 +132,7 @@ uint64_t GetPathSizeBytes(const std::string& path)
 bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
                                  int p_expectedHeadCount,
                                  int p_expectedTagCount,
+                                 int p_aclTagCount,
                                  std::vector<SPTAG::Cache::HierarchicalPostingMask>& p_masks)
 {
     constexpr std::uint32_t kStaticMetadataMagic = 0x314D5453U; // "STM1"
@@ -143,13 +144,11 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
         fprintf(stderr, "[ERROR] Cannot open static snapshot %s for posting masks\n", p_snapshotPath.c_str());
         return false;
     }
-
     std::int32_t header[kHeaderIntCount] = {};
     if (!input.read(reinterpret_cast<char*>(header), sizeof(header))) {
         fprintf(stderr, "[ERROR] Cannot read STM1 header from %s\n", p_snapshotPath.c_str());
         return false;
     }
-
     const std::uint32_t magic = static_cast<std::uint32_t>(header[0]);
     const int version = header[1];
     const int listCount = header[2];
@@ -168,6 +167,12 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
                 p_expectedTagCount, listPageOffset);
         return false;
     }
+    const int aclTagCount = p_aclTagCount > 0 ? p_aclTagCount : tagCount;
+    if (aclTagCount > tagCount) {
+        fprintf(stderr, "[ERROR] STM1 ACL tag count %d exceeds record tag count %d in %s\n",
+                aclTagCount, tagCount, p_snapshotPath.c_str());
+        return false;
+    }
 
     struct ListInfo {
         std::int32_t pageNum = 0;
@@ -177,6 +182,12 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
         std::int32_t pureCount = 0;
     };
     std::vector<ListInfo> lists(static_cast<size_t>(listCount));
+    struct stat snapshotStat {};
+    if (stat(p_snapshotPath.c_str(), &snapshotStat) != 0 || snapshotStat.st_size < 0) {
+        fprintf(stderr, "[ERROR] Cannot stat STM1 snapshot %s\n", p_snapshotPath.c_str());
+        return false;
+    }
+    const std::uint64_t snapshotBytes = static_cast<std::uint64_t>(snapshotStat.st_size);
     for (auto& list : lists) {
         if (!input.read(reinterpret_cast<char*>(&list.pageNum), sizeof(list.pageNum)) ||
             !input.read(reinterpret_cast<char*>(&list.pageOffset), sizeof(list.pageOffset)) ||
@@ -187,38 +198,102 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
             fprintf(stderr, "[ERROR] Invalid STM1 posting-list metadata in %s\n", p_snapshotPath.c_str());
             return false;
         }
-    }
-
-    p_masks.assign(static_cast<size_t>(listCount), SPTAG::Cache::HierarchicalPostingMask());
-    for (int postingId = 0; postingId < listCount; ++postingId) {
-        const auto& list = lists[static_cast<size_t>(postingId)];
-        if (list.pureCount == 0) continue;
-
+        const std::uint64_t listBytes =
+            static_cast<std::uint64_t>(list.elementCount) * static_cast<std::uint64_t>(recordBytes);
+        const std::uint64_t declaredPages = (listBytes + kPageSize - 1) / kPageSize;
         const std::uint64_t recordOffset =
             (static_cast<std::uint64_t>(listPageOffset) + static_cast<std::uint64_t>(list.pageNum)) *
                 kPageSize +
             list.pageOffset;
-        const size_t bytes = static_cast<size_t>(list.pureCount) * static_cast<size_t>(recordBytes);
-        std::vector<char> records(bytes);
-        input.seekg(static_cast<std::streamoff>(recordOffset), std::ios::beg);
-        if (!input.read(records.data(), static_cast<std::streamsize>(records.size()))) {
-            fprintf(stderr, "[ERROR] Cannot read STM1 pure posting %d from %s\n",
-                    postingId, p_snapshotPath.c_str());
+        if (list.pageOffset >= kPageSize || declaredPages > std::numeric_limits<std::uint16_t>::max() ||
+            list.pageCount != declaredPages ||
+            static_cast<std::uint64_t>(list.pageOffset) + listBytes > declaredPages * kPageSize ||
+            recordOffset > snapshotBytes || listBytes > snapshotBytes - recordOffset) {
+            fprintf(stderr, "[ERROR] Invalid STM1 posting layout in %s\n", p_snapshotPath.c_str());
             return false;
         }
+    }
 
-        auto& mask = p_masks[static_cast<size_t>(postingId)];
-        for (int i = 0; i < list.pureCount; ++i) {
-            const char* record = records.data() + static_cast<size_t>(i) * static_cast<size_t>(recordBytes);
-            for (int tagColumn = 0; tagColumn < tagCount; ++tagColumn) {
-                std::uint32_t tag = 0;
-                std::memcpy(&tag, record + sizeof(std::int32_t) +
+    p_masks.assign(static_cast<size_t>(listCount), SPTAG::Cache::HierarchicalPostingMask());
+    std::vector<std::uint32_t> postingOrder;
+    postingOrder.reserve(static_cast<size_t>(listCount));
+    for (std::uint32_t postingId = 0; postingId < static_cast<std::uint32_t>(listCount);
+         ++postingId) {
+        if (lists[postingId].pureCount > 0) postingOrder.push_back(postingId);
+    }
+    const auto recordOffsetFor = [&lists, listPageOffset](std::uint32_t postingId) {
+        const auto& list = lists[postingId];
+        return (static_cast<std::uint64_t>(listPageOffset) +
+                static_cast<std::uint64_t>(list.pageNum)) * kPageSize + list.pageOffset;
+    };
+    std::sort(postingOrder.begin(), postingOrder.end(),
+              [&recordOffsetFor](std::uint32_t lhs, std::uint32_t rhs) {
+                  const std::uint64_t left = recordOffsetFor(lhs);
+                  const std::uint64_t right = recordOffsetFor(rhs);
+                  return left == right ? lhs < rhs : left < right;
+              });
+
+    constexpr std::uint64_t kBatchBytes = 32ULL * 1024ULL * 1024ULL;
+    std::vector<char> batch;
+    size_t begin = 0;
+    size_t nextReport = std::max<size_t>(1, postingOrder.size() / 100);
+    fprintf(stderr, "[INFO] Scanning STM1 posting masks in physical order.\n");
+    while (begin < postingOrder.size()) {
+        const std::uint32_t firstPostingId = postingOrder[begin];
+        const std::uint64_t batchStart = recordOffsetFor(firstPostingId);
+        std::uint64_t batchEnd = batchStart;
+        size_t end = begin;
+        while (end < postingOrder.size()) {
+            const std::uint32_t postingId = postingOrder[end];
+            const auto& list = lists[postingId];
+            const std::uint64_t recordOffset = recordOffsetFor(postingId);
+            const std::uint64_t listBytes =
+                static_cast<std::uint64_t>(list.pureCount) * static_cast<std::uint64_t>(recordBytes);
+            if (recordOffset < batchStart || listBytes > std::numeric_limits<uint64_t>::max() - recordOffset) {
+                fprintf(stderr, "[ERROR] Invalid STM1 physical-order range in %s\n",
+                        p_snapshotPath.c_str());
+                return false;
+            }
+            const std::uint64_t recordEnd = recordOffset + listBytes;
+            if (end > begin && recordEnd - batchStart > kBatchBytes) break;
+            batchEnd = std::max(batchEnd, recordEnd);
+            ++end;
+        }
+        if (batchEnd < batchStart || batchEnd - batchStart > std::numeric_limits<size_t>::max()) {
+            fprintf(stderr, "[ERROR] STM1 mask batch is too large in %s\n", p_snapshotPath.c_str());
+            return false;
+        }
+        batch.resize(static_cast<size_t>(batchEnd - batchStart));
+        input.seekg(static_cast<std::streamoff>(batchStart), std::ios::beg);
+        if (!input.read(batch.data(), static_cast<std::streamsize>(batch.size()))) {
+            fprintf(stderr, "[ERROR] Cannot read STM1 posting batch from %s\n", p_snapshotPath.c_str());
+            return false;
+        }
+        for (size_t index = begin; index < end; ++index) {
+            const std::uint32_t postingId = postingOrder[index];
+            const auto& list = lists[postingId];
+            const char* records = batch.data() + (recordOffsetFor(postingId) - batchStart);
+            auto& mask = p_masks[postingId];
+            for (int i = 0; i < list.pureCount; ++i) {
+                const char* record = records + static_cast<size_t>(i) * static_cast<size_t>(recordBytes);
+                for (int tagColumn = 0; tagColumn < aclTagCount; ++tagColumn) {
+                    std::uint32_t tag = 0;
+                    std::memcpy(&tag, record + sizeof(std::int32_t) +
                                       static_cast<size_t>(tagColumn) * sizeof(tag),
-                            sizeof(tag));
-                mask.Insert(tagColumn, tag);
+                                sizeof(tag));
+                    mask.Insert(tagColumn, tag);
+                }
             }
         }
+        if (end >= nextReport || end == postingOrder.size()) {
+            const double percent = 100.0 * static_cast<double>(end) /
+                static_cast<double>(postingOrder.size());
+            fprintf(stderr, "\r[INFO] STM1 posting mask scan %.1f%%", percent);
+            nextReport += std::max<size_t>(1, postingOrder.size() / 100);
+        }
+        begin = end;
     }
+    fprintf(stderr, "\n");
     return true;
 }
 
@@ -4312,14 +4387,36 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             fprintf(stderr, "[INFO] Tenant %d: BuildSignatures non-FILEIO posting store "
                     "(no ssdmapping); generating in-memory head_node_meta.\n", p_tenantId);
 
+            EnsureTenantLoaded(p_tenantId);
+            std::shared_ptr<AnnIndex> idxPtr;
+            {
+                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+                auto it = m_tenantIndices.find(p_tenantId);
+                if (it != m_tenantIndices.end()) idxPtr = it->second;
+            }
+            if (!idxPtr) return false;
+            auto internalIdx = idxPtr->GetInternalIndex();
+            auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
+            auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
+            if (memoryIndex == nullptr || spannInternalIdx == nullptr) return false;
+
+            const auto* staticOptions = spannInternalIdx->GetOptions();
+            const int staticACLTagCols =
+                staticOptions != nullptr && staticOptions->m_staticACLTagCols > 0
+                ? staticOptions->m_staticACLTagCols
+                : p_numTagsPerVec;
+            if (staticACLTagCols <= 0 || staticACLTagCols > p_numTagsPerVec) {
+                fprintf(stderr, "[ERROR] Tenant %d: StaticACLTagCols=%d is invalid for %d tag columns.\n",
+                        p_tenantId, staticACLTagCols, p_numTagsPerVec);
+                return false;
+            }
+            SizeType numHeadSamples = memoryIndex->GetNumSamples();
+            if (numHeadSamples < (SizeType)numHeads) numHeadSamples = (SizeType)numHeads;
+
             // tag_level_offsets.bin covers categorical hierarchy columns only.
             // Numeric columns are range-filter attributes, not hierarchy levels.
             {
-                int numNumericCols = 0;
-                if (const char* e = std::getenv("SPTAG_NUMERIC_COLS")) numNumericCols = atoi(e);
-                if (numNumericCols < 0) numNumericCols = 0;
-                if (numNumericCols > p_numTagsPerVec) numNumericCols = p_numTagsPerVec;
-                const int numBaseCols = p_numTagsPerVec - numNumericCols;
+                const int numBaseCols = staticACLTagCols;
                 std::vector<uint32_t> levelMin(numBaseCols, std::numeric_limits<uint32_t>::max());
                 for (int vid = 0; vid < p_numVectors; ++vid)
                     for (int t = 0; t < numBaseCols; ++t) {
@@ -4351,24 +4448,9 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                                                 m_tenantTagToNodes[p_tenantId]);
             }
 
-            EnsureTenantLoaded(p_tenantId);
-            std::shared_ptr<AnnIndex> idxPtr;
-            {
-                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
-                auto it = m_tenantIndices.find(p_tenantId);
-                if (it != m_tenantIndices.end()) idxPtr = it->second;
-            }
-            if (!idxPtr) return false;
-            auto internalIdx = idxPtr->GetInternalIndex();
-            auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
-            auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
-            if (memoryIndex == nullptr || spannInternalIdx == nullptr) return false;
-
-            SizeType numHeadSamples = memoryIndex->GetNumSamples();
-            if (numHeadSamples < (SizeType)numHeads) numHeadSamples = (SizeType)numHeads;
             memoryIndex->InitializeHeadNodeMeta(numHeadSamples);
-            // For metadata-only ("slim") head roots the root translate map is not
-            // full, so resolve head-id -> global-VID from the bundle structures.
+            // Monolithic roots resolve through their head-ID map; metadata-only
+            // roots fall back to the bundle structures.
             spannInternalIdx->PopulateHeadNodeGlobalVIDsFromBundles();
 
             // Per-posting member-OR hierarchical mask: the dense filtered path
@@ -4385,6 +4467,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 struct stat staticSnapshotStat {};
                 if (stat(staticSnapshotPath.c_str(), &staticSnapshotStat) == 0) {
                     if (!BuildStaticPostingHierMasks(staticSnapshotPath, numHeads, p_numTagsPerVec,
+                                                      staticACLTagCols,
                                                       postingHierMasks)) {
                         return false;
                     }
@@ -4448,7 +4531,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 ++resolved;
                 SPTAG::Cache::HierarchicalOwnTags ownMask;
                 ownMask.Clear();
-                for (int t = 0; t < p_numTagsPerVec; ++t) {
+                for (int t = 0; t < staticACLTagCols; ++t) {
                     uint32_t tag = p_tagsPtr[(size_t)globalVID * p_numTagsPerVec + t];
                     ownMask.Insert(t, tag);
                 }

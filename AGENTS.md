@@ -107,7 +107,7 @@ configs after SPACEV-1B ablation showed no recall gain once H1 tails are enabled
 
 | Layer | What it builds | How to enable | Code |
 | ----- | -------------- | ------------- | ---- |
-| ① cross-graph | `head_cross_edges.bin` stitching the bundle nodes | ini `[MultiTenant] CrossEdges=1` (+ `CrossExtraEdges=N`) → launcher runs `Release/augmentheadgraph -d <index>/tenant_0/HeadIndex -k 15 -m N -t T -w true` **after** the build; `CrossEdges=0` skips it. Search-time kill switch: env `SPTAG_DISABLE_CROSS_EDGES=1`; filter queries skip cross edges unless `SPTAG_FILTER_KEEP_CROSS=1` | tool `AnnService/src/AugmentHeadGraph/main.cpp`; search `SPANNIndex.cpp` `CrossSubgraphGraphSearch` (~1886), gate ~1057-1063 |
+| ① cross-graph | `head_cross_edges.bin` stitching the bundle nodes | native `[BuildSSDIndex] CrossEdges=1`, `CrossExtraEdges=N`, `CrossEdgeSearchTopK`, and `CrossEdgeBuildThreads` build the sidecar atomically **before** STATIC Phase 4. The launcher reuses it; `augmentheadgraph` remains the fallback/rebuild tool. `CrossEdges=0` skips it. Search-time kill switch: env `SPTAG_DISABLE_CROSS_EDGES=1`; filter queries skip cross edges unless `SPTAG_FILTER_KEEP_CROSS=1` | shared builder `HeadCrossEdgeBuilder.cpp`; build-time tail callback and runtime traversal in `SPANNIndex.cpp` |
 | ② U_extra (~10% extra unfilter-only heads; optional, default OFF) | `head_role.bin` | ini `[MultiTenant] DualPoolAugment=1` (+ `DualPoolExtraRatio=0.1`) if explicitly needed; canonical SPACEV config uses `DualPoolAugment=0` | `SPANNIndex.cpp` DualPoolAugment (~3098-3192) |
 | ③ unfilter-tail (K nearest-head tail copies/vector) | tail edges appended after each pure prefix, ordered by true head distance | build: native SSD params `[BuildSSDIndex] TailReplicaCount=K` + `UnfilterTailBufferLength=P`, where P is max extra physical tail pages beyond pure pages (tail may fill pure-page slack); search env `SPTAG_UNFILTER_TAIL=1` | `ExtraDynamicSearcher.h` Phase 4 (~4035-4090); SSD params `TailReplicaCount`/`UnfilterTailBufferLength` |
 
@@ -135,8 +135,7 @@ read by `Helper::IniReader` (the same loader the classic `IndexBuilder` uses) �
 - `Script_AE/iniFile/build_spann_attr_spacev_opq25.ini` — the config. Run it with
   `Release/spannbuilder -c <config.ini>`.
 - `Tools/benchmarks/run_spann_attr_build.sh` — thin launcher. Carries ONLY what is
-  not a build param (process-loader env + the post-build `augmentheadgraph` step,
-  now gated by ini `[MultiTenant] CrossEdges`/`CrossExtraEdges` + copying
+  not a build param (process-loader env + cross-edge fallback/reuse + copying
   `opq_quantizer.bin`); derives every path FROM the ini via `sed`.
 
 How the `.ini` maps to the engine (`Wrappers/src/SpannAttrBuilder.cpp` `-c` reader):
@@ -154,9 +153,10 @@ How the `.ini` maps to the engine (`Wrappers/src/SpannAttrBuilder.cpp` `-c` read
   `TPTBalanceFactor`) are direct INI settings. Historical `[MultiTenant]`
   `PerVectorTagsFile` and U_extra settings are staged into native SelectHead
   options. `ACLCols`/`HierLevelWidths`/`NumericCols` remain wrapper-only routing
-  extensions. The unfilter-tail K/buffer are native SSD params
-  (`[BuildSSDIndex] TailReplicaCount`/`UnfilterTailBufferLength`), read straight
-  from the ini — no environment override.
+  extensions. The unfilter-tail K/buffer and pre-tail cross-edge settings are
+  native SSD params (`[BuildSSDIndex] TailReplicaCount`/
+  `UnfilterTailBufferLength`/`CrossEdges`/`CrossExtraEdges`), read straight from
+  the ini — no environment override.
 - `[SearchSSDIndex]` → applied only after BuildHead/BuildSSDIndex complete, then
   retained as a separate native section in the generated `indexloader.ini`.
   This keeps runtime values such as `InternalResultNum`, `MaxCheck`, and

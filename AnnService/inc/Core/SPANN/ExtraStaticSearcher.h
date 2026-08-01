@@ -18,6 +18,7 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <future>
 #include <limits>
 #include <mutex>
@@ -26,6 +27,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #ifndef _MSC_VER
 #include <fcntl.h>
@@ -259,6 +261,17 @@ namespace SPTAG
                 m_staticHeadBundleIndexes = p_indexes;
                 m_staticHeadBundleLocalToGlobalHIDs = p_localToGlobalHIDs;
                 m_staticHeadBundleNodeHeadVectorIDs = p_nodeHeadVectorIDs;
+            }
+
+            using StaticCrossGraphSearch = std::function<bool(
+                const ValueType*,
+                int,
+                int,
+                std::vector<std::pair<SizeType, float>>&)>;
+
+            void SetStaticCrossGraphSearch(StaticCrossGraphSearch p_search)
+            {
+                m_staticCrossGraphSearch = std::move(p_search);
             }
 
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
@@ -1070,27 +1083,34 @@ namespace SPTAG
                 const bool haveCrossBundleOwners =
                     m_staticBuildVectorOwners.size() == static_cast<size_t>(p_fullCount) &&
                     m_staticBuildHeadOwners.size() == static_cast<size_t>(headCount);
+                const bool useSingleSeedCrossGraphTail =
+                    haveCrossBundleOwners && static_cast<bool>(m_staticCrossGraphSearch);
                 const bool useBundleFanoutRNGTail =
+                    !useSingleSeedCrossGraphTail &&
                     haveCrossBundleOwners &&
                     m_staticHeadBundleLocalToGlobalHIDs != nullptr &&
                     m_staticHeadBundleIndexes.size() == m_staticHeadBundleLocalToGlobalHIDs->size() &&
                     !m_staticHeadBundleIndexes.empty();
-                const bool useGlobalRNGTail =
+                const bool useGlobalRNGTail = !useSingleSeedCrossGraphTail &&
                     haveCrossBundleOwners && !useBundleFanoutRNGTail;
                 const auto& headOwners = m_staticHeadVectorOwnersView != nullptr
                     ? *m_staticHeadVectorOwnersView
                     : m_staticHeadVectorOwners;
+                const char* tailSource = useSingleSeedCrossGraphTail
+                    ? "single-seed-cross-graph-RNG"
+                    : (useBundleFanoutRNGTail
+                        ? "bundle-fanout-RNG-cross-bundle"
+                        : (useGlobalRNGTail ? "global-RNG-cross-bundle" : "nearest-head"));
                 SPTAGLIB_LOG(
                     Helper::LogLevel::LL_Info,
                     "Static Phase 4 (unfilter-tail): K_replica=%d, source=%s, recordBytes=%d, "
                     "extraTailPages=%d, scanning %d base vectors against %d heads\n",
-                    replicaCount,
-                    useBundleFanoutRNGTail ? "bundle-fanout-RNG-cross-bundle" :
-                        (useGlobalRNGTail ? "global-RNG-cross-bundle" : "nearest-head"),
+                    replicaCount, tailSource,
                     recordBytes, extraTailPages, p_fullCount, headCount);
                 std::atomic_size_t nextVector(0);
                 std::atomic_size_t skippedDuplicate(0);
                 std::atomic_size_t skippedCapacity(0);
+                std::atomic<bool> tailSearchFailed(false);
                 constexpr size_t kTailLockShards = 256;
                 std::vector<std::vector<Edge>> tailCandidatesByHead(static_cast<size_t>(headCount));
                 std::vector<std::mutex> tailCandidateLocks(kTailLockShards);
@@ -1160,7 +1180,10 @@ namespace SPTAG
                     COMMON::QueryResultSet<ValueType> nearbyHeads(nullptr, replicaCount);
                     std::vector<Edge> globalSelections(static_cast<size_t>(
                         (std::max)(replicaCount, m_opt->m_replicaCount)));
-                    while (true) {
+                    std::vector<std::pair<SizeType, float>> crossCandidates;
+                    crossCandidates.reserve(static_cast<size_t>(
+                        (std::max)(1, m_opt->m_internalResultNum)));
+                    while (!tailSearchFailed.load(std::memory_order_acquire)) {
                         const SizeType vectorID = nextVector.fetch_add(1);
                         if (vectorID >= p_fullCount) break;
                         if (headOwners.count(vectorID) != 0 ||
@@ -1171,10 +1194,44 @@ namespace SPTAG
                         const ValueType* vector = static_cast<const ValueType*>(
                             p_fullVectors->GetVector(vectorID));
                         if (vector == nullptr) continue;
+                        const int vectorOwner =
+                            m_staticBuildVectorOwners[static_cast<size_t>(vectorID)];
+                        if (useSingleSeedCrossGraphTail) {
+                            crossCandidates.clear();
+                            if (!m_staticCrossGraphSearch(
+                                    vector,
+                                    vectorOwner,
+                                    (std::max)(1, m_opt->m_internalResultNum),
+                                    crossCandidates)) {
+                                tailSearchFailed.store(true, std::memory_order_release);
+                                return;
+                            }
+                            int globalCount = 0;
+                            if (!StaticCrossGraphRNGSelection(
+                                    globalSelections,
+                                    p_headIndex.get(),
+                                    crossCandidates,
+                                    vectorID,
+                                    globalCount)) {
+                                tailSearchFailed.store(true, std::memory_order_release);
+                                return;
+                            }
+                            for (int rank = 0;
+                                 rank < globalCount && rank < replicaCount;
+                                 ++rank) {
+                                const Edge& candidate =
+                                    globalSelections[static_cast<size_t>(rank)];
+                                if (candidate.node < 0 || candidate.node >= headCount ||
+                                    m_staticBuildHeadOwners[static_cast<size_t>(candidate.node)] ==
+                                        vectorOwner) {
+                                    continue;
+                                }
+                                offerTailCandidate(vectorID, candidate.node, candidate.distance);
+                            }
+                            continue;
+                        }
                         if (useBundleFanoutRNGTail) {
                             int globalCount = 0;
-                            const int vectorOwner =
-                                m_staticBuildVectorOwners[static_cast<size_t>(vectorID)];
                             if (!StaticBundleFanoutRNGSelection(
                                     globalSelections,
                                     vector,
@@ -1207,8 +1264,6 @@ namespace SPTAG
                                     globalCount)) {
                                 continue;
                             }
-                            const int vectorOwner =
-                                m_staticBuildVectorOwners[static_cast<size_t>(vectorID)];
                             for (int rank = 0;
                                  rank < globalCount && rank < replicaCount;
                                  ++rank) {
@@ -1240,6 +1295,12 @@ namespace SPTAG
                 workers.reserve(threadCount);
                 for (int t = 0; t < threadCount; ++t) workers.emplace_back(collectTailCandidates);
                 for (auto& worker : workers) worker.join();
+                if (tailSearchFailed.load(std::memory_order_acquire)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Single-seed cross-graph tail candidate search failed.\n");
+                    return false;
+                }
 
                 size_t admittedTailCount = 0;
                 for (SizeType head = 0; head < headCount; ++head) {
@@ -1524,6 +1585,52 @@ namespace SPTAG
                     selection.node = result->VID;
                     selection.tonode = p_fullID;
                     selection.distance = result->Dist;
+                    ++p_replicaCount;
+                }
+                return true;
+            }
+
+            bool StaticCrossGraphRNGSelection(
+                std::vector<Edge>& p_selections,
+                VectorIndex* p_index,
+                const std::vector<std::pair<SizeType, float>>& p_candidates,
+                SizeType p_fullID,
+                int& p_replicaCount)
+            {
+                if (p_index == nullptr || p_index->m_pQuantizer != nullptr) {
+                    return false;
+                }
+
+                p_replicaCount = 0;
+                for (const auto& candidate : p_candidates) {
+                    if (p_replicaCount >= static_cast<int>(p_selections.size()) ||
+                        candidate.first < 0 || candidate.first >= p_index->GetNumSamples()) {
+                        continue;
+                    }
+
+                    const void* candidateSample = p_index->GetSample(candidate.first);
+                    if (candidateSample == nullptr) return false;
+
+                    bool accepted = true;
+                    for (int rank = 0; rank < p_replicaCount; ++rank) {
+                        const SizeType selectedHead =
+                            p_selections[static_cast<size_t>(rank)].node;
+                        const void* selectedSample = p_index->GetSample(selectedHead);
+                        if (selectedSample == nullptr) return false;
+                        const float headDistance =
+                            p_index->ComputeDistance(candidateSample, selectedSample);
+                        if (m_opt->m_rngFactor * headDistance <= candidate.second) {
+                            accepted = false;
+                            break;
+                        }
+                    }
+                    if (!accepted) continue;
+
+                    Edge& selection =
+                        p_selections[static_cast<size_t>(p_replicaCount)];
+                    selection.node = candidate.first;
+                    selection.tonode = p_fullID;
+                    selection.distance = candidate.second;
                     ++p_replicaCount;
                 }
                 return true;
@@ -4336,6 +4443,7 @@ namespace SPTAG
             std::vector<std::shared_ptr<VectorIndex>> m_staticHeadBundleIndexes;
             const std::vector<std::vector<SizeType>>* m_staticHeadBundleLocalToGlobalHIDs = nullptr;
             const std::vector<std::vector<SizeType>>* m_staticHeadBundleNodeHeadVectorIDs = nullptr;
+            StaticCrossGraphSearch m_staticCrossGraphSearch;
             std::vector<int> m_staticBuildVectorOwners;
             std::vector<int> m_staticBuildHeadOwners;
             std::unique_ptr<PipePQTable> m_staticPipePQTable;

@@ -7,6 +7,7 @@
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
+#include "inc/Core/SPANN/HeadCrossEdgeBuilder.h"
 #include "inc/Core/SPANN/PrimaryHeadCSR.h"
 #include "inc/Helper/HeadCrossEdges.h"
 #include <algorithm>
@@ -481,7 +482,8 @@ template <typename T> ErrorCode Index<T>::SaveHeadBundleManifest(const std::stri
     }
 
     const std::string manifestPath = HeadBundleManifestPath(m_options, p_baseDir);
-    FILE* manifestFile = fopen(manifestPath.c_str(), "wb");
+    const std::string temporaryPath = manifestPath + ".tmp";
+    FILE* manifestFile = fopen(temporaryPath.c_str(), "wb");
     if (manifestFile == nullptr) {
         return ErrorCode::FailedCreateFile;
     }
@@ -518,8 +520,17 @@ template <typename T> ErrorCode Index<T>::SaveHeadBundleManifest(const std::stri
         }
     }
 
+    success = success && fflush(manifestFile) == 0;
     fclose(manifestFile);
-    return success ? ErrorCode::Success : ErrorCode::Fail;
+    if (!success) {
+        remove(temporaryPath.c_str());
+        return ErrorCode::Fail;
+    }
+    if (rename(temporaryPath.c_str(), manifestPath.c_str()) != 0) {
+        remove(temporaryPath.c_str());
+        return ErrorCode::FailedCreateFile;
+    }
+    return ErrorCode::Success;
 }
 
 template <typename T> ErrorCode Index<T>::SaveLoadedHeadBundles(const std::string& p_baseDir)
@@ -794,6 +805,361 @@ template <typename T> ErrorCode Index<T>::LoadHeadSelectState(const std::string&
 
     fclose(f);
     return ok ? ErrorCode::Success : ErrorCode::Fail;
+}
+
+template <typename T> ErrorCode Index<T>::InitializeHeadBundleNodesFromSelections()
+{
+    if (m_pendingNodeHeadSelections.empty()) {
+        return ErrorCode::Fail;
+    }
+
+    m_headBundleNodes.clear();
+    SizeType headOffset = 0;
+    SizeType postingOffset = 0;
+    for (size_t nodeId = 0; nodeId < m_pendingNodeHeadSelections.size(); ++nodeId)
+    {
+        HeadBundleNodeInfo nodeInfo;
+        nodeInfo.nodeId = static_cast<int>(nodeId);
+        nodeInfo.headIndexRelativePath =
+            HeadBundleNodeRelativePath(m_options, static_cast<int>(nodeId));
+        nodeInfo.headOffset = headOffset;
+        nodeInfo.headCount =
+            static_cast<SizeType>(m_pendingNodeHeadSelections[nodeId].size());
+        nodeInfo.postingOffset = postingOffset;
+        nodeInfo.postingCount = nodeInfo.headCount;
+        nodeInfo.assignmentCount = nodeId < m_pendingNodeVectorAssignments.size()
+            ? static_cast<SizeType>(m_pendingNodeVectorAssignments[nodeId].size())
+            : nodeInfo.postingCount;
+        m_headBundleNodes.emplace_back(std::move(nodeInfo));
+        headOffset += m_headBundleNodes.back().headCount;
+        postingOffset += m_headBundleNodes.back().postingCount;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::LoadTopLevelHeadIDMap(SizeType p_expectedHeadCount)
+{
+    if (p_expectedHeadCount <= 0) {
+        return ErrorCode::Fail;
+    }
+
+    if (m_vectorTranslateMap.R() == 0)
+    {
+        const std::string headIDPath =
+            m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile;
+        std::shared_ptr<Helper::DiskIO> input = SPTAG::f_createIO();
+        if (input == nullptr ||
+            !input->Initialize(headIDPath.c_str(), std::ios::binary | std::ios::in) ||
+            m_vectorTranslateMap.Load(
+                input, m_options.m_datasetRowsInBlock, m_options.m_datasetCapacity) !=
+                ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Failed to load top-level head IDs from %s.\n",
+                         headIDPath.c_str());
+            return ErrorCode::Fail;
+        }
+    }
+
+    if (m_vectorTranslateMap.R() != p_expectedHeadCount)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Top-level head ID count mismatch: expected=%d actual=%d.\n",
+                     static_cast<int>(p_expectedHeadCount),
+                     static_cast<int>(m_vectorTranslateMap.R()));
+        return ErrorCode::Fail;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::ActivateMetadataOnlyBundleRoot()
+{
+    const SizeType totalHeads = TotalHeadSampleCount();
+    if (totalHeads <= 0 ||
+        LoadTopLevelHeadIDMap(totalHeads) != ErrorCode::Success)
+    {
+        return ErrorCode::Fail;
+    }
+
+    auto metadataRoot = SPTAG::VectorIndex::CreateInstance(
+        SPTAG::IndexAlgoType::KDT, m_options.m_valueType);
+    if (metadataRoot == nullptr) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to create KDT metadata root for bundled STATIC build.\n");
+        return ErrorCode::Fail;
+    }
+    metadataRoot->SetParameter(
+        "DistCalcMethod",
+        SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+    metadataRoot->SetQuantizer(nullptr);
+
+    constexpr SizeType physicalCount = 1;
+    ByteArray rootBytes = ByteArray::Alloc(
+        static_cast<size_t>(physicalCount) * static_cast<size_t>(m_options.m_dim) * sizeof(T));
+    std::memset(rootBytes.Data(), 0, rootBytes.Length());
+    auto rootVectors = std::make_shared<BasicVectorSet>(
+        rootBytes, m_options.m_valueType, m_options.m_dim, physicalCount);
+    if (metadataRoot->BuildIndex(rootVectors, nullptr, false, true, true) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to build physical KDT metadata root.\n");
+        return ErrorCode::Fail;
+    }
+
+    // Validate every existing bundle before overwriting the old global root on disk.
+    m_index = std::move(metadataRoot);
+    m_metadataOnlyHeadStore = false;
+    if (InitializeHeadBundleRuntime(m_options.m_indexDirectory) != ErrorCode::Success)
+    {
+        return ErrorCode::Fail;
+    }
+    for (const auto& node : m_headBundleNodes)
+    {
+        if (node.nodeId < 0 ||
+            node.nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size()) ||
+            EnsureHeadBundleNodeLoaded(node.nodeId) != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Failed to validate head bundle node %d before metadata-root activation.\n",
+                         node.nodeId);
+            return ErrorCode::Fail;
+        }
+
+        const size_t slot = static_cast<size_t>(node.nodeId);
+        const auto& bundle = m_loadedHeadBundleIndexes[slot];
+        const auto& localToGlobal = m_headBundleLocalToGlobalHIDs[slot];
+        if (bundle == nullptr || bundle->GetVectorValueType() != m_options.m_valueType ||
+            bundle->GetFeatureDim() != m_options.m_dim ||
+            bundle->GetNumSamples() != node.headCount ||
+            static_cast<SizeType>(localToGlobal.size()) != node.headCount)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Head bundle node %d does not match the resumed checkpoint.\n",
+                         node.nodeId);
+            return ErrorCode::Fail;
+        }
+    }
+    if (static_cast<SizeType>(m_globalHeadVIDToLocalHID.size()) != totalHeads)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Top-level head IDs are not a unique complete bundle-head set.\n");
+        return ErrorCode::Fail;
+    }
+
+    const std::string headDir =
+        m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
+    if (!EnsureDirectory(headDir) || m_index->SaveIndex(headDir) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to save KDT metadata root to %s.\n", headDir.c_str());
+        return ErrorCode::Fail;
+    }
+    if (!WriteMetadataOnlyHeadStore(
+            headDir + FolderSep + "head_metaonly.bin", totalHeads, m_options.m_dim))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to write metadata-root sidecar.\n");
+        return ErrorCode::Fail;
+    }
+    if (SetupMetadataOnlyHeadStore(m_options.m_indexDirectory) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to bind bundle samples to KDT metadata root.\n");
+        return ErrorCode::Fail;
+    }
+    // The atomic manifest is the last BuildHead-complete commit marker.
+    if (SaveHeadBundleManifest(m_options.m_indexDirectory) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to commit bundle-head manifest.\n");
+        return ErrorCode::Fail;
+    }
+
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "Bundle STATIC build: activated KDT metadata root for %d logical heads.\n",
+                 static_cast<int>(totalHeads));
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::TryResumeCompletedBundleHeads(bool& p_resumed)
+{
+    p_resumed = false;
+    if (InitializeHeadBundleNodesFromSelections() != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
+
+    const SizeType totalHeads = TotalHeadSampleCount();
+    if (totalHeads <= 0 ||
+        m_pendingHeadVectorOwners.size() != static_cast<size_t>(totalHeads))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Resumed bundle heads have an incomplete owner map.\n");
+        return ErrorCode::Fail;
+    }
+    if (!m_pendingHeadRoles.empty() &&
+        (m_pendingHeadRoles.size() != static_cast<size_t>(totalHeads) ||
+         std::any_of(m_pendingHeadRoles.begin(), m_pendingHeadRoles.end(),
+                     [](uint8_t role) { return role != 0; })))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Resuming completed bundle heads does not support U_extra roles.\n");
+        return ErrorCode::Fail;
+    }
+
+    const std::string headDir =
+        m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
+    const std::string topLevelIDs =
+        m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile;
+    const std::string manifestPath =
+        HeadBundleManifestPath(m_options, m_options.m_indexDirectory);
+    const std::string metadataSidecar = headDir + FolderSep + "head_metaonly.bin";
+
+    size_t expectedNonemptyNodes = 0;
+    size_t completeNodes = 0;
+    bool anyNodeArtifact = false;
+    bool partialNodeArtifact = false;
+    for (const auto& node : m_headBundleNodes)
+    {
+        if (node.headCount == 0) continue;
+        ++expectedNonemptyNodes;
+        const std::string nodeDir =
+            JoinPath(m_options.m_indexDirectory, node.headIndexRelativePath);
+        const bool hasDirectory = direxists(nodeDir.c_str());
+        const bool hasConfig = fileexists((nodeDir + FolderSep + "indexloader.ini").c_str());
+        const bool hasIDs = fileexists((nodeDir + FolderSep + m_options.m_headIDFile).c_str());
+        const bool hasAny = hasDirectory || hasConfig || hasIDs;
+        anyNodeArtifact = anyNodeArtifact || hasAny;
+        if (!hasAny) continue;
+        if (!hasConfig || !hasIDs) {
+            partialNodeArtifact = true;
+            continue;
+        }
+        ++completeNodes;
+    }
+
+    if (!anyNodeArtifact)
+    {
+        if (fileexists(manifestPath.c_str()) || fileexists(metadataSidecar.c_str())) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Bundle-head completion marker exists without bundle graph artifacts.\n");
+            return ErrorCode::Fail;
+        }
+        m_headBundleNodes.clear();
+        return ErrorCode::Success; // No completed BuildHead: use the normal rebuild path.
+    }
+    if (partialNodeArtifact || completeNodes != expectedNonemptyNodes ||
+        !fileexists(topLevelIDs.c_str()))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Found partial completed bundle-head artifacts; refusing to overwrite them.\n");
+        return ErrorCode::Fail;
+    }
+
+    const std::vector<HeadBundleNodeInfo> expectedNodes = m_headBundleNodes;
+    if (fileexists(manifestPath.c_str()))
+    {
+        if (LoadHeadBundleManifest(m_options.m_indexDirectory) != ErrorCode::Success ||
+            m_headBundleNodes.size() != expectedNodes.size())
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Existing bundle-head manifest is invalid.\n");
+            return ErrorCode::Fail;
+        }
+        for (size_t i = 0; i < expectedNodes.size(); ++i)
+        {
+            const auto& actual = m_headBundleNodes[i];
+            const auto& expected = expectedNodes[i];
+            if (actual.nodeId != expected.nodeId ||
+                actual.headIndexRelativePath != expected.headIndexRelativePath ||
+                actual.headOffset != expected.headOffset ||
+                actual.headCount != expected.headCount ||
+                actual.postingOffset != expected.postingOffset ||
+                actual.postingCount != expected.postingCount ||
+                actual.assignmentCount != expected.assignmentCount)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Existing bundle-head manifest does not match the SelectHead checkpoint.\n");
+                return ErrorCode::Fail;
+            }
+        }
+        m_headBundleNodes = expectedNodes;
+    }
+
+    if (LoadTopLevelHeadIDMap(totalHeads) != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
+    for (SizeType hid = 0; hid < totalHeads; ++hid)
+    {
+        const SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[hid]));
+        const auto owner = m_pendingHeadVectorOwners.find(globalVID);
+        if (owner == m_pendingHeadVectorOwners.end() || owner->second < 0 ||
+            owner->second >= static_cast<int>(m_headBundleNodes.size()))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Top-level head ID %d is absent from the SelectHead owner map.\n",
+                         globalVID);
+            return ErrorCode::Fail;
+        }
+    }
+
+    for (const auto& node : m_headBundleNodes)
+    {
+        if (node.headCount == 0) continue;
+        const auto& expectedIDs =
+            m_pendingNodeHeadSelections[static_cast<size_t>(node.nodeId)];
+        if (!std::is_sorted(expectedIDs.begin(), expectedIDs.end()) ||
+            std::adjacent_find(expectedIDs.begin(), expectedIDs.end()) != expectedIDs.end())
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Checkpoint head IDs for bundle node %d are not sorted and unique.\n",
+                         node.nodeId);
+            return ErrorCode::Fail;
+        }
+
+        COMMON::Dataset<std::uint64_t> nodeHeadIDs;
+        nodeHeadIDs.SetName("ResumeBundleNodeIDs");
+        const std::string nodeDir =
+            JoinPath(m_options.m_indexDirectory, node.headIndexRelativePath);
+        if (nodeHeadIDs.Load(nodeDir + FolderSep + m_options.m_headIDFile,
+                             m_options.m_datasetRowsInBlock,
+                             m_options.m_datasetCapacity) != ErrorCode::Success ||
+            nodeHeadIDs.R() != node.headCount)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Bundle node %d head-ID file count does not match its checkpoint.\n",
+                         node.nodeId);
+            return ErrorCode::Fail;
+        }
+        for (SizeType localHid = 0; localHid < node.headCount; ++localHid)
+        {
+            const SizeType globalVID =
+                static_cast<SizeType>(*(nodeHeadIDs[localHid]));
+            if (globalVID != expectedIDs[static_cast<size_t>(localHid)])
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Bundle node %d head-ID order differs from its checkpoint.\n",
+                             node.nodeId);
+                return ErrorCode::Fail;
+            }
+            const auto owner = m_pendingHeadVectorOwners.find(globalVID);
+            if (owner == m_pendingHeadVectorOwners.end() || owner->second != node.nodeId)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Bundle node %d contains head %d owned by another node.\n",
+                             node.nodeId, globalVID);
+                return ErrorCode::Fail;
+            }
+        }
+    }
+
+    if (ActivateMetadataOnlyBundleRoot() != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
+    p_resumed = true;
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "Resume: reusing %zu completed bundle head graphs; skipping BuildHead.\n",
+                 m_headBundleNodes.size());
+    return ErrorCode::Success;
 }
 
 template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std::string& p_baseDir)
@@ -1109,6 +1475,14 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         m_headCrossEdgesLoaded.store(true, std::memory_order_release);
         return ErrorCode::Success;
     }
+    const auto invalidate = [this]() {
+        m_headCrossEdgeOffsetByB.clear();
+        m_headCrossEdgeCountByB.clear();
+        m_headCrossEdgeTargetsB.clear();
+        m_headBundleNodeByB.clear();
+        m_headBundleLocalByB.clear();
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+    };
 
     Helper::HeadCrossEdgesHeader header{};
     if (std::fread(&header, sizeof(header), 1, fp) != 1 ||
@@ -1117,8 +1491,8 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         std::fclose(fp);
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                      "head_cross_edges.bin format mismatch at %s — ignoring.\n", path.c_str());
-        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
-        return ErrorCode::Success;
+        invalidate();
+        return ErrorCode::Fail;
     }
 
     const SizeType headCount = (m_vectorTranslateMap.R() > 0)
@@ -1128,8 +1502,19 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         std::fclose(fp);
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                      "head_cross_edges.bin loaded before head id map is ready — ignoring.\n");
-        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
-        return ErrorCode::Success;
+        invalidate();
+        return ErrorCode::Fail;
+    }
+    if (header.totalHeads != headCount || header.maxEdgesPerHead < 0 ||
+        header.searchTopK <= 0) {
+        std::fclose(fp);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Warning,
+            "head_cross_edges.bin topology mismatch at %s: records=%d expected=%d M=%d K=%d.\n",
+            path.c_str(), header.totalHeads, static_cast<int>(headCount),
+            header.maxEdgesPerHead, header.searchTopK);
+        invalidate();
+        return ErrorCode::Fail;
     }
 
     m_headCrossEdgeOffsetByB.assign(static_cast<size_t>(headCount), UINT32_MAX);
@@ -1180,6 +1565,7 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     size_t nonEmpty = 0;
     size_t rawEdges = 0;
     size_t keptEdges = 0;
+    std::vector<std::uint8_t> sourceSeen(static_cast<size_t>(headCount), 0);
     for (std::int32_t i = 0; i < header.totalHeads && ok; ++i) {
         std::int32_t globalVID = 0;
         std::int32_t edgeCount = 0;
@@ -1196,16 +1582,31 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         if (globalVID >= 0 && static_cast<SizeType>(globalVID) <= maxGlobalVID) {
             srcB = globalToB[static_cast<size_t>(globalVID)];
         }
-        if (srcB == MaxSize || srcB < 0 || srcB >= headCount) continue;
+        if (srcB == MaxSize || srcB < 0 || srcB >= headCount ||
+            sourceSeen[static_cast<size_t>(srcB)] != 0 ||
+            m_headBundleNodeByB[static_cast<size_t>(srcB)] < 0) {
+            ok = false;
+            break;
+        }
+        sourceSeen[static_cast<size_t>(srcB)] = 1;
         const size_t begin = m_headCrossEdgeTargetsB.size();
         for (const auto& e : entries) {
             SizeType nbrGlobal = static_cast<SizeType>(e.neighborGlobalVID);
-            if (nbrGlobal < 0 || nbrGlobal > maxGlobalVID) continue;
+            if (nbrGlobal < 0 || nbrGlobal > maxGlobalVID) {
+                ok = false;
+                break;
+            }
             SizeType nbrB = globalToB[static_cast<size_t>(nbrGlobal)];
-            if (nbrB == MaxSize || nbrB < 0 || nbrB >= headCount) continue;
-            if (m_headBundleNodeByB[static_cast<size_t>(nbrB)] < 0) continue;
+            if (nbrB == MaxSize || nbrB < 0 || nbrB >= headCount ||
+                m_headBundleNodeByB[static_cast<size_t>(nbrB)] < 0 ||
+                m_headBundleNodeByB[static_cast<size_t>(nbrB)] ==
+                    m_headBundleNodeByB[static_cast<size_t>(srcB)]) {
+                ok = false;
+                break;
+            }
             m_headCrossEdgeTargetsB.push_back(nbrB);
         }
+        if (!ok) break;
         const size_t count = m_headCrossEdgeTargetsB.size() - begin;
         if (count > 0) {
             if (begin > UINT32_MAX || count > UINT16_MAX) {
@@ -1220,20 +1621,147 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     }
     std::fclose(fp);
     std::vector<SizeType>().swap(globalToB);
+    if (ok && std::find(sourceSeen.begin(), sourceSeen.end(), 0) != sourceSeen.end()) {
+        ok = false;
+    }
 
     if (!ok) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                     "head_cross_edges.bin truncated at %s — partial load (%zu entries).\n",
-                     path.c_str(), m_headCrossEdgeTargetsB.size());
-    } else {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "Loaded head_cross_edges.bin resolved: records=%d nonEmpty=%zu rawEdges=%zu keptEdges=%zu "
-                     "M=%d K=%d (dense B adjacency).\n",
-                     header.totalHeads, nonEmpty, rawEdges, keptEdges,
-                     header.maxEdgesPerHead, header.searchTopK);
+                     "head_cross_edges.bin is incomplete or stale at %s — rejecting it.\n",
+                     path.c_str());
+        invalidate();
+        return ErrorCode::Fail;
     }
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "Loaded head_cross_edges.bin resolved: records=%d nonEmpty=%zu rawEdges=%zu keptEdges=%zu "
+                 "M=%d K=%d (dense B adjacency).\n",
+                 header.totalHeads, nonEmpty, rawEdges, keptEdges,
+                 header.maxEdgesPerHead, header.searchTopK);
     m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::EnsureStaticTailCrossEdges()
+{
+    if (!m_options.m_buildCrossEdges || m_headBundleNodes.size() <= 1) {
+        return ErrorCode::Success;
+    }
+    if (m_index == nullptr || m_vectorTranslateMap.R() == 0 ||
+        m_loadedHeadBundleIndexes.size() != m_headBundleNodes.size() ||
+        m_headBundleLocalToGlobalHIDs.size() != m_headBundleNodes.size()) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot build STATIC cross edges before the bundle runtime and head-ID map are ready.\n");
+        return ErrorCode::Fail;
+    }
+
+    if (!m_headCrossEdgesDirty.load(std::memory_order_acquire) &&
+        LoadHeadCrossEdges() == ErrorCode::Success &&
+        !m_headCrossEdgeTargetsB.empty()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "Reusing validated pre-BuildSSD cross-edge sidecar.\n");
+        return ErrorCode::Success;
+    }
+
+    std::vector<HeadCrossEdgeBuildNode> nodes;
+    nodes.reserve(m_headBundleNodes.size());
+    for (const auto& bundleNode : m_headBundleNodes) {
+        const int nodeId = bundleNode.nodeId;
+        if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size()) ||
+            EnsureHeadBundleNodeLoaded(nodeId) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Cannot load bundle node %d for STATIC cross-edge construction.\n",
+                         nodeId);
+            return ErrorCode::Fail;
+        }
+        const size_t slot = static_cast<size_t>(nodeId);
+        const auto& index = m_loadedHeadBundleIndexes[slot];
+        const auto& localToGlobal = m_headBundleLocalToGlobalHIDs[slot];
+        if (index == nullptr ||
+            index->GetNumSamples() != static_cast<SizeType>(localToGlobal.size()) ||
+            bundleNode.headCount < 0 || bundleNode.headCount > index->GetNumSamples()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Invalid bundle node %d for STATIC cross-edge construction.\n",
+                         nodeId);
+            return ErrorCode::Fail;
+        }
+        nodes.push_back(
+            {nodeId, bundleNode.headCount, index, &localToGlobal, &m_vectorTranslateMap});
+    }
+
+    std::string headDirectory = m_options.m_indexDirectory;
+    if (!headDirectory.empty() && headDirectory.back() != FolderSep) headDirectory += FolderSep;
+    headDirectory += m_options.m_headIndexFolder;
+    const std::string outputPath =
+        headDirectory + FolderSep + Helper::kHeadCrossEdgesFileName;
+    const std::string dirtyPath =
+        headDirectory + FolderSep + Helper::kHeadCrossEdgesDirtyFileName;
+    const HeadCrossEdgeBuildOptions options{
+        (std::max)(1, m_options.m_crossEdgeSearchTopK),
+        (std::max)(1, m_options.m_crossExtraEdges),
+        m_options.m_crossEdgeBuildThreads > 0
+            ? m_options.m_crossEdgeBuildThreads
+            : (std::max)(1, m_options.m_iSSDNumberOfThreads),
+        true};
+
+    {
+        std::lock_guard<std::mutex> lock(m_headCrossEdgesMutex);
+        m_headCrossEdgeOffsetByB.clear();
+        m_headCrossEdgeCountByB.clear();
+        m_headCrossEdgeTargetsB.clear();
+        m_headBundleNodeByB.clear();
+        m_headBundleLocalByB.clear();
+        m_headCrossEdgesLoaded.store(false, std::memory_order_release);
+        m_headCrossEdgesDirty.store(false, std::memory_order_release);
+    }
+
+    SPTAGLIB_LOG(
+        Helper::LogLevel::LL_Info,
+        "Building cross-edge sidecar before STATIC tail: nodes=%zu K=%d M=%d threads=%d.\n",
+        nodes.size(), options.searchTopK, options.extraEdges, options.threads);
+    if (!BuildHeadCrossEdges(nodes, outputPath, dirtyPath, options)) {
+        return ErrorCode::Fail;
+    }
+
+    if (LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdgeTargetsB.empty()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Pre-BuildSSD cross-edge sidecar did not resolve to usable adjacency.\n");
+        return ErrorCode::Fail;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+bool Index<T>::SearchStaticTailCrossGraph(
+    const T* p_target,
+    int p_ownerNode,
+    int p_candidateCount,
+    std::vector<std::pair<SizeType, float>>& p_candidates) const
+{
+    p_candidates.clear();
+    if (p_target == nullptr || p_ownerNode < 0 || p_candidateCount <= 0 ||
+        m_headCrossEdgesDirty.load(std::memory_order_acquire) ||
+        LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdgeTargetsB.empty()) {
+        return false;
+    }
+
+    QueryResult query(p_target, p_candidateCount, false);
+    COMMON::QueryResultSet<T> results(p_target, p_candidateCount);
+    int scanned = 0;
+    const std::vector<int> ownerNode{p_ownerNode};
+    if (CrossSubgraphGraphSearch(
+            query, &results, ownerNode, nullptr, 0, p_candidateCount, scanned) !=
+        ErrorCode::Success) {
+        return false;
+    }
+
+    p_candidates.reserve(static_cast<size_t>(p_candidateCount));
+    for (int rank = 0; rank < results.GetResultNum(); ++rank) {
+        BasicResult* result = results.GetResult(rank);
+        if (result == nullptr || result->VID < 0) break;
+        p_candidates.emplace_back(result->VID, result->Dist);
+    }
+    return !p_candidates.empty();
 }
 
 // Helper: access RNG graph + samples uniformly for either KDT or BKT head-bundle index.
@@ -4360,8 +4888,28 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     double selectHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs\n", selectHeadTime);
 
+    const bool hasBundleUExtra = std::any_of(
+        m_pendingNodeUExtraSelections.begin(),
+        m_pendingNodeUExtraSelections.end(),
+        [](const std::vector<SizeType>& p_selection) { return !p_selection.empty(); });
+    const bool buildMetadataOnlyBundleRoot =
+        m_options.m_storage == Storage::STATIC &&
+        !m_pendingNodeHeadSelections.empty() &&
+        m_pQuantizer == nullptr &&
+        !m_options.m_enableDeltaEncoding &&
+        !hasBundleUExtra;
+    bool resumedCompletedBundleHeads = false;
+    if (resumedSelectHead && m_options.m_buildHead && buildMetadataOnlyBundleRoot)
+    {
+        if (TryResumeCompletedBundleHeads(resumedCompletedBundleHeads) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Failed to validate completed bundle heads for resume.\n");
+            return ErrorCode::Fail;
+        }
+    }
+
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
-    if (m_options.m_buildHead)
+    if (m_options.m_buildHead && !resumedCompletedBundleHeads)
     {
         // QuantizeHead config gate: only build the head index on quantized vectors when
         // a global quantizer is present AND m_quantizeHead is set. With in-posting
@@ -4455,16 +5003,6 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             return true;
         };
 
-        const bool hasBundleUExtra = std::any_of(
-            m_pendingNodeUExtraSelections.begin(),
-            m_pendingNodeUExtraSelections.end(),
-            [](const std::vector<SizeType>& p_selection) { return !p_selection.empty(); });
-        const bool buildMetadataOnlyBundleRoot =
-            m_options.m_storage == Storage::STATIC &&
-            !m_pendingNodeHeadSelections.empty() &&
-            m_pQuantizer == nullptr &&
-            !m_options.m_enableDeltaEncoding &&
-            !hasBundleUExtra;
         if (!buildMetadataOnlyBundleRoot) {
         m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
@@ -4606,99 +5144,11 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
         if (buildMetadataOnlyBundleRoot)
         {
-            const SizeType totalHeads = TotalHeadSampleCount();
-            if (totalHeads <= 0) {
+            if (ActivateMetadataOnlyBundleRoot() != ErrorCode::Success) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Bundle metadata root requires at least one selected head.\n");
+                             "Failed to activate the bundle metadata root.\n");
                 return ErrorCode::Fail;
             }
-
-            auto metadataRoot = SPTAG::VectorIndex::CreateInstance(
-                SPTAG::IndexAlgoType::KDT, valueType);
-            if (metadataRoot == nullptr) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Failed to create KDT metadata root for bundle build.\n");
-                return ErrorCode::Fail;
-            }
-            metadataRoot->SetParameter(
-                "DistCalcMethod",
-                SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
-            metadataRoot->SetQuantizer(nullptr);
-
-            const SizeType physicalCount = 1;
-            ByteArray rootBytes = ByteArray::Alloc(
-                static_cast<size_t>(physicalCount) * static_cast<size_t>(dims) * sizeof(T));
-            std::memset(rootBytes.Data(), 0, rootBytes.Length());
-            auto rootVectors = std::make_shared<BasicVectorSet>(
-                rootBytes, valueType, static_cast<DimensionType>(dims), physicalCount);
-            if (metadataRoot->BuildIndex(rootVectors, nullptr, false, true, true) != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Failed to build KDT metadata root for bundle build.\n");
-                return ErrorCode::Fail;
-            }
-
-            const std::string headDir =
-                m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
-            if (metadataRoot->SaveIndex(headDir) != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Failed to save KDT metadata root to %s.\n", headDir.c_str());
-                return ErrorCode::Fail;
-            }
-            m_index = std::move(metadataRoot);
-
-            std::shared_ptr<Helper::DiskIO> headIDs = SPTAG::f_createIO();
-            if (headIDs == nullptr ||
-                !headIDs->Initialize(
-                    (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(),
-                    std::ios::binary | std::ios::in) ||
-                m_vectorTranslateMap.Load(
-                    headIDs,
-                    m_options.m_datasetRowsInBlock,
-                    m_options.m_datasetCapacity) !=
-                    ErrorCode::Success ||
-                m_vectorTranslateMap.R() != totalHeads) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Failed to load the bundle metadata root head-ID map.\n");
-                return ErrorCode::Fail;
-            }
-
-            if (!WriteMetadataOnlyHeadStore(
-                    headDir + FolderSep + "head_metaonly.bin",
-                    totalHeads,
-                    static_cast<DimensionType>(dims))) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Failed to write bundle metadata-root sidecar.\n");
-                return ErrorCode::Fail;
-            }
-
-            auto* metadataKDT = dynamic_cast<KDT::Index<T>*>(m_index.get());
-            if (metadataKDT == nullptr) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "KDT metadata root has an unexpected value type.\n");
-                return ErrorCode::Fail;
-            }
-            metadataKDT->SetMetadataOnly(totalHeads, totalHeads);
-            m_metadataOnlyHeadStore = true;
-
-            if (InitializeHeadBundleRuntime(m_options.m_indexDirectory) != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "Failed to initialize bundle metadata-root runtime.\n");
-                return ErrorCode::Fail;
-            }
-            for (const auto& node : m_headBundleNodes) {
-                if (EnsureHeadBundleNodeLoaded(node.nodeId) != ErrorCode::Success) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                 "Failed to load bundle node %d for static placement.\n",
-                                 node.nodeId);
-                    return ErrorCode::Fail;
-                }
-            }
-
-            SPTAGLIB_LOG(
-                Helper::LogLevel::LL_Info,
-                "Bundle STATIC build: skipped global head graph; using KDT metadata root "
-                "for %d logical heads.\n",
-                static_cast<int>(totalHeads));
         }
     }
     auto t3 = std::chrono::high_resolution_clock::now();
@@ -4741,39 +5191,37 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options));
         }
 
-        // Pass pending vector tags to every immutable posting backend. Dynamic
-        // backends additionally consume node assignments and head roles.
+        // Tags are optional, but bundle ownership is required whenever static
+        // placement/tails use multiple preselected head bundles.
         if (!m_pendingVectorTags.empty() && m_pendingNumTagsPerVec > 0) {
             int numVecs = (int)(m_pendingVectorTags.size() / m_pendingNumTagsPerVec);
             m_extraSearcher->SetVectorTags(
                 m_pendingVectorTags.data(), numVecs, m_pendingNumTagsPerVec);
-            if (!m_pendingNodeVectorAssignments.empty()) {
-                m_extraSearcher->SetNodeVectorAssignments(m_pendingNodeVectorAssignments);
+        }
+        if (!m_pendingNodeVectorAssignments.empty()) {
+            m_extraSearcher->SetNodeVectorAssignments(m_pendingNodeVectorAssignments);
+        }
+        if (!m_pendingPrimaryNodeVectorAssignments.empty()) {
+            m_extraSearcher->SetPrimaryNodeVectorAssignments(
+                m_pendingPrimaryNodeVectorAssignments);
+        }
+        if (auto* staticSearcher =
+                dynamic_cast<ExtraStaticSearcher<T>*>(m_extraSearcher.get())) {
+            staticSearcher->SetHeadVectorOwnersView(&m_pendingHeadVectorOwners);
+            if (m_metadataOnlyHeadStore) {
+                staticSearcher->SetHeadBundleBuildView(
+                    m_loadedHeadBundleIndexes,
+                    &m_headBundleLocalToGlobalHIDs,
+                    &m_pendingNodeHeadSelections);
             }
-            if (!m_pendingPrimaryNodeVectorAssignments.empty()) {
-                m_extraSearcher->SetPrimaryNodeVectorAssignments(
-                    m_pendingPrimaryNodeVectorAssignments);
-            }
-            if (auto* staticSearcher =
-                    dynamic_cast<ExtraStaticSearcher<T>*>(m_extraSearcher.get())) {
-                staticSearcher->SetHeadVectorOwnersView(&m_pendingHeadVectorOwners);
-                if (m_metadataOnlyHeadStore) {
-                    staticSearcher->SetHeadBundleBuildView(
-                        m_loadedHeadBundleIndexes,
-                        &m_headBundleLocalToGlobalHIDs,
-                        &m_pendingNodeHeadSelections);
-                }
-            } else if (!m_pendingHeadVectorOwners.empty()) {
-                    m_extraSearcher->SetHeadVectorOwners(m_pendingHeadVectorOwners);
-            }
-            auto* eds = dynamic_cast<ExtraDynamicSearcher<T>*>(m_extraSearcher.get());
-            if (eds) {
-                // Dual-pool v3: pass head roles so SSD build can route U_extra
-                // through the k-NN posting path (ExtraDynamicSearcher.h:2493+,2630+).
-                if (!m_pendingHeadRoles.empty()) {
-                    eds->SetHeadRoles(m_pendingHeadRoles);
-                }
-            }
+        } else if (!m_pendingHeadVectorOwners.empty()) {
+            m_extraSearcher->SetHeadVectorOwners(m_pendingHeadVectorOwners);
+        }
+        auto* eds = dynamic_cast<ExtraDynamicSearcher<T>*>(m_extraSearcher.get());
+        if (eds && !m_pendingHeadRoles.empty()) {
+            // Dual-pool v3: pass head roles so SSD build can route U_extra
+            // through the k-NN posting path (ExtraDynamicSearcher.h:2493+,2630+).
+            eds->SetHeadRoles(m_pendingHeadRoles);
         }
 
        if (m_vectorTranslateMap.R() == 0) {
@@ -4790,6 +5238,37 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 ptr,
                 m_options.m_datasetRowsInBlock,
                 m_options.m_datasetCapacity);
+        }
+
+        const bool usePrebuiltCrossTail =
+            m_options.m_storage == Storage::STATIC &&
+            m_options.m_buildSsdIndex &&
+            m_options.m_buildCrossEdges &&
+            m_options.m_tailReplicaCount > 0 &&
+            m_headBundleNodes.size() > 1;
+        if (usePrebuiltCrossTail) {
+            if (EnsureStaticTailCrossEdges() != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to prepare cross edges before STATIC tail construction.\n");
+                return ErrorCode::Fail;
+            }
+            auto* staticSearcher =
+                dynamic_cast<ExtraStaticSearcher<T>*>(m_extraSearcher.get());
+            if (staticSearcher == nullptr) {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Single-seed STATIC cross-tail requires an unquantized static searcher.\n");
+                return ErrorCode::Fail;
+            }
+            staticSearcher->SetStaticCrossGraphSearch(
+                [this](
+                    const T* p_target,
+                    int p_ownerNode,
+                    int p_candidateCount,
+                    std::vector<std::pair<SizeType, float>>& p_candidates) {
+                    return SearchStaticTailCrossGraph(
+                        p_target, p_ownerNode, p_candidateCount, p_candidates);
+                });
         }
 
         if (m_options.m_buildSsdIndex)

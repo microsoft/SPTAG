@@ -35,6 +35,7 @@ export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=2000000
 ini() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^#]*\).*/\1/p" "$CFG" | head -1 | sed 's/[[:space:]]*$//'; }
 OUT=$(ini IndexDirectory)
 STORAGE=$(ini Storage); [ -z "$STORAGE" ] && STORAGE=FILEIO
+TMPROOT=$(ini TmpDir)
 QFILE=$(ini PostingQuantizerFile)        # optional; e.g. .../opq_codes_m25.bin
 SID=""
 if [ -n "$QFILE" ]; then
@@ -42,14 +43,19 @@ if [ -n "$QFILE" ]; then
 fi
 PIPEPQ_PIVOTS=$(ini PipePQPivotsFile)
 
-# (1) cross-graph knobs -- read from the ini ([MultiTenant], single source of truth).
-#   CrossEdges       : 1 = run augmentheadgraph (stitch per-node head bundles),
-#                      0 = skip it entirely (no head_cross_edges.bin -> unfilter
-#                      falls back to per-node fan-out). Default 1.
+# (1) cross-graph knobs -- read from [BuildSSDIndex] in the native ini.
+#   CrossEdges       : 1 = build/reuse head_cross_edges.bin. New STATIC bundle
+#                      builds create it before Phase 4; this post-build fallback
+#                      supports older/non-STATIC builders.
 #   CrossExtraEdges  : -m, cross-subgraph edges kept per head (augmentheadgraph
 #                      clamps <=0 back to 10). Default 10.
+#   CrossEdgeSearchTopK / CrossEdgeBuildThreads: native sidecar construction
+#                      settings, reused by the legacy post-build fallback.
 CROSS_EDGES=$(ini CrossEdges);            [ -z "$CROSS_EDGES" ] && CROSS_EDGES=1
 CROSS_EXTRA_EDGES=$(ini CrossExtraEdges); [ -z "$CROSS_EXTRA_EDGES" ] && CROSS_EXTRA_EDGES=10
+CROSS_EDGE_SEARCH_TOPK=$(ini CrossEdgeSearchTopK); [ -z "$CROSS_EDGE_SEARCH_TOPK" ] && CROSS_EDGE_SEARCH_TOPK=15
+CROSS_EDGE_BUILD_THREADS=$(ini CrossEdgeBuildThreads); [ -z "$CROSS_EDGE_BUILD_THREADS" ] && CROSS_EDGE_BUILD_THREADS=64
+ORDERED_PAGE_START=$(ini EnableOrderedPageStart); [ -z "$ORDERED_PAGE_START" ] && ORDERED_PAGE_START=false
 
 # (2) SelectHead resume checkpoint knobs ([MultiTenant], single source of truth).
 #   PersistSelectHead : 1 = after SelectHead, write head_select_state.bin and keep
@@ -77,6 +83,13 @@ is_true() {
   esac
 }
 
+if [ -n "$TMPROOT" ]; then
+  mkdir -p "$TMPROOT/work"
+  export TMPDIR="$TMPROOT"
+  export SPTAG_SPANN_WORK_DIR="$TMPROOT/work"
+  echo "[launcher] work dir = $SPTAG_SPANN_WORK_DIR"
+fi
+
 # BuildSignatures scans every posting and retains its filtering sidecars in
 # memory. Run it in a fresh process after the memory-intensive index build.
 BUILD_SIGNATURES=$(ini BuildSignatures); [ -z "$BUILD_SIGNATURES" ] && BUILD_SIGNATURES=false
@@ -103,6 +116,21 @@ validate_runtime_config() {
   if [ "${STORAGE^^}" = "STATIC" ]; then
     [ -s "$OUT/tenant_0/SPTAGFullList.bin" ] ||
       { echo "[launcher] missing static posting snapshot"; exit 1; }
+    if is_true "$ORDERED_PAGE_START"; then
+      [ -s "$OUT/tenant_0/ordered_page_starts.bin" ] ||
+        { echo "[launcher] missing ordered page-start directory"; exit 1; }
+    else
+      [ ! -e "$OUT/tenant_0/ordered_page_starts.bin" ] ||
+        { echo "[launcher] unexpected ordered page-start directory"; exit 1; }
+    fi
+    local key expected actual
+    for key in TailReplicaCount UnfilterTailBufferLength EnableUnfilterTail; do
+      expected=$(ini "$key")
+      [ -z "$expected" ] && continue
+      actual=$(sed -n "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//Ip" "$runtime_ini" | head -1)
+      [ "$actual" = "$expected" ] ||
+        { echo "[launcher] $key mismatch: expected $expected, got ${actual:-<missing>}"; exit 1; }
+    done
     echo "[launcher] verified static posting snapshot"
     return
   fi
@@ -224,14 +252,20 @@ if is_true "$BUILD_SIGNATURES"; then
 fi
 validate_runtime_config
 
-# --- (1) cross-graph: stitch the per-node head bundles (REQUIRED for >1 bundle).
-#     Without head_cross_edges.bin, unfilter falls back to per-node fan-out.
-#     Gated by [MultiTenant] CrossEdges in the ini. ---
+# --- (1) cross-graph: new STATIC bundle builds created this sidecar before
+#     BuildSSD. Retain the post-build tool only as a fallback/rebuild path. ---
 if [ "$CROSS_EDGES" = "1" ] || [ "$CROSS_EDGES" = "true" ]; then
-  echo "[launcher] cross-graph: augmentheadgraph -m $CROSS_EXTRA_EDGES (CrossEdges=$CROSS_EDGES)"
-  "$ROOT/Release/augmentheadgraph" \
-    -d "$OUT/tenant_0/HeadIndex" \
-    -k 15 -m $CROSS_EXTRA_EDGES -t 64 -w true
+  CROSS_EDGE_FILE="$OUT/tenant_0/HeadIndex/head_cross_edges.bin"
+  CROSS_EDGE_DIRTY="$OUT/tenant_0/HeadIndex/head_cross_edges.dirty"
+  if [ -s "$CROSS_EDGE_FILE" ] && [ ! -e "$CROSS_EDGE_DIRTY" ]; then
+    echo "[launcher] reusing pre-BuildSSD cross-edge sidecar"
+  else
+    echo "[launcher] cross-graph fallback: augmentheadgraph -k $CROSS_EDGE_SEARCH_TOPK -m $CROSS_EXTRA_EDGES -t $CROSS_EDGE_BUILD_THREADS (CrossEdges=$CROSS_EDGES)"
+    "$ROOT/Release/augmentheadgraph" \
+      -d "$OUT/tenant_0/HeadIndex" \
+      -k "$CROSS_EDGE_SEARCH_TOPK" -m "$CROSS_EXTRA_EDGES" \
+      -t "$CROSS_EDGE_BUILD_THREADS" -w true
+  fi
 else
   echo "[launcher] cross-graph DISABLED (CrossEdges=$CROSS_EDGES) -- skipping augmentheadgraph; unfilter will use per-node fan-out"
 fi

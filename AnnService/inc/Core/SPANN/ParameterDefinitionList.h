@@ -123,7 +123,16 @@ DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
 DefineSSDParameter(m_headRoleFile, std::string, std::string("head_role.bin"), "HeadRoleFile")
 DefineSSDParameter(m_numTagsPerVec, int, 0, "NumTagsPerVec")
+// 0 scans every STM1 tag column; a positive value restricts flat ACL matching
+// to the categorical prefix, excluding trailing numeric attributes.
 DefineSSDParameter(m_staticACLTagCols, int, 0, "StaticACLTagCols")
+// Build the bundle cross-edge sidecar before STATIC tail construction. This is
+// separate from the mutable runtime DisableCrossEdges diagnostic switch below.
+DefineSSDParameter(m_buildCrossEdges, bool, false, "CrossEdges")
+DefineSSDParameter(m_crossExtraEdges, int, 10, "CrossExtraEdges")
+DefineSSDParameter(m_crossEdgeSearchTopK, int, 15, "CrossEdgeSearchTopK")
+// 0 follows BuildSSDIndex.NumberOfThreads.
+DefineSSDParameter(m_crossEdgeBuildThreads, int, 0, "CrossEdgeBuildThreads")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

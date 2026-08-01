@@ -207,12 +207,14 @@ inline bool ConvertStringTo<std::uint64_t>(const char* p_str, std::uint64_t& p_v
 template <>
 inline bool ConvertStringTo<bool>(const char* p_str, bool& p_value)
 {
-    if (StrUtils::StrEqualIgnoreCase(p_str, "true"))
+    if (StrUtils::StrEqualIgnoreCase(p_str, "true") ||
+        StrUtils::StrEqualIgnoreCase(p_str, "1"))
     {
         p_value = true;
         
     }
-    else if (StrUtils::StrEqualIgnoreCase(p_str, "false"))
+    else if (StrUtils::StrEqualIgnoreCase(p_str, "false") ||
+             StrUtils::StrEqualIgnoreCase(p_str, "0"))
     {
         p_value = false;
     }

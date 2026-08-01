@@ -127,6 +127,12 @@ namespace SPTAG {
             // Number of leading tag columns used by static ACL filtering.
             // Zero preserves the legacy behavior of using every tag column.
             int m_staticACLTagCols;
+            // Build-time cross-subgraph sidecar used by STATIC unfilter-tail
+            // construction and retained for runtime unified traversal.
+            bool m_buildCrossEdges;
+            int m_crossExtraEdges;
+            int m_crossEdgeSearchTopK;
+            int m_crossEdgeBuildThreads;
 
             // GPU building
             int m_gpuSSDNumTrees;
