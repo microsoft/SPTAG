@@ -26,6 +26,7 @@ namespace SPTAG
         ///
         /// Key schema before the TiKVIO namespace prefix is applied:
         ///   vc:{layer}                -> SizeType vector count
+        ///   vm:{layer}                -> SizeType maximum allocated VID
         ///   v:{layer}:{vid}           -> uint8_t version for one VID
         ///
         /// Different benchmark runs should use distinct TiKVKeyPrefix values,
@@ -37,6 +38,7 @@ namespace SPTAG
             std::shared_ptr<Helper::KeyValueIO> m_db;
             int m_layer{0};
             std::atomic<SizeType> m_count{0};
+            std::atomic<SizeType> m_maxVID{-1};
             std::atomic<SizeType> m_deleted{0};
             uint8_t m_defaultVersion{0xff};
             std::atomic<bool> m_metadataDirty{false};
@@ -53,6 +55,11 @@ namespace SPTAG
             std::string CountKey() const
             {
                 return "vc:" + std::to_string(m_layer);
+            }
+
+            std::string MaxVIDKey() const
+            {
+                return "vm:" + std::to_string(m_layer);
             }
 
             std::string VersionKey(SizeType vid) const
@@ -150,6 +157,67 @@ namespace SPTAG
                 }
             }
 
+            void EnsureMaxVIDAtLeast(SizeType maxVID)
+            {
+                if (maxVID < 0) return;
+
+                SizeType cached = m_maxVID.load(std::memory_order_relaxed);
+                while (cached < maxVID &&
+                       !m_maxVID.compare_exchange_weak(cached, maxVID,
+                                                       std::memory_order_relaxed)) {
+                }
+                if (cached >= maxVID) return;
+
+                std::string currentValue;
+                bool currentNotExist = false;
+                auto getRet = m_db->Get(MaxVIDKey(), &currentValue, MaxTimeout, nullptr);
+                if (getRet == ErrorCode::Key_NotFound) {
+                    currentNotExist = true;
+                    currentValue.clear();
+                } else if (getRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVVersionMap::EnsureMaxVIDAtLeast failed to read max VID layer=%d ret=%d\n",
+                        m_layer, static_cast<int>(getRet));
+                    return;
+                }
+
+                for (int attempt = 0; attempt < 64; ++attempt) {
+                    SizeType current = -1;
+                    if (!currentNotExist && currentValue.size() >= sizeof(SizeType)) {
+                        std::memcpy(&current, currentValue.data(), sizeof(SizeType));
+                    }
+                    if (current >= maxVID) {
+                        m_maxVID.store(current, std::memory_order_relaxed);
+                        return;
+                    }
+
+                    std::string desired(reinterpret_cast<const char*>(&maxVID), sizeof(SizeType));
+                    bool swapped = false;
+                    bool actualNotExist = false;
+                    std::string actualValue;
+                    auto ret = m_db->CompareAndSwap(MaxVIDKey(), desired,
+                                                    currentNotExist, currentValue,
+                                                    MaxTimeout, nullptr,
+                                                    &swapped, &actualNotExist, &actualValue);
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVVersionMap::EnsureMaxVIDAtLeast CAS failed layer=%d ret=%d\n",
+                            m_layer, static_cast<int>(ret));
+                        return;
+                    }
+                    if (swapped) {
+                        m_maxVID.store(maxVID, std::memory_order_relaxed);
+                        return;
+                    }
+                    currentNotExist = actualNotExist;
+                    currentValue = std::move(actualValue);
+                }
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "TiKVVersionMap::EnsureMaxVIDAtLeast CAS conflict layer=%d maxVID=%d\n",
+                    m_layer, maxVID);
+            }
+
             uint8_t ReadVersionByte(SizeType vid) const
             {
                 uint8_t value = 0xfe;
@@ -220,6 +288,7 @@ namespace SPTAG
                 (void)capacity;
 
                 m_count = size;
+                EnsureMaxVIDAtLeast(size - 1);
 
                 if (m_layer > 0 && globalIDs != nullptr && globalIDs->R() > 0) {
                     m_defaultVersion = DefaultVersionForLayer();
@@ -343,6 +412,15 @@ namespace SPTAG
             }
 
             SizeType Count() override { return m_count.load(); }
+            SizeType MaxVID() override
+            {
+                SizeType maxVID = -1;
+                if (ReadSizeType(MaxVIDKey(), maxVID)) {
+                    m_maxVID.store(maxVID, std::memory_order_relaxed);
+                    return maxVID;
+                }
+                return m_maxVID.load(std::memory_order_relaxed);
+            }
             SizeType GetDeleteCount() override { return 0; }
             std::uint64_t BufferSize() override { return static_cast<std::uint64_t>(m_count.load()) + sizeof(SizeType) * 2 + sizeof(uint8_t); }
 
@@ -406,7 +484,14 @@ namespace SPTAG
                 uint8_t storedVersion = version;
                 if (!WriteVersionByte(key, storedVersion, oldVal)) return;
                 EnsureCountAtLeast(key + 1);
+                EnsureMaxVIDAtLeast(key);
                 UpdateDeleteCount(oldVal, storedVersion);
+            }
+
+            void SetR(SizeType num) override
+            {
+                EnsureCountAtLeast(num);
+                EnsureMaxVIDAtLeast(num - 1);
             }
 
             // Per-VID batch write: mirrors SetVersion() for each (vid, ver) pair.
@@ -447,6 +532,7 @@ namespace SPTAG
                 }
                 if (keys.empty()) return;
                 if (maxKey >= 0) EnsureCountAtLeast(maxKey + 1);
+                if (maxKey >= 0) EnsureMaxVIDAtLeast(maxKey);
 
                 auto ret = m_db->MultiPut(keys, values, MaxTimeout, nullptr);
                 if (ret == ErrorCode::Undefined) {
@@ -611,6 +697,12 @@ namespace SPTAG
                     return ErrorCode::Success;
                 }
                 m_count = count;
+                SizeType maxVID = -1;
+                if (!ReadSizeType(MaxVIDKey(), maxVID)) {
+                    maxVID = count > 0 ? count - 1 : -1;
+                    if (maxVID >= 0) PutSizeType(MaxVIDKey(), maxVID);
+                }
+                m_maxVID = maxVID;
 
                 m_defaultVersion = DefaultVersionForLayer();
 

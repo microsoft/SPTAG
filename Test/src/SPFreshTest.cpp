@@ -1715,6 +1715,11 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
         dispatcher->WaitForAllResults(dispatchId, 60);
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Driver: sent Stop command to all workers\n");
     }
+    if (workerPtr && index) {
+        if (auto* spannIndex = dynamic_cast<SPANN::Index<T>*>(index.get())) {
+            spannIndex->SetWorker(nullptr);
+        }
+    }
 
     M = oldM;
     K = oldK;
@@ -3046,6 +3051,7 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
     }
 
     router->ClearDispatchCallback();
+    spannIndex->SetWorker(nullptr);
     N = oldN; M = oldM; K = oldK; queries = oldQ;
     BOOST_TEST_MESSAGE("Worker " << nodeIndex << ": Shutting down");
 }

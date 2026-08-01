@@ -70,7 +70,7 @@ public:
 
     // Append a batch of entries to the given shard's log.  Returns the
     // version of the last written entry (>= 1 on success, 0 on failure).
-    std::uint64_t Append(int shard, const std::vector<HeadSyncEntry>& entries) {
+    std::uint64_t Append(int shard, std::vector<HeadSyncEntry>& entries) {
         if (!m_db || entries.empty()) return 0;
         std::lock_guard<std::mutex> lk(GetShardAppendMutex(shard));
         std::uint64_t base = LoadLatestVersion(shard);
@@ -79,8 +79,9 @@ public:
         keys.reserve(entries.size());
         values.reserve(entries.size());
         std::uint64_t v = base;
-        for (const auto& e : entries) {
+        for (auto& e : entries) {
             ++v;
+            e.m_shard = shard;
             keys.push_back(MakeEntryKey(shard, v));
             values.push_back(EncodeEntry(e));
         }
@@ -170,6 +171,26 @@ public:
         m_reconciler = std::thread([this]() { ReconcileLoop(); });
     }
 
+    void ReconcileShard(int shard) {
+        if (!m_apply || shard < 0) return;
+        std::lock_guard<std::mutex> lk(GetShardReconcileMutex(shard));
+        std::uint64_t cursor = LoadCursor(shard);
+        while (true) {
+            std::uint64_t latest = LoadLatestVersion(shard);
+            if (latest <= cursor) return;
+            auto entries = ReadSince(shard, cursor, latest);
+            if (entries.empty()) return;
+            std::uint64_t advanced = cursor;
+            for (const auto& ve : entries) {
+                if (!m_apply(ve)) break;
+                advanced = ve.version;
+            }
+            if (advanced == cursor) return;
+            if (!StoreCursor(shard, advanced)) return;
+            cursor = advanced;
+        }
+    }
+
     void Stop() {
         {
             std::lock_guard<std::mutex> lk(m_cvMutex);
@@ -234,24 +255,19 @@ private:
         return *slot;
     }
 
+    std::mutex& GetShardReconcileMutex(int shard) {
+        std::lock_guard<std::mutex> lk(m_reconcileMutexMapLock);
+        auto& slot = m_reconcileMutexes[shard];
+        if (!slot) slot = std::make_unique<std::mutex>();
+        return *slot;
+    }
+
     void ReconcileLoop() {
         std::unique_lock<std::mutex> lk(m_cvMutex);
         while (!m_stop) {
             lk.unlock();
             for (int shard : m_shards) {
-                std::uint64_t cursor = LoadCursor(shard);
-                std::uint64_t latest = LoadLatestVersion(shard);
-                if (latest <= cursor) continue;
-                auto entries = ReadSince(shard, cursor, latest);
-                if (entries.empty()) continue;
-                std::uint64_t advanced = cursor;
-                for (const auto& ve : entries) {
-                    if (!m_apply(ve)) break;
-                    advanced = ve.version;
-                }
-                if (advanced > cursor) {
-                    StoreCursor(shard, advanced);
-                }
+                ReconcileShard(shard);
             }
             lk.lock();
             m_cv.wait_for(lk, std::chrono::milliseconds(m_reconcileIntervalMs),
@@ -265,6 +281,8 @@ private:
 
     std::mutex m_appendMutexMapLock;
     std::unordered_map<int, std::unique_ptr<std::mutex>> m_appendMutexes;
+    std::mutex m_reconcileMutexMapLock;
+    std::unordered_map<int, std::unique_ptr<std::mutex>> m_reconcileMutexes;
 
     std::vector<int> m_shards;
     ApplyFn m_apply;

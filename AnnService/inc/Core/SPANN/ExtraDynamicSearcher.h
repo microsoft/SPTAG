@@ -452,15 +452,17 @@ namespace SPTAG::SPANN {
                 int s = m_splitJobsInFlight.load(std::memory_order_relaxed);
                 int m = m_mergeJobsInFlight.load(std::memory_order_relaxed);
                 int a = m_appendJobsInFlight.load(std::memory_order_relaxed);
-                if (s == 0 && m == 0 && a == 0) return;
+                int r = m_reassignJobsInFlight.load(std::memory_order_relaxed);
+                if (s == 0 && m == 0 && a == 0 && r == 0) return;
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                "ExtraDynamicSearcher layer=%d: drain timeout, split=%d merge=%d append=%d still in-flight\n",
+                "ExtraDynamicSearcher layer=%d: drain timeout, split=%d merge=%d append=%d reassign=%d still in-flight\n",
                 m_layer,
                 (int)m_splitJobsInFlight.load(),
                 (int)m_mergeJobsInFlight.load(),
-                (int)m_appendJobsInFlight.load());
+                (int)m_appendJobsInFlight.load(),
+                (int)m_reassignJobsInFlight.load());
         }
 
         int GetNumWorkerNodes() const {
@@ -498,8 +500,18 @@ namespace SPTAG::SPANN {
         /// Set the external WorkerNode pointer and bind all callbacks
         /// (append, head-sync, remote-lock, merge-hint) at THIS instance's m_layer.
         void SetWorker(WorkerNode* router) override {
+            if (router == nullptr) {
+                DrainAsyncJobs();
+                if (m_worker) {
+                    m_worker->FlushRemoteAppends();
+                    m_worker->ClearCallbacksIfOwner(m_layer, this);
+                }
+                if (m_headSyncLog) m_headSyncLog->Stop();
+                m_worker = nullptr;
+                return;
+            }
+
             m_worker = router;
-            if (!m_worker) return;
 
             // Push RPC tuning from SPANN options (RemoteAppend*) so the
             // hardcoded defaults in RemotePostingOps/WorkerNode get
@@ -674,11 +686,13 @@ namespace SPTAG::SPANN {
                     }
                 });
 
-            // Head sync callback: apply head index updates from peers
+            // Head sync packets are latency notifications. The owner shard is
+            // the single durable writer; peers replay its log in order before
+            // mutating their local in-memory head index.
             auto* headIndex = m_headIndex;
             int layer = m_layer;
             auto* worker = m_worker;
-            m_worker->SetHeadSyncCallback(m_layer, [headIndex, layer, worker](const HeadSyncEntry& entry) {
+            auto applyHeadSync = [headIndex, layer, worker](const HeadSyncEntry& entry) {
                 if (entry.op == HeadSyncEntry::Op::Add) {
                     headIndex->AddHeadIndex(entry.headVector.data(), entry.headVID, 0,
                         static_cast<DimensionType>(entry.headVector.size() / sizeof(ValueType)),
@@ -688,7 +702,28 @@ namespace SPTAG::SPANN {
                     headIndex->DeleteIndex(entry.headVID, layer + 1);
                     if (worker) worker->NoteHeadSyncApplyDelete();
                 }
-            });
+                return true;
+            };
+            if (m_layer == 0 && m_headSyncLog) {
+                auto* headSyncLog = m_headSyncLog.get();
+                m_worker->SetHeadSyncCallback(m_layer, [headSyncLog](const HeadSyncEntry& entry) {
+                    headSyncLog->ReconcileShard(entry.m_shard);
+                });
+                std::vector<int> shards;
+                shards.reserve(GetNumWorkerNodes());
+                for (int shard = 0; shard < GetNumWorkerNodes(); ++shard) {
+                    shards.push_back(shard);
+                }
+                m_headSyncLog->StartReconciler(
+                    std::move(shards),
+                    [applyHeadSync](const Distributed::HeadSyncLog::VersionedEntry& entry) {
+                        return applyHeadSync(entry.entry);
+                    });
+            } else {
+                m_worker->SetHeadSyncCallback(m_layer, [applyHeadSync](const HeadSyncEntry& entry) {
+                    applyHeadSync(entry);
+                });
+            }
 
             // Remote lock callback: per-bucket leases with TTL auto-release
             // AND a fencing token.  The owner returns a monotonically
@@ -1279,10 +1314,10 @@ namespace SPTAG::SPANN {
                     // upper-bound check is single-node only. Downstream
                     // BatchGetVersions handles out-of-range VIDs safely.
                     bool distributed = (m_worker && m_worker->IsEnabled());
-                    SizeType maxVid = m_versionMap->Count();
+                    SizeType maxVid = distributed ? -1 : m_versionMap->MaxVID();
                     for (SizeType j = 0; j < postVectorNum; j++) {
                         SizeType VID = *((SizeType*)(postingP + j * m_vectorInfoSize));
-                        if (VID < 0 || (!distributed && VID >= maxVid)) { sawInvalid = true; break; }
+                        if (VID < 0 || (!distributed && VID > maxVid)) { sawInvalid = true; break; }
                     }
                     if (sawInvalid) {
                         if (retry < 3) {
@@ -1394,12 +1429,6 @@ namespace SPTAG::SPANN {
                 } else {
                     ks[1] = 1;
                 }
-                // === Phase A: precompute per-child plan (no I/O, no locks) ===
-                // We resolve newHeadVID, isSameHead, and ownership for each of
-                // the two cluster children up-front so Phase B can acquire
-                // every lock the split will need before any DB write.  This
-                // closes the strand window where k=0 wrote and k=1 then
-                // failed to lock, leaving cluster-1's vectors orphaned.
                 struct ChildPlan {
                     bool active = false;
                     bool isSameHead = false;
@@ -1409,8 +1438,12 @@ namespace SPTAG::SPANN {
                     uint8_t version = 0;
                 };
                 ChildPlan plans[2];
+
+                // Resolve the complete lock plan and build both payloads before
+                // acquiring locks or writing to DB.
                 {
                     bool tentativeSameHead = false;
+                    int first = 0;
                     for (int k : ks) {
                         if (args.counts[k] == 0) continue;
                         plans[k].active = true;
@@ -1428,14 +1461,7 @@ namespace SPTAG::SPANN {
                                 plans[k].ownerNode = owner;
                             }
                         }
-                    }
-                }
 
-                // === Phase B: build per-child posting payloads (memory only) ===
-                {
-                    int first = 0;
-                    for (int k : ks) {
-                        if (!plans[k].active) continue;
                         first = (k == 0) ? 0 : args.counts[0];
                         newPostingLists[k].resize(args.counts[k] * m_vectorInfoSize);
                         char* ptr = (char*)(newPostingLists[k].c_str());
@@ -1944,7 +1970,13 @@ namespace SPTAG::SPANN {
                         // own version counter independently.
                         if (m_headSyncLog) {
                             int shard = m_worker->GetWorkerNodeIndex();
-                            m_headSyncLog->Append(shard, headSyncEntries);
+                            std::uint64_t version = m_headSyncLog->Append(shard, headSyncEntries);
+                            if (version == 0) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                    "Split: failed to persist HeadSync entries for shard %d\n", shard);
+                                return ErrorCode::DiskIOFail;
+                            }
+                            m_headSyncLog->StoreCursor(shard, version);
                         }
                         m_worker->BroadcastHeadSync(headSyncEntries);
                     }
@@ -2133,8 +2165,8 @@ namespace SPTAG::SPANN {
                                 continue;
                             }
                         }
-                        if (!m_headIndex->ContainSample(queryResult->VID, m_layer + 1)) continue;
                     }
+                    if (!m_headIndex->ContainSample(queryResult->VID, m_layer + 1)) continue;
 
                     if ((ret=db->Get(DBKey(queryResult->VID), &nextPostingList, MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
                         if (ret == ErrorCode::Key_NotFound) {
@@ -2306,7 +2338,13 @@ namespace SPTAG::SPANN {
                     headSyncEntries.push_back(std::move(entry));
                     if (m_headSyncLog) {
                         int shard = m_worker->GetWorkerNodeIndex();
-                        m_headSyncLog->Append(shard, headSyncEntries);
+                        std::uint64_t version = m_headSyncLog->Append(shard, headSyncEntries);
+                        if (version == 0) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                "MergePostings: failed to persist HeadSync entries for shard %d\n", shard);
+                            return ErrorCode::DiskIOFail;
+                        }
+                        m_headSyncLog->StoreCursor(shard, version);
                     }
                     m_worker->BroadcastHeadSync(headSyncEntries);
                 }
@@ -2464,14 +2502,14 @@ namespace SPTAG::SPANN {
                 }
                 std::vector<uint8_t> cr_mapVers;
                 m_versionMap->BatchGetVersions(cr_vids, cr_mapVers);
-                const SizeType maxVid = m_versionMap->Count();
                 const bool distributed = (m_worker && m_worker->IsEnabled());
+                const SizeType maxVid = distributed ? -1 : m_versionMap->MaxVID();
                 for (size_t j = 0; j < postVectorNum; j++) {
                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                     SizeType vid = cr_vids[j];
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                    if (vid < 0 || (!distributed && vid >= maxVid)) {
+                    if (vid < 0 || (!distributed && vid > maxVid)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                      "CollectReAssign: skip invalid VID %lld in posting headID=%lld\n",
                                      (std::int64_t)vid, (std::int64_t)newHeadsID[i]);
@@ -2551,14 +2589,14 @@ namespace SPTAG::SPANN {
                     }
                     std::vector<uint8_t> nb_mapVers;
                     m_versionMap->BatchGetVersions(nb_vids, nb_mapVers);
-                    const SizeType maxVid = m_versionMap->Count();
                     const bool distributed = (m_worker && m_worker->IsEnabled());
+                    const SizeType maxVid = distributed ? -1 : m_versionMap->MaxVID();
                     for (size_t j = 0; j < postVectorNum; j++) {
                         uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                         SizeType vid = nb_vids[j];
                         uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                        if (vid < 0 || (!distributed && vid >= maxVid)) {
+                        if (vid < 0 || (!distributed && vid > maxVid)) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                 "CollectReAssign(nearby): skip invalid VID %lld in posting headID=%lld\n",
                                 (std::int64_t)vid, (std::int64_t)HeadPrevTopK[i]);
@@ -3318,7 +3356,7 @@ namespace SPTAG::SPANN {
                     char* vectorInfo = p_postingListFullData + i * m_vectorInfoSize;
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
-                    if (vectorID < 0 || vectorID >= m_versionMap->Count())
+                    if (vectorID < 0 || (!isTiKV && vectorID > m_versionMap->MaxVID()))
                         return ErrorCode::Key_OverFlow;
                     if (!isTiKV && m_versionMap->Deleted(vectorID))
                         continue;
@@ -3655,26 +3693,28 @@ namespace SPTAG::SPANN {
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
-            // Initialize the per-layer version map. For TiKVVersionMap this:
-            //   - layer 0 (default=0xff alive): bumps m_count only; no per-VID
-            //     writes. Inserts later rely on the default 0xff == alive.
-            //   - layer >0 (default=0xfe deleted): writes 0xff explicitly for
-            //     each alive head in p_localToGlobal so MergePostings'
-            //     Deleted()/GetVersion filter doesn't silently drop legitimate
-            //     base heads during async merges. Without this, layer-1
-            //     MergePostings reads stored version=0xfe, sees Deleted()=true
-            //     (because per-VID byte is missing → reads default 0xfe),
-            //     filters every entry, and writes back a corrupted near-empty
-            //     posting -- destroying recall after even a single async merge.
-            // The alive marker is 0xff to match the unified version convention
-            // (0xff = alive/default/reset, 0xfe = deleted) introduced on the
-            // pre-merge-tikv-bugfix branch; this is the batched-MultiPut
-            // equivalent of that branch's per-head
-            // "if (Deleted(globalID)) SetVersion(globalID, 0xff)" loop.
-            m_versionMap->Initialize(m_opt->m_vectorSize,
-                                     p_headIndex->m_iDataBlockSize,
-                                     p_headIndex->m_iDataCapacity,
-                                     &p_localToGlobal);
+            if (m_opt->m_storage == Storage::TIKVIO) {
+                m_versionMap->SetR(m_opt->m_vectorSize);
+                if (p_localToGlobal.R() > 0) {
+                    for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
+                        SizeType globalID = *(p_localToGlobal[i]);
+                        if (m_versionMap->Deleted(globalID)) {
+                            m_versionMap->SetVersion(globalID, 0xff);
+                        }
+                    }
+                } else {
+                    for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
+                        if (m_versionMap->Deleted(i)) {
+                            m_versionMap->SetVersion(i, 0xff);
+                        }
+                    }
+                }
+            } else {
+                m_versionMap->Initialize(m_opt->m_vectorSize,
+                                         p_headIndex->m_iDataBlockSize,
+                                         p_headIndex->m_iDataCapacity,
+                                         &p_localToGlobal);
+            }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
 

@@ -321,13 +321,15 @@ namespace SPTAG::SPANN {
         SizeType headVID;
         std::string headVector;       // only for Add; empty for Delete
         std::int32_t m_layer = 0;     // originating ExtraDynamicSearcher layer
+        std::int32_t m_shard = -1;    // owner shard that serialized this HeadSync entry
 
         size_t EstimateBufferSize() const {
             return sizeof(std::uint8_t)   // op
                  + sizeof(SizeType)       // headVID
                  + sizeof(std::uint32_t)  // headVector length
                  + headVector.size()
-                 + sizeof(std::int32_t);  // layer
+                 + sizeof(std::int32_t)   // layer
+                 + sizeof(std::int32_t);  // shard
         }
 
         std::uint8_t* Write(std::uint8_t* p_buffer) const {
@@ -341,6 +343,7 @@ namespace SPTAG::SPANN {
                 p_buffer += vecLen;
             }
             p_buffer = SimpleWriteBuffer(m_layer, p_buffer);
+            p_buffer = SimpleWriteBuffer(m_shard, p_buffer);
             return p_buffer;
         }
 
@@ -359,6 +362,7 @@ namespace SPTAG::SPANN {
                 headVector.clear();
             }
             p_buffer = SimpleReadBuffer(p_buffer, m_layer);
+            p_buffer = SimpleReadBuffer(p_buffer, m_shard);
             return p_buffer;
         }
     };
