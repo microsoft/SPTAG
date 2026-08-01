@@ -130,9 +130,6 @@ DefineSSDParameter(m_staticACLTagCols, int, 0, "StaticACLTagCols")
 // separate from the mutable runtime DisableCrossEdges diagnostic switch below.
 DefineSSDParameter(m_buildCrossEdges, bool, false, "CrossEdges")
 DefineSSDParameter(m_crossExtraEdges, int, 10, "CrossExtraEdges")
-DefineSSDParameter(m_crossEdgeSearchTopK, int, 15, "CrossEdgeSearchTopK")
-// 0 follows BuildSSDIndex.NumberOfThreads.
-DefineSSDParameter(m_crossEdgeBuildThreads, int, 0, "CrossEdgeBuildThreads")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

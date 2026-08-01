@@ -33,6 +33,28 @@ export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=2000000
 
 # --- derive paths from the ini (single source of truth) ---
 ini() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^#]*\).*/\1/p" "$CFG" | head -1 | sed 's/[[:space:]]*$//'; }
+ini_section() {
+  awk -F= -v section="$1" -v key="$2" '
+    BEGIN {
+      wanted_section = "[" tolower(section) "]";
+      wanted_key = tolower(key);
+    }
+    /^\[/ {
+      in_section = (tolower($0) == wanted_section);
+      next;
+    }
+    in_section && NF >= 2 {
+      name = $1;
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", name);
+      if (tolower(name) == wanted_key) {
+        value = substr($0, index($0, "=") + 1);
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value);
+        print value;
+        exit;
+      }
+    }
+  ' "$CFG"
+}
 OUT=$(ini IndexDirectory)
 STORAGE=$(ini Storage); [ -z "$STORAGE" ] && STORAGE=FILEIO
 TMPROOT=$(ini TmpDir)
@@ -43,18 +65,21 @@ if [ -n "$QFILE" ]; then
 fi
 PIPEPQ_PIVOTS=$(ini PipePQPivotsFile)
 
-# (1) cross-graph knobs -- read from [BuildSSDIndex] in the native ini.
+# (1) existing cross-graph knobs.
 #   CrossEdges       : 1 = build/reuse head_cross_edges.bin. New STATIC bundle
 #                      builds create it before Phase 4; this post-build fallback
 #                      supports older/non-STATIC builders.
 #   CrossExtraEdges  : -m, cross-subgraph edges kept per head (augmentheadgraph
 #                      clamps <=0 back to 10). Default 10.
-#   CrossEdgeSearchTopK / CrossEdgeBuildThreads: native sidecar construction
-#                      settings, reused by the legacy post-build fallback.
 CROSS_EDGES=$(ini CrossEdges);            [ -z "$CROSS_EDGES" ] && CROSS_EDGES=1
 CROSS_EXTRA_EDGES=$(ini CrossExtraEdges); [ -z "$CROSS_EXTRA_EDGES" ] && CROSS_EXTRA_EDGES=10
-CROSS_EDGE_SEARCH_TOPK=$(ini CrossEdgeSearchTopK); [ -z "$CROSS_EDGE_SEARCH_TOPK" ] && CROSS_EDGE_SEARCH_TOPK=15
-CROSS_EDGE_BUILD_THREADS=$(ini CrossEdgeBuildThreads); [ -z "$CROSS_EDGE_BUILD_THREADS" ] && CROSS_EDGE_BUILD_THREADS=64
+case "$CROSS_EXTRA_EDGES" in
+  *[!0-9]*|'') CROSS_EXTRA_EDGES=10 ;;
+esac
+CROSS_EDGE_SEARCH_TOPK=$CROSS_EXTRA_EDGES
+[ "$CROSS_EDGE_SEARCH_TOPK" -lt 15 ] && CROSS_EDGE_SEARCH_TOPK=15
+CROSS_EDGE_BUILD_THREADS=$(ini_section BuildSSDIndex NumberOfThreads)
+[ -z "$CROSS_EDGE_BUILD_THREADS" ] && CROSS_EDGE_BUILD_THREADS=1
 ORDERED_PAGE_START=$(ini EnableOrderedPageStart); [ -z "$ORDERED_PAGE_START" ] && ORDERED_PAGE_START=false
 
 # (2) SelectHead resume checkpoint knobs ([MultiTenant], single source of truth).

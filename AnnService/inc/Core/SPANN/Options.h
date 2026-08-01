@@ -131,8 +131,6 @@ namespace SPTAG {
             // construction and retained for runtime unified traversal.
             bool m_buildCrossEdges;
             int m_crossExtraEdges;
-            int m_crossEdgeSearchTopK;
-            int m_crossEdgeBuildThreads;
 
             // GPU building
             int m_gpuSSDNumTrees;

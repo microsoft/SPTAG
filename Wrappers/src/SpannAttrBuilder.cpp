@@ -717,8 +717,6 @@ int main(int argc, char** argv) {
         };
         stageMultiTenantBuildSSD("CrossEdges", "CrossEdges");
         stageMultiTenantBuildSSD("CrossExtraEdges", "CrossExtraEdges");
-        stageMultiTenantBuildSSD("CrossEdgeSearchTopK", "CrossEdgeSearchTopK");
-        stageMultiTenantBuildSSD("CrossEdgeBuildThreads", "CrossEdgeBuildThreads");
     }
 
     // Native [BuildSSDIndex] section: apply every param through the SPANN parameter

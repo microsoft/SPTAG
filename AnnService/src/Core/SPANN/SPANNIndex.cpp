@@ -1719,11 +1719,9 @@ template <typename T> ErrorCode Index<T>::EnsureStaticTailCrossEdges()
     const std::string dirtyPath =
         headDirectory + FolderSep + Helper::kHeadCrossEdgesDirtyFileName;
     const HeadCrossEdgeBuildOptions options{
-        (std::max)(1, m_options.m_crossEdgeSearchTopK),
+        (std::max)(15, m_options.m_crossExtraEdges),
         (std::max)(1, m_options.m_crossExtraEdges),
-        m_options.m_crossEdgeBuildThreads > 0
-            ? m_options.m_crossEdgeBuildThreads
-            : (std::max)(1, m_options.m_iSSDNumberOfThreads),
+        (std::max)(1, m_options.m_iSSDNumberOfThreads),
         true};
 
     {

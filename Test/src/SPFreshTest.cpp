@@ -1313,8 +1313,6 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
         set("BuildSSDIndex", "UnfilterTailBufferLength", "-1");
         set("BuildSSDIndex", "CrossEdges", "1");
         set("BuildSSDIndex", "CrossExtraEdges", "2");
-        set("BuildSSDIndex", "CrossEdgeSearchTopK", "4");
-        set("BuildSSDIndex", "CrossEdgeBuildThreads", "1");
         set("BuildSSDIndex", "ExcludeHead", "true");
         set("BuildSSDIndex", "NumTagsPerVec", std::to_string(tagCount));
         set("BuildSSDIndex", "StaticACLTagCols", std::to_string(tagCount));
