@@ -124,7 +124,7 @@ namespace SPTAG::SPANN {
         // gRPC timeout in production, the diagnostic to chase is "gRPC
         // client is wedged", not "tune the destructor timeout".
         ~WorkerNode() {
-            m_acceptingNewRequests.store(false, std::memory_order_release);
+            m_acceptingNewRequests.store(false, std::memory_order_seq_cst);
 
             // Log every 2x RPC timeout: that gives one full RPC cycle as
             // the healthy-drain upper bound (gate -> each in-flight thread
@@ -136,12 +136,14 @@ namespace SPTAG::SPANN {
                 2 * std::max(1, m_remoteOps.GetRpcTimeoutSec()));
 
             auto lastLogged = std::chrono::steady_clock::now();
-            while (m_inflightAppendFlushes.load(std::memory_order_acquire) > 0) {
+            while (m_activeQueueProducers.load(std::memory_order_seq_cst) > 0 ||
+                   m_inflightAppendFlushes.load(std::memory_order_acquire) > 0) {
                 auto now = std::chrono::steady_clock::now();
                 if (now - lastLogged >= logInterval) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                        "~WorkerNode: still waiting on %d in-flight auto-flush thread(s) "
+                        "~WorkerNode: still waiting on %d queue producer(s) and %d in-flight auto-flush thread(s) "
                         "(exceeded 2x RPC timeout, gRPC may be wedged)\n",
+                        m_activeQueueProducers.load(std::memory_order_relaxed),
                         m_inflightAppendFlushes.load(std::memory_order_relaxed));
                     lastLogged = now;
                 }
@@ -330,7 +332,9 @@ namespace SPTAG::SPANN {
         // ---- Append queue ----
 
         void QueueRemoteAppend(int nodeIndex, RemoteAppendRequest req) {
-            if (!m_acceptingNewRequests.load(std::memory_order_acquire)) {
+            m_activeQueueProducers.fetch_add(1, std::memory_order_seq_cst);
+            if (!m_acceptingNewRequests.load(std::memory_order_seq_cst)) {
+                m_activeQueueProducers.fetch_sub(1, std::memory_order_acq_rel);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                     "WorkerNode: rejecting QueueRemoteAppend to node %d during shutdown\n",
                     nodeIndex);
@@ -364,6 +368,10 @@ namespace SPTAG::SPANN {
                     didReserveSlot = true;
                 }
             }
+            if (didReserveSlot) {
+                m_inflightAppendFlushes.fetch_add(1, std::memory_order_relaxed);
+            }
+            m_activeQueueProducers.fetch_sub(1, std::memory_order_acq_rel);
             if (!didReserveSlot) return;
 
             // Fire-and-forget async send. After the initial chunk completes,
@@ -374,7 +382,6 @@ namespace SPTAG::SPANN {
             // interleave items within a chunk, so cross-chunk ordering adds
             // no extra correctness risk for the per-posting RMW path.
             auto items = std::make_shared<std::vector<RemoteAppendRequest>>(std::move(toFlush));
-            m_inflightAppendFlushes.fetch_add(1, std::memory_order_relaxed);
             std::thread([this, nodeIndex, items]() {
                 while (true) {
                     ErrorCode ret = SendBatchRemoteAppend(nodeIndex, *items);
@@ -488,6 +495,15 @@ namespace SPTAG::SPANN {
                 errors += iterErrors.load();
             }
             return errors > 0 ? ErrorCode::Fail : ErrorCode::Success;
+        }
+
+        ErrorCode PrepareForShutdown() {
+            m_acceptingNewRequests.store(false, std::memory_order_seq_cst);
+            while (m_activeQueueProducers.load(std::memory_order_seq_cst) > 0 ||
+                   m_inflightAppendFlushes.load(std::memory_order_acquire) > 0) {
+                std::this_thread::sleep_for(kShutdownPollInterval);
+            }
+            return FlushRemoteAppends();
         }
 
         // ---- Cross-node merge hint queue ----
@@ -730,10 +746,10 @@ namespace SPTAG::SPANN {
         std::unordered_map<int, int> m_perNodeInflight; // guarded by m_appendQueueMutex
         static constexpr size_t kAutoFlushThreshold = 50000;
         std::atomic<int> m_maxInflightPerNode{4};
+        std::atomic<int> m_activeQueueProducers{0};
 
-        // Gate: producers (QueueRemoteAppend) consult this; the destructor
-        // sets it to false to drain in-flight auto-flush threads to zero
-        // without new threads being spawned.
+        // Gate: PrepareForShutdown (or the destructor fallback) closes this
+        // after index producers are detached, before the final queue drain.
         std::atomic<bool> m_acceptingNewRequests{true};
 
         // Shutdown wait tuning (used only by ~WorkerNode).

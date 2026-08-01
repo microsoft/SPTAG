@@ -1689,6 +1689,11 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                 else
                     jsonFile << "      }\n";
 
+                if (workerPtr) {
+                    if (auto* spannClone = dynamic_cast<SPANN::Index<T>*>(cloneIndex.get())) {
+                        spannClone->SetWorker(nullptr);
+                    }
+                }
                 cloneIndex = nullptr;
                 prevPath = clonePath;
                 jsonFile.flush();
@@ -1705,6 +1710,15 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     jsonFile.close();
 
     // Stop workers in distributed mode
+    if (workerPtr && index) {
+        if (auto* spannIndex = dynamic_cast<SPANN::Index<T>*>(index.get())) {
+            spannIndex->SetWorker(nullptr);
+        }
+        BOOST_CHECK_MESSAGE(workerPtr->PrepareForShutdown() == ErrorCode::Success,
+            "Driver final RemoteAppend flush failed");
+        BOOST_CHECK_MESSAGE(workerPtr->FlushRemoteMerges() == ErrorCode::Success,
+            "Driver final RemoteMerge flush failed");
+    }
     if (dispatcher && numNodes > 1) {
         // Stop the heartbeat pump first so we don't race a stray Heartbeat
         // packet against the Stop dispatch on the same connection.
@@ -1714,11 +1728,6 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
         // tears down the network (which would force-kill in-flight RPCs).
         dispatcher->WaitForAllResults(dispatchId, 60);
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Driver: sent Stop command to all workers\n");
-    }
-    if (workerPtr && index) {
-        if (auto* spannIndex = dynamic_cast<SPANN::Index<T>*>(index.get())) {
-            spannIndex->SetWorker(nullptr);
-        }
     }
 
     M = oldM;
@@ -3052,6 +3061,10 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
 
     router->ClearDispatchCallback();
     spannIndex->SetWorker(nullptr);
+    BOOST_CHECK_MESSAGE(router->PrepareForShutdown() == ErrorCode::Success,
+        "Worker final RemoteAppend flush failed");
+    BOOST_CHECK_MESSAGE(router->FlushRemoteMerges() == ErrorCode::Success,
+        "Worker final RemoteMerge flush failed");
     N = oldN; M = oldM; K = oldK; queries = oldQ;
     BOOST_TEST_MESSAGE("Worker " << nodeIndex << ": Shutting down");
 }
