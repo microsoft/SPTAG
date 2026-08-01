@@ -474,16 +474,6 @@ private:
     std::map<int, int> m_tenantHeadCounts;
     // Total posting count across all tenants (SPANN postings + small tenant vector blocks)
     int m_totalPostingCount = 0;
-    // Path to the shared SPANN SSD working directory
-    std::string m_sharedSpannWorkDir;
-
-    // --- Shared SPANN posting storage ---
-    // Shared FileIO (BlockController) for all SPANN tenants
-    std::shared_ptr<SPTAG::SPANN::FileIO> m_sharedFileIO;
-    // Per-SPANN-tenant HeadIndex (VectorIndex) for routing queries
-    std::map<int, std::shared_ptr<SPTAG::VectorIndex>> m_tenantHeadIndices;
-    // Per-SPANN-tenant vector translate map (head vector ID → full vector ID)
-    std::map<int, std::shared_ptr<SPTAG::COMMON::Dataset<std::uint64_t>>> m_tenantTranslateMaps;
 
     // Thresholds for hybrid strategy (vector count)
     // All tenants use SPANN — HeadIndex stays in memory, postings read from SSD
@@ -532,10 +522,6 @@ private:
 
     // Unload a tenant while holding exclusive lock (called by eviction)
     bool UnloadTenantLocked(int p_tenantId);
-
-    // Shared SPANN search: uses HeadIndex + shared FileIO + PostingOffset
-    std::shared_ptr<QueryResult> SearchSharedSPANN(ByteArray p_queryVector, int p_tenantId, int p_resultNum);
-    bool InitSharedFileIO();
 
     // Hybrid build helpers
     TenantIndexType ChooseIndexType(int vectorCount) const;
