@@ -145,6 +145,7 @@ namespace SPTAG
             mutable std::vector<std::shared_ptr<VectorIndex>> m_loadedHeadBundleIndexes;
             mutable std::vector<std::vector<SizeType>> m_headBundleLocalToGlobalHIDs;
             mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
+            mutable std::mutex m_globalHeadVIDToLocalHIDMutex;
             mutable std::mutex m_headBundleLoadLock;
             // Cross-edge graph, resolved into the same dense head-local-id (B) space as
             // ordinary RNG neighbors. This keeps cross edges on the hot path as plain
@@ -250,6 +251,7 @@ namespace SPTAG
             }
             inline bool IsHeadRoleUnfilterOnly(SizeType globalHeadVID) const {
                 if (!m_extraSearcher) return false;
+                std::lock_guard<std::mutex> lock(m_globalHeadVIDToLocalHIDMutex);
                 auto bIt = m_globalHeadVIDToLocalHID.find(globalHeadVID);
                 if (bIt == m_globalHeadVIDToLocalHID.end()) return false;
                 return m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(bIt->second));

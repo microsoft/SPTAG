@@ -915,6 +915,9 @@ template <typename T> ErrorCode Index<T>::ActivateMetadataOnlyBundleRoot()
     }
     for (const auto& node : m_headBundleNodes)
     {
+        if (node.headCount == 0) {
+            continue;
+        }
         if (node.nodeId < 0 ||
             node.nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size()) ||
             EnsureHeadBundleNodeLoaded(node.nodeId) != ErrorCode::Success)
@@ -939,11 +942,14 @@ template <typename T> ErrorCode Index<T>::ActivateMetadataOnlyBundleRoot()
             return ErrorCode::Fail;
         }
     }
-    if (static_cast<SizeType>(m_globalHeadVIDToLocalHID.size()) != totalHeads)
     {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                     "Top-level head IDs are not a unique complete bundle-head set.\n");
-        return ErrorCode::Fail;
+        std::lock_guard<std::mutex> lock(m_globalHeadVIDToLocalHIDMutex);
+        if (static_cast<SizeType>(m_globalHeadVIDToLocalHID.size()) != totalHeads)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Top-level head IDs are not a unique complete bundle-head set.\n");
+            return ErrorCode::Fail;
+        }
     }
 
     const std::string headDir =
@@ -1169,7 +1175,10 @@ template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std:
     m_headBundleBaseDir = p_baseDir;
     m_loadedHeadBundleIndexes.clear();
     m_headBundleLocalToGlobalHIDs.clear();
-    m_globalHeadVIDToLocalHID.clear();
+    {
+        std::lock_guard<std::mutex> mapLock(m_globalHeadVIDToLocalHIDMutex);
+        m_globalHeadVIDToLocalHID.clear();
+    }
     m_headCrossEdgeOffsetByB.clear();
     m_headCrossEdgeCountByB.clear();
     m_headCrossEdgeTargetsB.clear();
@@ -1215,6 +1224,7 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
     }
 
     std::lock_guard<std::mutex> lock(m_headBundleLoadLock);
+    std::lock_guard<std::mutex> headMapLock(m_globalHeadVIDToLocalHIDMutex);
     auto& localToGlobalHIDs = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(p_nodeId)];
 
     if (m_globalHeadVIDToLocalHID.empty())
@@ -1533,16 +1543,15 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         }
     }
 
-    SizeType maxGlobalVID = 0;
-    for (SizeType b = 0; b < headCount; ++b) {
-        SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[b]));
-        if (globalVID != MaxSize && globalVID > maxGlobalVID) maxGlobalVID = globalVID;
-    }
-    std::vector<SizeType> globalToB(static_cast<size_t>(maxGlobalVID) + 1, MaxSize);
-    for (SizeType b = 0; b < headCount; ++b) {
-        SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[b]));
-        if (globalVID != MaxSize && globalVID >= 0 && globalVID <= maxGlobalVID) {
-            globalToB[static_cast<size_t>(globalVID)] = b;
+    std::lock_guard<std::mutex> headMapLock(m_globalHeadVIDToLocalHIDMutex);
+    if (static_cast<SizeType>(m_globalHeadVIDToLocalHID.size()) != headCount) {
+        m_globalHeadVIDToLocalHID.clear();
+        m_globalHeadVIDToLocalHID.reserve(static_cast<size_t>(headCount) * 2 + 1);
+        for (SizeType b = 0; b < headCount; ++b) {
+            const SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[b]));
+            if (globalVID != MaxSize && globalVID >= 0) {
+                m_globalHeadVIDToLocalHID[globalVID] = b;
+            }
         }
     }
 
@@ -1579,8 +1588,11 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         }
         rawEdges += static_cast<size_t>(edgeCount);
         SizeType srcB = MaxSize;
-        if (globalVID >= 0 && static_cast<SizeType>(globalVID) <= maxGlobalVID) {
-            srcB = globalToB[static_cast<size_t>(globalVID)];
+        if (globalVID >= 0) {
+            const auto source = m_globalHeadVIDToLocalHID.find(static_cast<SizeType>(globalVID));
+            if (source != m_globalHeadVIDToLocalHID.end()) {
+                srcB = source->second;
+            }
         }
         if (srcB == MaxSize || srcB < 0 || srcB >= headCount ||
             sourceSeen[static_cast<size_t>(srcB)] != 0 ||
@@ -1592,11 +1604,13 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         const size_t begin = m_headCrossEdgeTargetsB.size();
         for (const auto& e : entries) {
             SizeType nbrGlobal = static_cast<SizeType>(e.neighborGlobalVID);
-            if (nbrGlobal < 0 || nbrGlobal > maxGlobalVID) {
+            if (nbrGlobal < 0) {
                 ok = false;
                 break;
             }
-            SizeType nbrB = globalToB[static_cast<size_t>(nbrGlobal)];
+            const auto neighbor = m_globalHeadVIDToLocalHID.find(nbrGlobal);
+            const SizeType nbrB =
+                neighbor == m_globalHeadVIDToLocalHID.end() ? MaxSize : neighbor->second;
             if (nbrB == MaxSize || nbrB < 0 || nbrB >= headCount ||
                 m_headBundleNodeByB[static_cast<size_t>(nbrB)] < 0 ||
                 m_headBundleNodeByB[static_cast<size_t>(nbrB)] ==
@@ -1620,7 +1634,6 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         }
     }
     std::fclose(fp);
-    std::vector<SizeType>().swap(globalToB);
     if (ok && std::find(sourceSeen.begin(), sourceSeen.end(), 0) != sourceSeen.end()) {
         ok = false;
     }
@@ -1666,6 +1679,9 @@ template <typename T> ErrorCode Index<T>::EnsureStaticTailCrossEdges()
     std::vector<HeadCrossEdgeBuildNode> nodes;
     nodes.reserve(m_headBundleNodes.size());
     for (const auto& bundleNode : m_headBundleNodes) {
+        if (bundleNode.headCount == 0) {
+            continue;
+        }
         const int nodeId = bundleNode.nodeId;
         if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size()) ||
             EnsureHeadBundleNodeLoaded(nodeId) != ErrorCode::Success) {
@@ -1687,6 +1703,12 @@ template <typename T> ErrorCode Index<T>::EnsureStaticTailCrossEdges()
         }
         nodes.push_back(
             {nodeId, bundleNode.headCount, index, &localToGlobal, &m_vectorTranslateMap});
+    }
+    if (nodes.empty()) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot build STATIC cross edges without non-empty bundle nodes.\n");
+        return ErrorCode::Fail;
     }
 
     std::string headDirectory = m_options.m_indexDirectory;
@@ -6021,8 +6043,11 @@ ErrorCode Index<T>::AddTaggedHeadToBundle(int p_bundleSlot, const T* p_center,
         ++node.headCount;
         ++node.postingCount;
         {
-            std::lock_guard<std::mutex> lock(m_globalVIDToBundleLocMutex);
+            std::lock_guard<std::mutex> lock(m_globalHeadVIDToLocalHIDMutex);
             m_globalHeadVIDToLocalHID[p_anchorVID] = newHeadID;
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_globalVIDToBundleLocMutex);
             m_globalVIDToBundleLoc[p_anchorVID] =
                 std::make_pair(p_bundleSlot, static_cast<SizeType>(begin));
         }
@@ -6294,7 +6319,10 @@ ErrorCode Index<T>::SplitTaggedPosting(ExtraWorkSpace* p_workspace, SizeType p_h
 
     auto isKnownHeadVID = [&](SizeType vid) {
         if (vid == MaxSize || vid < 0) return true;
-        if (m_globalHeadVIDToLocalHID.find(vid) != m_globalHeadVIDToLocalHID.end()) return true;
+        {
+            std::lock_guard<std::mutex> lock(m_globalHeadVIDToLocalHIDMutex);
+            if (m_globalHeadVIDToLocalHID.find(vid) != m_globalHeadVIDToLocalHID.end()) return true;
+        }
         for (SizeType head = 0; head < m_vectorTranslateMap.R(); ++head) {
             if (static_cast<SizeType>(*(m_vectorTranslateMap[head])) == vid) return true;
         }

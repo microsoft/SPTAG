@@ -7,8 +7,8 @@ set(Zstd ${PROJECT_SOURCE_DIR}/ThirdParty/zstd)
 include_directories(${AnnService})
 include_directories(${Zstd}/lib)
 
-file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
-file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
+file(GLOB_RECURSE HDR_FILES CONFIGURE_DEPENDS ${AnnService}/inc/Core/*.h ${AnnService}/inc/Helper/*.h)
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
 
 set(SPDK_LIBRARIES "")
 if (SPDK)

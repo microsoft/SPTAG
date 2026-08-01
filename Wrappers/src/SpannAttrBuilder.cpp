@@ -696,6 +696,29 @@ int main(int argc, char** argv) {
         stageMultiTenantSelectHead("DualPoolAugment", "DualPoolAugment");
         stageMultiTenantSelectHead("DualPoolExtraRatio", "DualPoolExtraRatio");
         stageMultiTenantSelectHead("UExtraIDFile", "UExtraIDFile");
+
+        // Cross-edge construction became a native BuildSSDIndex phase. Preserve
+        // existing sectioned configs while letting an explicit native value win.
+        auto stageMultiTenantBuildSSD = [&](const char* source, const char* target) {
+            if (!ini->DoesParameterExist("MultiTenant", source)) return;
+            if (ini->DoesParameterExist("BuildSSDIndex", target)) {
+                fprintf(stderr,
+                        "[spannbuilder][cfg] ignoring legacy [MultiTenant] %s; "
+                        "[BuildSSDIndex] %s is authoritative\n",
+                        source, target);
+                return;
+            }
+            const std::string value = ini->GetParameter<std::string>(
+                "MultiTenant", source, std::string());
+            mgr.SetSSDBuildParam(target, value.c_str());
+            fprintf(stderr,
+                    "[spannbuilder][cfg] [MultiTenant] %s = %s -> [BuildSSDIndex] %s\n",
+                    source, value.c_str(), target);
+        };
+        stageMultiTenantBuildSSD("CrossEdges", "CrossEdges");
+        stageMultiTenantBuildSSD("CrossExtraEdges", "CrossExtraEdges");
+        stageMultiTenantBuildSSD("CrossEdgeSearchTopK", "CrossEdgeSearchTopK");
+        stageMultiTenantBuildSSD("CrossEdgeBuildThreads", "CrossEdgeBuildThreads");
     }
 
     // Native [BuildSSDIndex] section: apply every param through the SPANN parameter
