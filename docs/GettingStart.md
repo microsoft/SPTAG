@@ -239,6 +239,17 @@ MaxDistRatio=8.0
 SearchPostingPageLimit=12
 ```
 
+### **Global RaBitQ Quantizer**
+
+RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the
+official scalar model and encode base vectors with `Release/quantizer`, then
+use the generated model through `QuantizerFilePath` in the normal SPANN
+workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
+`Dim=136` (128 scalar bytes plus two Float reconstruction factors).
+
+See [`RaBitQ_Global_Quantizer.md`](RaBitQ_Global_Quantizer.md) and
+`Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini`.
+
 ### **Quantizer Training and Quantizing Vectors**
 > Use Quantizer.exe to train PQQuantizer and output quantizer & quantized vectors:
 

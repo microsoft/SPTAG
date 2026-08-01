@@ -56,6 +56,12 @@ namespace SPTAG
 
             virtual SizeType Count() = 0;
             virtual SizeType MaxVID() { return Count() > 0 ? Count() - 1 : -1; }
+            virtual bool InitializeInitialCount(SizeType size)
+            {
+                (void)size;
+                return true;
+            }
+            virtual SizeType InitialCount() { return Count(); }
             virtual SizeType GetDeleteCount() = 0;
             virtual std::uint64_t BufferSize() = 0;
 

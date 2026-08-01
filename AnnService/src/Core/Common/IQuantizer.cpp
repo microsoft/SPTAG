@@ -1,6 +1,7 @@
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/OPQQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#include <inc/Core/Common/RaBitQQuantizer.h>
 #include <inc/Helper/StringConvert.h>
 
 namespace SPTAG
@@ -60,6 +61,15 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
         if (ret->LoadQuantizer(p_in) != ErrorCode::Success)
             ret.reset();
         return ret;
+    case QuantizerType::RaBitQQuantizer:
+        if (reconstructType != VectorValueType::Float) {
+            return ret;
+        }
+        ret = std::make_shared<RaBitQQuantizer>();
+        if (ret->LoadQuantizer(p_in) != ErrorCode::Success) {
+            ret.reset();
+        }
+        return ret;
     }
     return ret;
 }
@@ -116,6 +126,15 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
 
         if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)
             ret.reset();
+        return ret;
+    case QuantizerType::RaBitQQuantizer:
+        if (reconstructType != VectorValueType::Float) {
+            return ret;
+        }
+        ret = std::make_shared<RaBitQQuantizer>();
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) {
+            ret.reset();
+        }
         return ret;
     }
     return ret;

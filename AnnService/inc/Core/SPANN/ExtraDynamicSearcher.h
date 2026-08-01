@@ -382,7 +382,7 @@ namespace SPTAG::SPANN {
             m_opt = &p_opt;
             m_layer = layer;
             m_headIndex = headIndex;
-            m_metaDataSize = sizeof(SizeType) + sizeof(uint8_t);
+            m_metaDataSize = sizeof(SizeType) + sizeof(std::uint8_t);
             m_vectorDataSize = sizeof(ValueType) * m_opt->m_dim;
             m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
             p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * m_vectorInfoSize + PageSize - 1) / PageSize));
@@ -971,6 +971,10 @@ namespace SPTAG::SPANN {
 
         virtual SizeType GetNumSamples() const override
         {
+            if (m_opt != nullptr && m_opt->m_storage == Storage::TIKVIO) {
+                SizeType maxVID = m_versionMap->MaxVID();
+                return maxVID >= 0 ? maxVID + 1 : 0;
+            }
             return m_versionMap->Count();
         }
 
@@ -3025,18 +3029,22 @@ namespace SPTAG::SPANN {
 
         bool LoadIndex(Options& p_opt) override {
             m_opt = &p_opt;
-            m_initialVectorSize = p_opt.m_vectorSize;  // initial count for VID stripe
+            m_initialVectorSize = p_opt.m_vectorSize;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 
             std::string versionmapPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
             if (m_opt->m_recovery) {
                 versionmapPath = m_opt->m_persistentBufferPath + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading version map\n");
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity) != ErrorCode::Success) {
+                    return false;
+                }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             }
             else if (m_opt->m_storage == Storage::ROCKSDBIO || m_opt->m_storage == Storage::TIKVIO) {
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity) != ErrorCode::Success) {
+                    return false;
+                }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
@@ -3112,6 +3120,15 @@ namespace SPTAG::SPANN {
                 m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
             } 
 	    }
+            if (m_opt->m_storage == Storage::TIKVIO) {
+                m_initialVectorSize = m_versionMap->InitialCount();
+                if (m_initialVectorSize <= 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "Invalid TiKV initial VID count for layer %d: %d\n",
+                        m_layer, m_initialVectorSize);
+                    return false;
+                }
+            }
             if (m_opt->m_update) {
                 if (m_splitThreadPool == nullptr) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
@@ -3183,7 +3200,6 @@ namespace SPTAG::SPANN {
             auto layerTotalStart = std::chrono::high_resolution_clock::now();
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
-
             int diskRead = 0;
             int diskIO = 0;
             int listElements = 0;
@@ -3255,7 +3271,6 @@ namespace SPTAG::SPANN {
                     }
                 }
             }
-
             // For TiKV mode: post-heap version check via BatchGetVersions
             if (isTiKV && checkVersionMapInSearch) {
                 int fetchCount = queryResults.GetResultNum();
@@ -3480,7 +3495,6 @@ namespace SPTAG::SPANN {
 
         bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::Dataset<SizeType>& p_headToLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) override {
             m_opt = &p_opt;
-
             int numThreads = m_opt->m_iSSDNumberOfThreads;
             int candidateNum = m_opt->m_internalResultNum;
             if (m_opt->m_headIDFile.empty()) {
@@ -3497,10 +3511,15 @@ namespace SPTAG::SPANN {
             {
                 auto fullVectors = p_reader->GetVectorSet();
                 fullCount = fullVectors->Count();
-                m_initialVectorSize = fullCount;  // remember bulk-build count for stripe formula
-                m_metaDataSize = sizeof(SizeType) + sizeof(uint8_t);
+                m_metaDataSize = sizeof(SizeType) + sizeof(std::uint8_t);
                 m_vectorDataSize = fullVectors->PerVectorDataSize();
                 m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
+                if (m_opt->m_storage == Storage::TIKVIO) {
+                    if (!m_versionMap->InitializeInitialCount(fullCount)) {
+                        return false;
+                    }
+                    m_initialVectorSize = m_versionMap->InitialCount();
+                }
             }
             if (upperBound > 0) fullCount = upperBound;
 
@@ -3987,11 +4006,14 @@ namespace SPTAG::SPANN {
 
         ErrorCode AddIndex(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
             SizeType begin, bool disableSplit = false) override {
-
+            const SizeType vidStride = static_cast<SizeType>(GetNumWorkerNodes());
+            if (m_opt->m_storage == Storage::TIKVIO && p_vectorSet->Count() > 0) {
+                m_versionMap->SetR(begin + (p_vectorSet->Count() - 1) * vidStride + 1);
+            }
             // Phase 1: RNGSelection + serialize + WAL for each vector, group by headID
             std::unordered_map<SizeType, std::string> headAppends;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
-                SizeType VID = begin + v;
+                SizeType VID = begin + v * vidStride;
                 uint8_t version;
                 if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
                     if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, 0xff);
