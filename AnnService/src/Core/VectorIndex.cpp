@@ -794,14 +794,6 @@ std::shared_ptr<VectorIndex> VectorIndex::CreateInstance(IndexAlgoType p_algo, V
 
 ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::shared_ptr<VectorIndex> &p_vectorIndex)
 {
-    static const std::map<std::string, std::string> emptyOverrides;
-    return LoadIndex(p_loaderFilePath, emptyOverrides, p_vectorIndex);
-}
-
-ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath,
-                                 const std::map<std::string, std::string> &p_paramOverrides,
-                                 std::shared_ptr<VectorIndex> &p_vectorIndex)
-{
     std::string folderPath(p_loaderFilePath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
         folderPath += FolderSep;
@@ -823,23 +815,6 @@ ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath,
     ErrorCode ret = ErrorCode::Success;
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success)
         return ret;
-
-    // Apply param overrides AFTER LoadIndexConfig but BEFORE LoadIndexData, so that
-    // settings like TiKVPDAddresses are reflected in m_options before the KV connection
-    // is constructed inside LoadIndexData -> PrepareDB.
-    for (const auto &kv : p_paramOverrides)
-    {
-        const std::string &key = kv.first;
-        const std::string &val = kv.second;
-        auto dotPos = key.find('.');
-        if (dotPos != std::string::npos) {
-            std::string section = key.substr(0, dotPos);
-            std::string param = key.substr(dotPos + 1);
-            p_vectorIndex->SetParameter(param.c_str(), val.c_str(), section.c_str());
-        } else {
-            p_vectorIndex->SetParameter(key.c_str(), val.c_str(), "BuildSSDIndex");
-        }
-    }
 
     std::shared_ptr<std::vector<std::string>> indexfiles = p_vectorIndex->GetIndexFiles();
     if (iniReader.DoesSectionExist("MetaData"))

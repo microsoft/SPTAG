@@ -2894,12 +2894,8 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
 
     BOOST_TEST_MESSAGE("Worker node " << nodeIndex << ": Loading index from " << indexPath);
     std::shared_ptr<VectorIndex> index;
-    // IMPORTANT: Pass ssdOverrides through LoadIndex so that worker-specific settings
-    // (especially TiKVPDAddresses pointing at this worker's local PD) are applied
-    // BEFORE the underlying TiKV connection is constructed in PrepareDB. Without this,
-    // the worker would inherit the driver's PD address from the saved indexloader.ini
-    // and route every KV write back to the driver's TiKV instead of its own.
-    BOOST_REQUIRE(VectorIndex::LoadIndex(indexPath, ssdOverrides, index) == ErrorCode::Success);
+    (void)ssdOverrides;
+    BOOST_REQUIRE(VectorIndex::LoadIndex(indexPath, index) == ErrorCode::Success);
     BOOST_REQUIRE(index != nullptr);
 
     // Create WorkerNode

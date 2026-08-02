@@ -62,50 +62,6 @@ extern "C" bool RocksDbIOUringEnable() { return true; }
 
 namespace SPTAG::SPANN {
 
-    // RAII lease holder for a remote per-bucket lock issued by
-    // WorkerNode::SendRemoteLock.  Stores the fencing token so the
-    // release call can be validated by the owner.  Used by both Split
-    // (via a token map for batched acquisition) and MergePostings
-    // (per-candidate, one lease at a time).
-    struct RemoteLeaseGuard {
-        WorkerNode* router = nullptr;
-        int nodeIndex = -1;
-        int layer = 0;
-        SizeType vid = -1;
-        std::uint64_t token = 0;
-
-        RemoteLeaseGuard() = default;
-        RemoteLeaseGuard(const RemoteLeaseGuard&) = delete;
-        RemoteLeaseGuard& operator=(const RemoteLeaseGuard&) = delete;
-        RemoteLeaseGuard(RemoteLeaseGuard&& o) noexcept { *this = std::move(o); }
-        RemoteLeaseGuard& operator=(RemoteLeaseGuard&& o) noexcept {
-            release();
-            router = o.router; nodeIndex = o.nodeIndex; layer = o.layer;
-            vid = o.vid; token = o.token;
-            o.router = nullptr; o.token = 0;
-            return *this;
-        }
-        ~RemoteLeaseGuard() { release(); }
-
-        // Returns true on success (token != 0).  Caller decides whether
-        // a denial means "skip candidate" or "propagate failure".
-        bool acquire(WorkerNode* r, int n, int l, SizeType v) {
-            release();
-            if (!r) return false;
-            std::uint64_t t = r->SendRemoteLock(n, l, v, true, 0);
-            if (t == 0) return false;
-            router = r; nodeIndex = n; layer = l; vid = v; token = t;
-            return true;
-        }
-        void release() {
-            if (router && token) {
-                router->SendRemoteLock(nodeIndex, layer, vid, false, token);
-            }
-            router = nullptr; token = 0;
-        }
-        bool active() const { return router != nullptr && token != 0; }
-    };
-
     template <typename ValueType>
     class ExtraDynamicSearcher : public IExtraSearcher
     {
@@ -3728,11 +3684,6 @@ namespace SPTAG::SPANN {
                         }
                     }
                 }
-            } else {
-                m_versionMap->Initialize(m_opt->m_vectorSize,
-                                         p_headIndex->m_iDataBlockSize,
-                                         p_headIndex->m_iDataCapacity,
-                                         &p_localToGlobal);
             }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");

@@ -725,8 +725,6 @@ namespace SPTAG {
             }
 
             virtual ErrorCode Checkpoint(std::string prefix) { return ErrorCode::Success; }
-
-            virtual void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) {}
         };
     } // SPANN
 } // SPTAG
