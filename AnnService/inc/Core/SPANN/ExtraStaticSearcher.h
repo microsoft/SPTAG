@@ -1514,7 +1514,8 @@ namespace SPTAG
                 const std::vector<SizeType>& p_localToGlobalHIDs,
                 const std::vector<SizeType>& p_nodeHeadVectorIDs,
                 SizeType p_fullID,
-                int& p_replicaCount)
+                int& p_replicaCount,
+                std::atomic<std::uint64_t>* p_checkedLeaves = nullptr)
             {
                 if (p_queryVector == nullptr || p_index == nullptr || p_index->m_pQuantizer != nullptr ||
                     p_localToGlobalHIDs.size() != p_nodeHeadVectorIDs.size()) {
@@ -1561,6 +1562,11 @@ namespace SPTAG
                     p_queryVector, (std::max)(1, m_opt->m_internalResultNum));
                 if (p_index->SearchIndex(queryResults) != ErrorCode::Success) {
                     return false;
+                }
+                if (p_checkedLeaves != nullptr) {
+                    p_checkedLeaves->fetch_add(
+                        static_cast<std::uint64_t>((std::max)(0, queryResults.GetScanned())),
+                        std::memory_order_relaxed);
                 }
 
                 for (int i = 0; i < queryResults.GetResultNum() &&
@@ -1978,6 +1984,7 @@ namespace SPTAG
                     }
 
                     std::atomic_size_t sent(0);
+                    std::atomic<std::uint64_t> pureCheckedLeaves(0);
                     std::vector<std::thread> threads;
                     threads.reserve(numThreads);
                     for (int tid = 0; tid < numThreads; ++tid) {
@@ -2011,7 +2018,8 @@ namespace SPTAG
                                             localToGlobal,
                                             nodeHeadVectorIDs,
                                             vectorId,
-                                            localCount)) {
+                                            localCount,
+                                            &pureCheckedLeaves)) {
                                         continue;
                                     }
                                 } else {
@@ -2069,6 +2077,15 @@ namespace SPTAG
                         Helper::LogLevel::LL_Info,
                         "Node-aware static candidate search finished with %zu assignments across %zu nodes.\n",
                         assignments.size(), plannedNodeVectors.size());
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Static pure placement: assignments=%zu checkedLeaves=%llu avgLeaves=%.2f\n",
+                        assignments.size(),
+                        static_cast<unsigned long long>(pureCheckedLeaves.load()),
+                        assignments.empty()
+                            ? 0.0
+                            : static_cast<double>(pureCheckedLeaves.load()) /
+                                  static_cast<double>(assignments.size()));
                 } else {
                     if (p_opt.m_batches > 1)
                     {
