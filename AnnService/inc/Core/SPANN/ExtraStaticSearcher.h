@@ -14,6 +14,7 @@
 #include <atomic>
 #include <map>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <climits>
 #include <cstdint>
@@ -1005,6 +1006,7 @@ namespace SPTAG
                     return false;
                 }
 
+                const auto tailPhaseStart = std::chrono::steady_clock::now();
                 const SizeType headCount = p_headIndex->GetNumSamples();
                 const int replicaCount = (std::min)(requestedReplicaCount, static_cast<int>(headCount));
                 p_pureCountPerHead.resize(static_cast<size_t>(headCount));
@@ -1291,16 +1293,34 @@ namespace SPTAG
                     }
                 };
 
+                const auto tailCandidateStart = std::chrono::steady_clock::now();
                 std::vector<std::thread> workers;
                 workers.reserve(threadCount);
                 for (int t = 0; t < threadCount; ++t) workers.emplace_back(collectTailCandidates);
                 for (auto& worker : workers) worker.join();
+                const auto tailCandidateEnd = std::chrono::steady_clock::now();
                 if (tailSearchFailed.load(std::memory_order_acquire)) {
                     SPTAGLIB_LOG(
                         Helper::LogLevel::LL_Error,
                         "Single-seed cross-graph tail candidate search failed.\n");
                     return false;
                 }
+
+                auto logTailTiming = [&](const char* p_cap) {
+                    const auto tailPhaseEnd = std::chrono::steady_clock::now();
+                    const double prepareSeconds = std::chrono::duration<double>(
+                        tailCandidateStart - tailPhaseStart).count();
+                    const double candidateSeconds = std::chrono::duration<double>(
+                        tailCandidateEnd - tailCandidateStart).count();
+                    const double mergeSeconds = std::chrono::duration<double>(
+                        tailPhaseEnd - tailCandidateEnd).count();
+                    const double totalSeconds = std::chrono::duration<double>(
+                        tailPhaseEnd - tailPhaseStart).count();
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Static Phase 4 timing: prepare=%.2fs candidate=%.2fs merge=%.2fs total=%.2fs cap=%s\n",
+                        prepareSeconds, candidateSeconds, mergeSeconds, totalSeconds, p_cap);
+                };
 
                 size_t admittedTailCount = 0;
                 for (SizeType head = 0; head < headCount; ++head) {
@@ -1349,6 +1369,7 @@ namespace SPTAG
                         skippedDuplicate.load(),
                         skippedCapacity.load(),
                         p_selections.m_selections.size());
+                    logTailTiming("unbounded");
                     return true;
                 }
 
@@ -1411,6 +1432,9 @@ namespace SPTAG
                     skippedCapacity.load(),
                     tailRecordsTrimmed,
                     p_selections.m_selections.size(),
+                    unboundedTail ? "unbounded" :
+                        ("purePages+" + std::to_string(extraTailPages)).c_str());
+                logTailTiming(
                     unboundedTail ? "unbounded" :
                         ("purePages+" + std::to_string(extraTailPages)).c_str());
                 return true;
@@ -2136,7 +2160,10 @@ namespace SPTAG
                 VectorIndex::SortSelections(&selections.m_selections);
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time to sort selections:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count()) / 1000);
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Time to sort selections:%.2lf sec.\n",
+                    std::chrono::duration<double>(t3 - t2).count());
 
                 int postingSizeLimit = INT_MAX;
                 if (p_opt.m_postingPageLimit > 0)
@@ -2236,7 +2263,14 @@ namespace SPTAG
                 }
 
                 auto t4 = std::chrono::high_resolution_clock::now();
-                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Time to perform posting cut:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()) / 1000);
+                SPTAGLIB_LOG(
+                    SPTAG::Helper::LogLevel::LL_Info,
+                    "Time to perform posting cut:%.2lf sec.\n",
+                    std::chrono::duration<double>(t4 - t3).count());
+                SPTAGLIB_LOG(
+                    SPTAG::Helper::LogLevel::LL_Info,
+                    "Static Phase 3 (pure assignment/cut) time: %.2lf sec.\n",
+                    std::chrono::duration<double>(t4 - t1).count());
 
                 auto fullVectors = p_reader->GetVectorSet();
                 if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine &&
@@ -4366,7 +4400,10 @@ namespace SPTAG
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Output done...\n");
                 auto t2 = std::chrono::high_resolution_clock::now();
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time to write results:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Time to write results:%.2lf sec.\n",
+                    std::chrono::duration<double>(t2 - t1).count());
             }
 
             ErrorCode GetWritePosting(ExtraWorkSpace* p_exWorkSpace, SizeType pid, std::string& posting, bool write = false) override {
