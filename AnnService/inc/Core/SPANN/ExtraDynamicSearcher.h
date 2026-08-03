@@ -228,7 +228,7 @@ namespace SPTAG::SPANN {
         std::unique_ptr<COMMON::IVersionMap> m_versionMap;
         Options* m_opt;
         int m_layer;
-        SizeType m_initialVectorSize = 0;  // vector count at build time (before inserts)
+        SizeType m_initialGlobalTotalVectorCount = 0;  // immutable stripe base loaded from shared metadata
 
         COMMON::FineGrainedRWLock m_rwLocks;
 
@@ -439,8 +439,10 @@ namespace SPTAG::SPANN {
         // Stripe globalVID across worker nodes (only for vectors added after build).
         SizeType AllocateGlobalVID(SizeType localVID) const override {
             int numWorkers = GetNumWorkerNodes();
-            if (numWorkers <= 1 || localVID < m_initialVectorSize) return localVID;
-            return m_initialVectorSize + (localVID - m_initialVectorSize) * numWorkers + GetWorkerNodeIndex();
+            if (numWorkers <= 1 || localVID < m_initialGlobalTotalVectorCount) return localVID;
+            return m_initialGlobalTotalVectorCount
+                + (localVID - m_initialGlobalTotalVectorCount) * numWorkers
+                + GetWorkerNodeIndex();
         }
 
         // SPDKThreadPool. Called both after pool creation and from
@@ -582,49 +584,29 @@ namespace SPTAG::SPANN {
                         ws = &localWorkSpace;
                     }
 
-                    // Phase 1: per-head prep (race-condition wait,
-                    // resurrection or refusal).  Items refused at this phase
-                    // count as failures and are excluded from the MultiMerge.
+                    // A head that a concurrent Merge/Split deleted is NOT
+                    // screened out here: that check would be unlocked and
+                    // racy, and dropping the item would lose the vectors
+                    // outright (the sender has already been ACKed once the
+                    // receiver WAL accepted the batch).  Items go straight to
+                    // BatchAppend, which re-checks under the head lock and
+                    // reassigns still-current vectors to a live head -- the
+                    // same handling a local append gets.
                     // No receiver-side version-map mirror: the shared TiKV
                     // version map already holds the sender's authoritative
                     // version (see single-append callback above).
-                    std::vector<bool> alive(items.size(), true);
-                    for (size_t i = 0; i < items.size(); ++i) {
-                        auto* req = items[i];
-                        if (req->m_appendPosting.empty() || req->m_appendNum == 0) {
-                            // Defensive drop (matches Append()'s gate).
-                            alive[i] = false;
-                            ++outSuccess;
-                            continue;
-                        }
-                        
-                        bool wasMissing = !m_headIndex->ContainSample(req->m_headID, m_layer + 1);
-                        if (wasMissing) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
-                                "BatchAppendCallback: head=%lld deleted by local structural op; refusing\n",
-                                (std::int64_t)req->m_headID);
-                            alive[i] = false;
-                            ++outFail;
-                            continue;
-                        }
-                        if (wasMissing && !req->m_headVec.empty()) {
-                            DimensionType dim = static_cast<DimensionType>(
-                                req->m_headVec.size() / sizeof(ValueType));
-                            m_headIndex->AddHeadIndex(req->m_headVec.data(),
-                                req->m_headID, 0, dim, m_layer + 1, ws);
-                        }
-                    }
-
-                    // Phase 2: group surviving items by headID, then
-                    // hand the grouped map to BatchAppend so it issues
-                    // a single db->MultiMerge for all heads.
+                    // Group by headID so BatchAppend issues a single
+                    // db->MultiMerge for all heads.
                     std::unordered_map<SizeType, std::string> headAppends;
                     headAppends.reserve(items.size());
                     size_t aliveCount = 0;
                     bool anyFenced = false;
-                    for (size_t i = 0; i < items.size(); ++i) {
-                        if (!alive[i]) continue;
-                        auto* req = items[i];
+                    for (auto* req : items) {
+                        if (req->m_appendPosting.empty() || req->m_appendNum == 0) {
+                            // Defensive drop (matches Append()'s gate).
+                            ++outSuccess;
+                            continue;
+                        }
                         auto& dst = headAppends[req->m_headID];
                         if (dst.empty()) dst = std::move(req->m_appendPosting);
                         else             dst.append(req->m_appendPosting);
@@ -642,27 +624,20 @@ namespace SPTAG::SPANN {
                     }
                 });
 
-            // Head sync packets are latency notifications. The owner shard is
-            // the single durable writer; peers replay its log in order before
-            // mutating their local in-memory head index.
-            auto* headIndex = m_headIndex;
-            int layer = m_layer;
-            auto* worker = m_worker;
-            auto applyHeadSync = [headIndex, layer, worker](const HeadSyncEntry& entry) {
-                if (entry.op == HeadSyncEntry::Op::Add) {
-                    headIndex->AddHeadIndex(entry.headVector.data(), entry.headVID, 0,
-                        static_cast<DimensionType>(entry.headVector.size() / sizeof(ValueType)),
-                        layer + 1, nullptr);
-                    if (worker) worker->NoteHeadSyncApplyAdd();
-                } else {
-                    headIndex->DeleteIndex(entry.headVID, layer + 1);
-                    if (worker) worker->NoteHeadSyncApplyDelete();
-                }
-                return true;
-            };
+            // Head sync packets are either a latency notification (m_shard
+            // >= 0: "reconcile that shard now") or a publish request
+            // (m_shard < 0: "you own this head, publish the change from
+            // your shard"). Only a head's owner ever writes its shard log,
+            // so every change to a given head is totally ordered there;
+            // peers replay it in order before mutating their local
+            // in-memory head index.
             if (m_layer == 0 && m_headSyncLog) {
                 auto* headSyncLog = m_headSyncLog.get();
-                m_worker->SetHeadSyncCallback(m_layer, [headSyncLog](const HeadSyncEntry& entry) {
+                m_worker->SetHeadSyncCallback(m_layer, [this, headSyncLog](const HeadSyncEntry& entry) {
+                    if (entry.m_shard < 0) {
+                        HandleHeadSyncPublishRequest(entry);
+                        return;
+                    }
                     headSyncLog->ReconcileShard(entry.m_shard);
                 });
                 std::vector<int> shards;
@@ -672,12 +647,17 @@ namespace SPTAG::SPANN {
                 }
                 m_headSyncLog->StartReconciler(
                     std::move(shards),
-                    [applyHeadSync](const Distributed::HeadSyncLog::VersionedEntry& entry) {
-                        return applyHeadSync(entry.entry);
+                    [this](const Distributed::HeadSyncLog::VersionedEntry& entry) {
+                        ApplyHeadSyncEntry(entry.entry);
+                        return true;
                     });
             } else {
-                m_worker->SetHeadSyncCallback(m_layer, [applyHeadSync](const HeadSyncEntry& entry) {
-                    applyHeadSync(entry);
+                m_worker->SetHeadSyncCallback(m_layer, [this](const HeadSyncEntry& entry) {
+                    if (entry.m_shard < 0) {
+                        HandleHeadSyncPublishRequest(entry);
+                        return;
+                    }
+                    ApplyHeadSyncEntry(entry);
                 });
             }
 
@@ -804,6 +784,107 @@ namespace SPTAG::SPANN {
             if (target.isLocal) return false;
             if (outNodeIndex) *outNodeIndex = target.nodeIndex;
             return true;
+        }
+
+        // Durably persist head topology changes and broadcast them as a
+        // latency hint.  TiKV is the source of truth; the broadcast only
+        // tells peers which shard to reconcile early.
+        //
+        // Only the owner of a head may publish changes for it, so that each
+        // HeadSyncLog shard keeps exactly one writer and every op for a
+        // given head lands in one totally-ordered log.  A Split runs on the
+        // parent head's owner but can create child heads a peer owns, and a
+        // Merge can delete a peer-owned candidate; those entries are handed
+        // to the owning node, which republishes them from its own shard
+        // (see the HeadSync callback's publish-request branch).  Publishing
+        // by originator instead would split Add(X) and Delete(X) across two
+        // shard logs whose relative order is undefined, so a late Add(X)
+        // would resurrect a merged-away head through AddHeadIndex's
+        // ResetIndex path and the replicated head indexes would diverge.
+        bool PublishHeadSync(std::vector<HeadSyncEntry>& p_entries) {
+            if (p_entries.empty() || !m_worker) return true;
+
+            std::vector<HeadSyncEntry> owned;
+            std::unordered_map<int, std::vector<HeadSyncEntry>> delegated;
+            for (auto& entry : p_entries) {
+                int ownerNode = -1;
+                if (IsRemoteOwnedHead(entry.headVID, &ownerNode)) {
+                    // m_shard < 0 marks a publish request; the owner stamps
+                    // its own shard when it appends to its log.
+                    entry.m_shard = -1;
+                    delegated[ownerNode].emplace_back(std::move(entry));
+                } else {
+                    owned.emplace_back(std::move(entry));
+                }
+            }
+            p_entries.clear();
+
+            bool ok = true;
+            if (!owned.empty()) {
+                int shard = m_worker->GetWorkerNodeIndex();
+                if (m_headSyncLog) {
+                    // Append() stamps m_shard on every entry so peers know
+                    // which shard log to reconcile.
+                    std::uint64_t version = m_headSyncLog->Append(shard, owned);
+                    if (version == 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "PublishHeadSync: failed to persist %zu entries for shard %d\n",
+                            owned.size(), shard);
+                        ok = false;
+                    } else {
+                        // We just applied these locally, so skip replaying
+                        // our own writes on the next reconcile tick.
+                        m_headSyncLog->StoreCursor(shard, version);
+                    }
+                } else {
+                    // No durable log on this layer: still stamp the shard so
+                    // receivers treat this as a hint and not as a publish
+                    // request (which would bounce back to us forever).
+                    for (auto& entry : owned) entry.m_shard = shard;
+                }
+                if (ok) m_worker->BroadcastHeadSync(owned);
+            }
+
+            for (auto& target : delegated) {
+                m_worker->SendHeadSyncTo(target.first, std::move(target.second));
+            }
+            return ok;
+        }
+
+        // Apply one head topology change to this node's in-memory head
+        // index. Must stay idempotent: the reconciler replays a shard's log
+        // from a cursor and the publisher applies locally before publishing.
+        void ApplyHeadSyncEntry(const HeadSyncEntry& p_entry) {
+            if (p_entry.op == HeadSyncEntry::Op::Add) {
+                m_headIndex->AddHeadIndex(p_entry.headVector.data(), p_entry.headVID, 0,
+                    static_cast<DimensionType>(p_entry.headVector.size() / sizeof(ValueType)),
+                    m_layer + 1, nullptr);
+                if (m_worker) m_worker->NoteHeadSyncApplyAdd();
+            } else {
+                m_headIndex->DeleteIndex(p_entry.headVID, m_layer + 1);
+                if (m_worker) m_worker->NoteHeadSyncApplyDelete();
+            }
+        }
+
+        // A peer performed a Split/Merge that changed a head we own and is
+        // asking us, the owner, to publish it. Apply locally, then publish
+        // from our own shard so the change gets a version in the one log
+        // that orders every change to this head.
+        void HandleHeadSyncPublishRequest(const HeadSyncEntry& p_entry) {
+            int ownerNode = -1;
+            if (IsRemoteOwnedHead(p_entry.headVID, &ownerNode)) {
+                // The hash ring moved between the sender's routing decision
+                // and delivery. Forwarding could ping-pong, so drop and let
+                // the new owner's reconciler converge from the log.
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "HeadSync publish request for head %lld now owned by node %d; dropping\n",
+                    (std::int64_t)p_entry.headVID, ownerNode);
+                return;
+            }
+            ApplyHeadSyncEntry(p_entry);
+            std::vector<HeadSyncEntry> entries;
+            entries.push_back(p_entry);
+            PublishHeadSync(entries);
         }
 
         // Scan a posting buffer for an entry whose VID matches headID
@@ -1265,19 +1346,15 @@ namespace SPTAG::SPANN {
                 // version-byte read.
                 {
                     bool sawInvalid = false;
-                    // In distributed mode the version map's Count() is a per-node
-                    // local atomic. Global VIDs are striped across nodes, so a
-                    // vector owned/inserted by another node (global VID >= local
-                    // Count()) can be legitimately remote-appended into this
-                    // node's posting without growing the local count. Only treat
-                    // VID < 0 (a torn/garbage read) as corruption there; the
-                    // upper-bound check is single-node only. Downstream
-                    // BatchGetVersions handles out-of-range VIDs safely.
-                    bool distributed = (m_worker && m_worker->IsEnabled());
-                    SizeType maxVid = distributed ? -1 : m_versionMap->MaxVID();
+                    // The version map's Count() is a per-node local atomic and
+                    // global VIDs are striped across nodes, so it cannot bound
+                    // a posting's VIDs. MaxVID() is the shared cluster-wide max
+                    // allocated VID (read from TiKV metadata), advanced before
+                    // the corresponding vector is written into any posting.
+                    SizeType maxVid = m_versionMap->MaxVID();
                     for (SizeType j = 0; j < postVectorNum; j++) {
                         SizeType VID = *((SizeType*)(postingP + j * m_vectorInfoSize));
-                        if (VID < 0 || (!distributed && VID > maxVid)) { sawInvalid = true; break; }
+                        if (VID < 0 || VID > maxVid) { sawInvalid = true; break; }
                     }
                     if (sawInvalid) {
                         if (retry < 3) {
@@ -1923,22 +2000,16 @@ namespace SPTAG::SPANN {
                         headSyncEntries.push_back(std::move(entry));
                     }
                     if (!headSyncEntries.empty()) {
-                        // Durably persist to TiKV first, then broadcast.
-                        // Per design, broadcast is a best-effort latency
+                        // Route each entry to its head's owner, which
+                        // durably persists it before broadcasting. Per
+                        // design, broadcast is a best-effort latency
                         // optimization; TiKV is the source of truth.
-                        // Shard = owning node so each owner advances its
-                        // own version counter independently.
-                        if (m_headSyncLog) {
-                            int shard = m_worker->GetWorkerNodeIndex();
-                            std::uint64_t version = m_headSyncLog->Append(shard, headSyncEntries);
-                            if (version == 0) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                    "Split: failed to persist HeadSync entries for shard %d\n", shard);
-                                return ErrorCode::DiskIOFail;
-                            }
-                            m_headSyncLog->StoreCursor(shard, version);
+                        if (!PublishHeadSync(headSyncEntries)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                "Split: failed to publish HeadSync entries for head %lld\n",
+                                (std::int64_t)headID);
+                            return ErrorCode::DiskIOFail;
                         }
-                        m_worker->BroadcastHeadSync(headSyncEntries);
                     }
                 }
                 
@@ -2296,17 +2367,12 @@ namespace SPTAG::SPANN {
                     entry.headVID = deletedHeadVID;
                     entry.m_layer = m_layer;
                     headSyncEntries.push_back(std::move(entry));
-                    if (m_headSyncLog) {
-                        int shard = m_worker->GetWorkerNodeIndex();
-                        std::uint64_t version = m_headSyncLog->Append(shard, headSyncEntries);
-                        if (version == 0) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                "MergePostings: failed to persist HeadSync entries for shard %d\n", shard);
-                            return ErrorCode::DiskIOFail;
-                        }
-                        m_headSyncLog->StoreCursor(shard, version);
+                    if (!PublishHeadSync(headSyncEntries)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "MergePostings: failed to publish HeadSync delete for head %lld\n",
+                            (std::int64_t)deletedHeadVID);
+                        return ErrorCode::DiskIOFail;
                     }
-                    m_worker->BroadcastHeadSync(headSyncEntries);
                 }
                 m_stat.m_mergeNum++;
                 return ErrorCode::Success;
@@ -2447,6 +2513,11 @@ namespace SPTAG::SPANN {
 
             std::vector<float> newHeadsDist(2, 0.0f);
             std::set<SizeType> reAssignVectorsTopK;
+            // Read the shared max allocated VID once per call: for the
+            // TiKV-backed map this is a cluster-wide value (peers may have
+            // allocated higher VIDs), so it must not be derived from the
+            // local Count() nor re-read per posting.
+            const SizeType maxVid = m_versionMap->MaxVID();
             if (newHeadsVec[0]) newHeadsDist[0] = m_headIndex->ComputeDistance(headVector, newHeadsVec[0]->data());
             if (newHeadsVec[1]) newHeadsDist[1] = m_headIndex->ComputeDistance(headVector, newHeadsVec[1]->data());
             for (int i = 0; i < postingLists.size(); i++) {
@@ -2462,14 +2533,12 @@ namespace SPTAG::SPANN {
                 }
                 std::vector<uint8_t> cr_mapVers;
                 m_versionMap->BatchGetVersions(cr_vids, cr_mapVers);
-                const bool distributed = (m_worker && m_worker->IsEnabled());
-                const SizeType maxVid = distributed ? -1 : m_versionMap->MaxVID();
                 for (size_t j = 0; j < postVectorNum; j++) {
                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                     SizeType vid = cr_vids[j];
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                    if (vid < 0 || (!distributed && vid > maxVid)) {
+                    if (vid < 0 || vid > maxVid) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                      "CollectReAssign: skip invalid VID %lld in posting headID=%lld\n",
                                      (std::int64_t)vid, (std::int64_t)newHeadsID[i]);
@@ -2549,14 +2618,12 @@ namespace SPTAG::SPANN {
                     }
                     std::vector<uint8_t> nb_mapVers;
                     m_versionMap->BatchGetVersions(nb_vids, nb_mapVers);
-                    const bool distributed = (m_worker && m_worker->IsEnabled());
-                    const SizeType maxVid = distributed ? -1 : m_versionMap->MaxVID();
                     for (size_t j = 0; j < postVectorNum; j++) {
                         uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                         SizeType vid = nb_vids[j];
                         uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                        if (vid < 0 || (!distributed && vid > maxVid)) {
+                        if (vid < 0 || vid > maxVid) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                 "CollectReAssign(nearby): skip invalid VID %lld in posting headID=%lld\n",
                                 (std::int64_t)vid, (std::int64_t)HeadPrevTopK[i]);
@@ -2985,7 +3052,6 @@ namespace SPTAG::SPANN {
 
         bool LoadIndex(Options& p_opt) override {
             m_opt = &p_opt;
-            m_initialVectorSize = p_opt.m_vectorSize;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 
             std::string versionmapPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
@@ -3077,13 +3143,15 @@ namespace SPTAG::SPANN {
             } 
 	    }
             if (m_opt->m_storage == Storage::TIKVIO) {
-                m_initialVectorSize = m_versionMap->InitialCount();
-                if (m_initialVectorSize <= 0) {
+                m_initialGlobalTotalVectorCount = m_versionMap->InitialGlobalTotalCount();
+                if (m_initialGlobalTotalVectorCount <= 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                         "Invalid TiKV initial VID count for layer %d: %d\n",
-                        m_layer, m_initialVectorSize);
+                        m_layer, m_initialGlobalTotalVectorCount);
                     return false;
                 }
+            } else {
+                m_initialGlobalTotalVectorCount = p_opt.m_vectorSize;
             }
             if (m_opt->m_update) {
                 if (m_splitThreadPool == nullptr) {
@@ -3471,10 +3539,10 @@ namespace SPTAG::SPANN {
                 m_vectorDataSize = fullVectors->PerVectorDataSize();
                 m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
                 if (m_opt->m_storage == Storage::TIKVIO) {
-                    if (!m_versionMap->InitializeInitialCount(fullCount)) {
+                    if (!m_versionMap->InitializeInitialGlobalTotalCount(fullCount)) {
                         return false;
                     }
-                    m_initialVectorSize = m_versionMap->InitialCount();
+                    m_initialGlobalTotalVectorCount = m_versionMap->InitialGlobalTotalCount();
                 }
             }
             if (upperBound > 0) fullCount = upperBound;

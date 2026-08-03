@@ -284,6 +284,14 @@ namespace SPTAG::SPANN {
             m_remoteOps.BroadcastHeadSync(entries);
         }
 
+        // Send HeadSync entries to exactly one peer. Used to hand a head
+        // topology change to the node that owns the head, so that only the
+        // owner ever writes its own HeadSyncLog shard.
+        void SendHeadSyncTo(int nodeIndex, std::vector<HeadSyncEntry> entries) {
+            if (!m_enabled || entries.empty()) return;
+            m_remoteOps.SendOneHeadSync(nodeIndex, std::move(entries), /*isRetry=*/false);
+        }
+
         // v33: expose HeadSync delivery diagnostics + retry queue.
         void DumpHeadSyncStats(const char* label) const {
             m_remoteOps.DumpHeadSyncStats(label);

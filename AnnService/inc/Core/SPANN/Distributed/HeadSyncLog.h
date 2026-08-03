@@ -70,6 +70,13 @@ public:
 
     // Append a batch of entries to the given shard's log.  Returns the
     // version of the last written entry (>= 1 on success, 0 on failure).
+    //
+    // INVARIANT: a shard has exactly one writer -- the node that owns it.
+    // Head topology changes for a head a peer owns are not written here;
+    // they are routed to that owner (see ExtraDynamicSearcher::
+    // PublishHeadSync), which then appends to its own shard.  That is what
+    // makes the process-local m_appendMutex sufficient to serialize the
+    // version bump, and what gives a per-head total order.
     std::uint64_t Append(int shard, std::vector<HeadSyncEntry>& entries) {
         if (!m_db || entries.empty()) return 0;
         std::lock_guard<std::mutex> lk(GetShardAppendMutex(shard));
