@@ -274,7 +274,8 @@ void TestDataGenerator<T>::GenerateBatchTruth(const std::string &filename, std::
 }
 
 template <typename T>
-float TestDataGenerator<T>::EvaluateRecall(const std::vector<SPTAG::QueryResult> &res, std::shared_ptr<SPTAG::VectorSet> &truth, int recallK, int k, int batch, int totalbatches)
+float TestDataGenerator<T>::EvaluateRecall(const std::vector<SPTAG::QueryResult> &res, std::shared_ptr<SPTAG::VectorSet> &truth, int recallK, int k, int batch, int totalbatches,
+                                           int totalQueries, int queryOffset)
 {
     if (!truth)
     {
@@ -285,14 +286,17 @@ float TestDataGenerator<T>::EvaluateRecall(const std::vector<SPTAG::QueryResult>
     recallK = min(recallK, static_cast<int>(truth->Dimension()));
     float totalRecall = 0.0f;
     float eps = 1e-4f;
-    SizeType distbase = truth->Count() - (totalbatches + 1) * res.size();
+    // Use global queryCount when caller provides it (distributed path); otherwise
+    // assume single-node where res.size() IS the global query count.
+    SizeType queryCount = (totalQueries > 0) ? static_cast<SizeType>(totalQueries) : static_cast<SizeType>(res.size());
+    SizeType distbase = truth->Count() - (totalbatches + 1) * queryCount;
     for (SizeType i = 0; i < res.size(); ++i)
     {
-        const SizeType *truthNN = reinterpret_cast<const SizeType *>(truth->GetData()) + batch * res.size() + i;
+        const SizeType *truthNN = reinterpret_cast<const SizeType *>(truth->GetVector(batch * queryCount + queryOffset + i));
         float *truthD = nullptr;
         if (truth->Count() > distbase)
         {
-            truthD = reinterpret_cast<float *>(truth->GetVector(distbase + batch * res.size() + i));
+            truthD = reinterpret_cast<float *>(truth->GetVector(distbase + batch * queryCount + queryOffset + i));
         }
         for (int j = 0; j < recallK; ++j)
         {

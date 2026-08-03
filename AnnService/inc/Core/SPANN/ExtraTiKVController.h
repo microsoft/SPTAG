@@ -12,6 +12,7 @@
 #include "kvproto/tikvpb.grpc.pb.h"
 #include "kvproto/kvrpcpb.pb.h"
 #include "kvproto/metapb.pb.h"
+#include "kvproto/pdpb.pb.h"
 #include "kvproto/pdpb.grpc.pb.h"
 
 #include <map>
@@ -1444,6 +1445,93 @@ namespace SPTAG::SPANN
                 prefixedKeys[i] = MakePrefixedKey(keys[i]);
             }
             return MultiDeletePrefixed(prefixedKeys, timeout);
+        }
+
+        // ScanPrefix: walks `prefix` using paged RawScan and returns logical
+        // (key, value) pairs with the TiKVIO physical prefix stripped off.
+        // Used by durable WALs (e.g. BatchAppendWAL) to recover entries
+        // persisted before a crash.
+        ErrorCode ScanPrefix(const std::string& prefix,
+                             std::vector<std::pair<std::string, std::string>>& out,
+                             std::size_t maxEntries) override
+        {
+            const auto timeout = std::chrono::microseconds(5'000'000);
+            std::string physicalPrefix = MakePrefixedKey(prefix);
+            // RawScan end_key: a key strictly greater than every key in the
+            // prefix. Increment last byte; if it overflows append 0xff.
+            std::string endKey = physicalPrefix;
+            while (!endKey.empty() && static_cast<unsigned char>(endKey.back()) == 0xFF) {
+                endKey.pop_back();
+            }
+            if (endKey.empty()) {
+                endKey = physicalPrefix + std::string(1, '\xFF');
+            } else {
+                endKey.back() = static_cast<char>(static_cast<unsigned char>(endKey.back()) + 1);
+            }
+
+            std::string cursor = physicalPrefix;
+            const int pageLimit = 1024;
+            for (;;) {
+                int attempt = 0;
+                bool advanced = false;
+                std::string lastKey;
+                int count = 0;
+                for (; attempt < 10; attempt++) {
+                    auto stub = GetStubForKey(cursor);
+                    if (!stub) { RetryBackoff(attempt); continue; }
+
+                    kvrpcpb::RawScanRequest request;
+                    request.set_start_key(cursor);
+                    request.set_end_key(endKey);
+                    request.set_limit(pageLimit);
+                    SetContext(request.mutable_context(), cursor);
+
+                    kvrpcpb::RawScanResponse response;
+                    grpc::ClientContext ctx;
+                    SetDeadline(ctx, timeout);
+
+                    auto status = stub->RawScan(&ctx, request, &response);
+                    if (!status.ok()) {
+                        if (ShouldLogRetry(attempt))
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "TiKVIO::ScanPrefix gRPC error (attempt %d): %s\n",
+                                attempt + 1, status.error_message().c_str());
+                        InvalidateRegionCache(cursor);
+                        RetryBackoff(attempt);
+                        continue;
+                    }
+                    if (response.has_region_error()) {
+                        InvalidateRegionCache(cursor);
+                        RetryBackoff(attempt);
+                        continue;
+                    }
+                    count = response.kvs_size();
+                    for (int i = 0; i < count; i++) {
+                        const auto& kv = response.kvs(i);
+                        const std::string& k = kv.key();
+                        if (k.size() < physicalPrefix.size()) continue;
+                        out.emplace_back(k.substr(physicalPrefix.size() - prefix.size()), kv.value());
+                        if (maxEntries > 0 && out.size() >= maxEntries) {
+                            return ErrorCode::Success;
+                        }
+                    }
+                    if (count > 0) {
+                        lastKey = response.kvs(count - 1).key();
+                        advanced = true;
+                    }
+                    break;
+                }
+                if (attempt >= 10) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVIO::ScanPrefix exhausted retries\n");
+                    return ErrorCode::Fail;
+                }
+                if (!advanced || count < pageLimit) {
+                    return ErrorCode::Success;
+                }
+                // Advance cursor past the last seen key.
+                cursor = lastKey + std::string(1, '\0');
+            }
         }
 
         // Variants that accept already-prefixed keys (used by chunk/count helpers

@@ -121,6 +121,23 @@ namespace SPTAG {
             int m_versionChunkSize;
             int m_asyncRpcMaxInflight;
 
+            // Distributed RemotePostingOps RPC tuning
+            int m_remoteAppendChunkSize;
+            int m_remoteAppendRetry;
+            int m_remoteAppendTimeoutSec;
+            int m_remoteAppendMaxInflight;
+
+            // Async Split/Merge job retry count.  Distributed design
+            // requires async jobs to be safe-to-retry — see Async Job
+            // Fault Tolerance section.
+            int m_asyncJobMaxRetry;
+
+            // Remote lock lease TTL in milliseconds (default 30000).
+            // Bounds how long a crashed or disconnected holder can block
+            // the owner's Split/Merge path; the owner auto-reclaims the
+            // lease on expiry.  Match this to your structural-op p99.
+            int m_remoteLockTtlMs;
+
             // GPU building
             int m_gpuSSDNumTrees;
             int m_gpuSSDLeafSize;
@@ -173,6 +190,7 @@ namespace SPTAG {
             int m_endVectorNum;
             std::string m_persistentBufferPath;
             int m_appendThreadNum;
+            int m_addIndexChunkSize;
             int m_reassignThreadNum;
             int m_batch;
             std::string m_fullVectorPath;

@@ -6,6 +6,7 @@
 
 #include "IVersionMap.h"
 #include "inc/Helper/KeyValueIO.h"
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -25,6 +26,8 @@ namespace SPTAG
         ///
         /// Key schema before the TiKVIO namespace prefix is applied:
         ///   vc:{layer}                -> SizeType vector count
+        ///   vm:{layer}                -> SizeType maximum allocated VID
+        ///   vi:{layer}                -> SizeType immutable initial VID count
         ///   v:{layer}:{vid}           -> uint8_t version for one VID
         ///
         /// Different benchmark runs should use distinct TiKVKeyPrefix values,
@@ -36,6 +39,9 @@ namespace SPTAG
             std::shared_ptr<Helper::KeyValueIO> m_db;
             int m_layer{0};
             std::atomic<SizeType> m_count{0};
+            std::atomic<SizeType> m_maxVID{-1};
+            std::atomic<SizeType> m_maxVIDDurable{-1};
+            std::atomic<SizeType> m_initialGlobalTotalCount{-1};
             std::atomic<SizeType> m_deleted{0};
             uint8_t m_defaultVersion{0xff};
             std::atomic<bool> m_metadataDirty{false};
@@ -52,6 +58,16 @@ namespace SPTAG
             std::string CountKey() const
             {
                 return "vc:" + std::to_string(m_layer);
+            }
+
+            std::string MaxVIDKey() const
+            {
+                return "vm:" + std::to_string(m_layer);
+            }
+
+            std::string InitialGlobalTotalCountKey() const
+            {
+                return "vi:" + std::to_string(m_layer);
             }
 
             std::string VersionKey(SizeType vid) const
@@ -149,6 +165,91 @@ namespace SPTAG
                 }
             }
 
+            void EnsureMaxVIDAtLeast(SizeType maxVID)
+            {
+                if (maxVID < 0) return;
+
+                SizeType cached = m_maxVID.load(std::memory_order_relaxed);
+                while (cached < maxVID &&
+                       !m_maxVID.compare_exchange_weak(cached, maxVID,
+                                                       std::memory_order_relaxed)) {
+                }
+                // Gate on the *durable* watermark, not the in-memory one:
+                // a concurrent caller may have already raised m_maxVID while
+                // its TiKV CAS is still in flight. Returning here on the
+                // in-memory value would let this thread write its vector into
+                // a posting before any peer can observe the new bound, and a
+                // peer's Split/ReAssign scan would then drop that VID as
+                // out-of-range.
+                if (m_maxVIDDurable.load(std::memory_order_acquire) >= maxVID) return;
+
+                std::string currentValue;
+                bool currentNotExist = false;
+                auto getRet = m_db->Get(MaxVIDKey(), &currentValue, MaxTimeout, nullptr);
+                if (getRet == ErrorCode::Key_NotFound) {
+                    currentNotExist = true;
+                    currentValue.clear();
+                } else if (getRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVVersionMap::EnsureMaxVIDAtLeast failed to read max VID layer=%d ret=%d\n",
+                        m_layer, static_cast<int>(getRet));
+                    return;
+                }
+
+                for (int attempt = 0; attempt < 64; ++attempt) {
+                    SizeType current = -1;
+                    if (!currentNotExist && currentValue.size() >= sizeof(SizeType)) {
+                        std::memcpy(&current, currentValue.data(), sizeof(SizeType));
+                    }
+                    if (current >= maxVID) {
+                        PublishMaxVID(current);
+                        return;
+                    }
+
+                    std::string desired(reinterpret_cast<const char*>(&maxVID), sizeof(SizeType));
+                    bool swapped = false;
+                    bool actualNotExist = false;
+                    std::string actualValue;
+                    auto ret = m_db->CompareAndSwap(MaxVIDKey(), desired,
+                                                    currentNotExist, currentValue,
+                                                    MaxTimeout, nullptr,
+                                                    &swapped, &actualNotExist, &actualValue);
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVVersionMap::EnsureMaxVIDAtLeast CAS failed layer=%d ret=%d\n",
+                            m_layer, static_cast<int>(ret));
+                        return;
+                    }
+                    if (swapped) {
+                        PublishMaxVID(maxVID);
+                        return;
+                    }
+                    currentNotExist = actualNotExist;
+                    currentValue = std::move(actualValue);
+                }
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "TiKVVersionMap::EnsureMaxVIDAtLeast CAS conflict layer=%d maxVID=%d\n",
+                    m_layer, maxVID);
+            }
+
+            // Monotonically publish a max VID that is known to be durable in
+            // TiKV, keeping the in-memory hint at least as large.
+            void PublishMaxVID(SizeType maxVID)
+            {
+                SizeType durable = m_maxVIDDurable.load(std::memory_order_relaxed);
+                while (durable < maxVID &&
+                       !m_maxVIDDurable.compare_exchange_weak(durable, maxVID,
+                                                              std::memory_order_release,
+                                                              std::memory_order_relaxed)) {
+                }
+                SizeType cached = m_maxVID.load(std::memory_order_relaxed);
+                while (cached < maxVID &&
+                       !m_maxVID.compare_exchange_weak(cached, maxVID,
+                                                       std::memory_order_relaxed)) {
+                }
+            }
+
             uint8_t ReadVersionByte(SizeType vid) const
             {
                 uint8_t value = 0xfe;
@@ -213,47 +314,6 @@ namespace SPTAG
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr)
-            {
-                (void)blockSize;
-                (void)capacity;
-
-                m_count = size;
-
-                if (m_layer > 0 && globalIDs != nullptr && globalIDs->R() > 0) {
-                    m_defaultVersion = DefaultVersionForLayer();
-                    std::unordered_set<SizeType> aliveIDs;
-                    aliveIDs.reserve(static_cast<size_t>(globalIDs->R()));
-                    for (SizeType i = 0; i < globalIDs->R(); i++) {
-                        SizeType globalID = *(globalIDs->At(i));
-                        if (globalID >= 0 && globalID < size) {
-                            aliveIDs.insert(globalID);
-                        }
-                    }
-
-                    m_deleted = size;
-                    SaveMetadata();
-
-                    SizeType written = 0;
-                    for (SizeType globalID : aliveIDs) {
-                        if (PutByte(VersionKey(globalID), 0x00) == ErrorCode::Success) {
-                            written++;
-                        }
-                    }
-                    m_deleted = size - written;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=deleted, alive=%d, written=%d, deleted=%d\n",
-                        m_layer, size, static_cast<int>(aliveIDs.size()), written, m_deleted.load());
-                } else {
-                    m_defaultVersion = DefaultVersionForLayer();
-                    m_deleted = (m_defaultVersion == 0xfe) ? size : 0;
-                    SaveMetadata();
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=%s, deleted=%d\n",
-                        m_layer, size, (m_defaultVersion == 0xfe) ? "deleted" : "alive", m_deleted.load());
-                }
-            }
-
             ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override
             {
                 globalIDs.clear();
@@ -308,6 +368,84 @@ namespace SPTAG
             }
 
             SizeType Count() override { return m_count.load(); }
+            SizeType MaxVID() override
+            {
+                SizeType maxVID = -1;
+                if (ReadSizeType(MaxVIDKey(), maxVID)) {
+                    PublishMaxVID(maxVID);
+                    return maxVID;
+                }
+                return m_maxVID.load(std::memory_order_relaxed);
+            }
+            bool InitializeInitialGlobalTotalCount(SizeType size) override
+            {
+                if (size < 0) return false;
+
+                std::string currentValue;
+                bool currentNotExist = false;
+                auto getRet = m_db->Get(InitialGlobalTotalCountKey(), &currentValue, MaxTimeout, nullptr);
+                if (getRet == ErrorCode::Key_NotFound) {
+                    currentNotExist = true;
+                    currentValue.clear();
+                } else if (getRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVVersionMap::InitializeInitialGlobalTotalCount failed to read initial count layer=%d ret=%d\n",
+                        m_layer, static_cast<int>(getRet));
+                    return false;
+                }
+
+                for (int attempt = 0; attempt < 64; ++attempt) {
+                    SizeType current = -1;
+                    if (!currentNotExist && currentValue.size() >= sizeof(SizeType)) {
+                        std::memcpy(&current, currentValue.data(), sizeof(SizeType));
+                    }
+                    if (current == size) {
+                        m_initialGlobalTotalCount.store(current, std::memory_order_relaxed);
+                        return true;
+                    }
+                    if (!currentNotExist) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVVersionMap initial count mismatch layer=%d db=%d build=%d\n",
+                            m_layer, current, size);
+                        return false;
+                    }
+
+                    std::string desired(reinterpret_cast<const char*>(&size), sizeof(SizeType));
+                    bool swapped = false;
+                    bool actualNotExist = false;
+                    std::string actualValue;
+                    auto ret = m_db->CompareAndSwap(InitialGlobalTotalCountKey(), desired,
+                                                    true, currentValue,
+                                                    MaxTimeout, nullptr,
+                                                    &swapped, &actualNotExist, &actualValue);
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVVersionMap::InitializeInitialGlobalTotalCount CAS failed layer=%d ret=%d\n",
+                            m_layer, static_cast<int>(ret));
+                        return false;
+                    }
+                    if (swapped) {
+                        m_initialGlobalTotalCount.store(size, std::memory_order_relaxed);
+                        return true;
+                    }
+                    currentNotExist = actualNotExist;
+                    currentValue = std::move(actualValue);
+                }
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "TiKVVersionMap::InitializeInitialGlobalTotalCount CAS conflict layer=%d size=%d\n",
+                    m_layer, size);
+                return false;
+            }
+            SizeType InitialGlobalTotalCount() override
+            {
+                SizeType initialCount = -1;
+                if (ReadSizeType(InitialGlobalTotalCountKey(), initialCount)) {
+                    m_initialGlobalTotalCount.store(initialCount, std::memory_order_relaxed);
+                    return initialCount;
+                }
+                return m_initialGlobalTotalCount.load(std::memory_order_relaxed);
+            }
             SizeType GetDeleteCount() override { return 0; }
             std::uint64_t BufferSize() override { return static_cast<std::uint64_t>(m_count.load()) + sizeof(SizeType) * 2 + sizeof(uint8_t); }
 
@@ -371,7 +509,75 @@ namespace SPTAG
                 uint8_t storedVersion = version;
                 if (!WriteVersionByte(key, storedVersion, oldVal)) return;
                 EnsureCountAtLeast(key + 1);
+                EnsureMaxVIDAtLeast(key);
                 UpdateDeleteCount(oldVal, storedVersion);
+            }
+
+            void SetR(SizeType num) override
+            {
+                EnsureCountAtLeast(num);
+                EnsureMaxVIDAtLeast(num - 1);
+            }
+
+            // Per-VID batch write: mirrors SetVersion() for each (vid, ver) pair.
+            // Uses TiKVIO MultiPut so the writes are grouped per TiKV region
+            // and issued in parallel. m_deleted accounting is approximate
+            // here (we do not read the old byte to compute the exact delta);
+            // GetDeleteCount() returns 0 for the TiKV-backed version map so
+            // this approximation is acceptable. Callers that need precise
+            // accounting can call SetVersion() per-VID instead.
+            void BatchSetVersions(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions) override
+            {
+                size_t n = std::min(vids.size(), versions.size());
+                if (n == 0) return;
+
+                SizeType count = m_count.load();
+                SizeType maxKey = -1;
+                std::vector<std::string> keys;
+                std::vector<std::string> values;
+                keys.reserve(n);
+                values.reserve(n);
+                for (size_t i = 0; i < n; ++i) {
+                    // Only a negative VID is a genuine torn/garbage read. In
+                    // distributed mode global VIDs are striped across nodes and
+                    // the version map is a shared global keyspace in TiKV, so a
+                    // remote-owned VID >= the local Count() is legitimate (these
+                    // calls exist precisely to mirror remote-appended records).
+                    // Mirror SetVersion(): accept any vid >= 0 and grow the
+                    // local count hint to cover it.
+                    if (vids[i] < 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVVersionMap::BatchSetVersions: invalid key %d (max %d)\n",
+                            vids[i], count);
+                        continue;
+                    }
+                    if (vids[i] > maxKey) maxKey = vids[i];
+                    keys.push_back(VersionKey(vids[i]));
+                    values.push_back(std::string(1, static_cast<char>(versions[i])));
+                }
+                if (keys.empty()) return;
+                if (maxKey >= 0) EnsureCountAtLeast(maxKey + 1);
+                if (maxKey >= 0) EnsureMaxVIDAtLeast(maxKey);
+
+                auto ret = m_db->MultiPut(keys, values, MaxTimeout, nullptr);
+                if (ret == ErrorCode::Undefined) {
+                    // Backend lacks MultiPut: fall back to serial SetVersion
+                    // which preserves m_deleted accounting.
+                    for (size_t i = 0; i < n; ++i) {
+                        if (vids[i] >= 0) {
+                            SetVersion(vids[i], versions[i]);
+                        }
+                    }
+                } else if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "TiKVVersionMap::BatchSetVersions: MultiPut failed layer=%d ret=%d keys=%zu; falling back to per-VID SetVersion.\n",
+                        m_layer, static_cast<int>(ret), keys.size());
+                    for (size_t i = 0; i < n; ++i) {
+                        if (vids[i] >= 0) {
+                            SetVersion(vids[i], versions[i]);
+                        }
+                    }
+                }
             }
 
             bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
@@ -460,12 +666,7 @@ namespace SPTAG
                 return LoadMetadataFromTiKV();
             }
 
-            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
-            {
-                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
-            }
-
-            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy) override
+            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy = VersionReadPolicy::UseCache) override
             {
                 (void)policy;
                 versions.assign(vids.size(), 0xfe);
@@ -516,6 +717,21 @@ namespace SPTAG
                     return ErrorCode::Success;
                 }
                 m_count = count;
+                SizeType maxVID = -1;
+                if (!ReadSizeType(MaxVIDKey(), maxVID)) {
+                    maxVID = count > 0 ? count - 1 : -1;
+                    if (maxVID >= 0) PutSizeType(MaxVIDKey(), maxVID);
+                }
+                m_maxVID = maxVID;
+                m_maxVIDDurable = maxVID;
+                SizeType initialCount = -1;
+                if (!ReadSizeType(InitialGlobalTotalCountKey(), initialCount)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVVersionMap: missing initial count key '%s' (layer=%d); rebuild the index metadata.\n",
+                        InitialGlobalTotalCountKey().c_str(), m_layer);
+                    return ErrorCode::Fail;
+                }
+                m_initialGlobalTotalCount = initialCount;
 
                 m_defaultVersion = DefaultVersionForLayer();
 
@@ -524,8 +740,9 @@ namespace SPTAG
                 m_metadataDirty.store(false, std::memory_order_release);
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                    "TiKVVersionMap: loaded per-VID metadata layer=%d count=%d deleted=%d default=%u\n",
-                    m_layer, m_count.load(), m_deleted.load(), static_cast<unsigned>(m_defaultVersion));
+                    "TiKVVersionMap: loaded per-VID metadata layer=%d count=%d maxVID=%d initialCount=%d deleted=%d default=%u\n",
+                    m_layer, m_count.load(), m_maxVID.load(), m_initialGlobalTotalCount.load(),
+                    m_deleted.load(), static_cast<unsigned>(m_defaultVersion));
                 return ErrorCode::Success;
             }
         };

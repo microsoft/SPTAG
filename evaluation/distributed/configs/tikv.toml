@@ -1,0 +1,74 @@
+memory-usage-limit = "80GB"
+
+[server]
+# v41: 16 → 32 to handle higher concurrent gRPC streams. 96-core host has
+# plenty of headroom; previous setting was a default-y stab in the dark.
+grpc-concurrency = 32
+grpc-memory-pool-quota = "16GB"
+
+[raftstore]
+region-max-size = "512MB"
+region-split-size = "384MB"
+region-max-keys = 5120000
+region-split-keys = 3840000
+# v41: 4 → 32. apply-pool is the path raft-log → RocksDB writes go through.
+# At 32 concurrent RMW ops per store (4 local insert + 16 receiver sub-workers
+# + 4 search + 4 search-during-insert + misc), a 4-thread apply pool meant
+# ~8× queue depth, which is the primary write-amp source we observed
+# (TiKV at 7/96 cores while ops are still queueing).
+apply-pool-size = 32
+# v41: 4 → 16. store-pool routes raft messages between peers and to apply.
+store-pool-size = 16
+# v41: batch up raft entries per fsync. If we're disk-fsync bound (likely),
+# this directly amortizes the sync cost.
+raft-write-batch-size = "1MB"
+
+[storage]
+reserve-space = "1GB"
+# v41: 4 (default) → 16. KV scheduler is the front-end before raftstore.
+scheduler-worker-pool-size = 16
+
+[storage.block-cache]
+capacity = "60GB"
+
+# v41: new section. Read pool default = 0.8×CPU = 76 on 96-core host, which
+# would let reads steal CPU from writes. Cap at 32 to leave room for write
+# path. Min 8 ensures reads stay responsive under light load.
+[readpool.unified]
+max-thread-count = 32
+min-thread-count = 8
+
+[rocksdb]
+max-background-jobs = 32
+max-sub-compactions = 8
+# v41: 8 dedicated flush threads (subset of max-background-jobs). Reduces
+# the chance that compaction monopolizes background-jobs and starves flushes.
+max-background-flushes = 8
+rate-bytes-per-sec = "0"
+
+[rocksdb.defaultcf]
+# v41: 512MB → 1GB. Bigger memtable means fewer flushes (and thus fewer L0
+# files), reducing the chance of slowdown/stop write triggers under burst.
+write-buffer-size = "1GB"
+# v41: 5 → 8. More memtables = more headroom before flush back-pressure.
+max-write-buffer-number = 8
+min-write-buffer-number-to-merge = 2
+level0-file-num-compaction-trigger = 12
+# v41: 28 → 40, 40 → 60. Loosen the L0 stall thresholds so bursts have more
+# slack. With 10K-item chunks (v39+) we generate more small writes than v38
+# did, so we hit slowdown more often.
+level0-slowdown-writes-trigger = 40
+level0-stop-writes-trigger = 60
+max-bytes-for-level-base = "2GB"
+compression-per-level = ["no", "no", "no", "lz4", "lz4", "zstd", "zstd"]
+target-file-size-base = "128MB"
+
+[rocksdb.writecf]
+write-buffer-size = "128MB"
+max-write-buffer-number = 5
+
+[coprocessor]
+region-max-size = "512MB"
+region-split-size = "384MB"
+region-max-keys = 5120000
+region-split-keys = 3840000
