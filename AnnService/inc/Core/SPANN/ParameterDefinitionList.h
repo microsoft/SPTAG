@@ -193,6 +193,10 @@ DefineSSDParameter(m_endVectorNum, int, -1, "EndVectorNum")
 DefineSSDParameter(m_persistentBufferPath, std::string, std::string(""), "PersistentBufferPath")
 // Background append threadnum
 DefineSSDParameter(m_appendThreadNum, int, 1, "AppendThreadNum") // Mutable
+// Vectors per chunk when AddIndex splits a bulk insert into jobs. Smaller
+// values start flushing appends sooner (better overlap with remote nodes and
+// shorter head-lock hold); larger values batch more heads per MultiMerge.
+DefineSSDParameter(m_addIndexChunkSize, int, 32, "AddIndexChunkSize") // Mutable
 // Background reassign threadnum
 DefineSSDParameter(m_reassignThreadNum, int, 0, "ReassignThreadNum") // Mutable
 // Background process batch size

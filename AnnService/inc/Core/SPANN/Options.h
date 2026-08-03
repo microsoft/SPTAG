@@ -190,6 +190,7 @@ namespace SPTAG {
             int m_endVectorNum;
             std::string m_persistentBufferPath;
             int m_appendThreadNum;
+            int m_addIndexChunkSize;
             int m_reassignThreadNum;
             int m_batch;
             std::string m_fullVectorPath;

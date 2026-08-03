@@ -186,9 +186,87 @@ namespace SPTAG::SPANN {
             }
         };
 
+        // Shared state for one chunked AddIndex call.  The vector set is cut
+        // into fixed-size chunks; every chunk runs the full RNGSelection ->
+        // serialize -> BatchAppend pipeline for its own slice, so appends start
+        // flowing (and overlap with the remote workers) long before the last
+        // vector has been routed.  Chunks are claimed from m_nextChunk by both
+        // the calling thread and AddIndexChunkJob instances running on the
+        // shared append pool, which keeps total thread usage bounded by the
+        // pool size no matter how many AddIndex calls are in flight.
+        struct AddIndexChunkContext
+        {
+            ExtraDynamicSearcher<ValueType>* m_extraIndex;
+            std::shared_ptr<VectorSet> m_vectorSet;
+            SizeType m_begin;
+            SizeType m_vidStride;
+            SizeType m_chunkSize;
+            SizeType m_numChunks;
+            bool m_disableSplit;
+            std::atomic<std::uint64_t> m_nextChunk{ 0 };
+            std::atomic<int> m_outstanding{ 0 };
+            std::atomic<int> m_error{ static_cast<int>(ErrorCode::Success) };
+            std::mutex m_doneLock;
+            std::condition_variable m_doneCond;
+
+            void RecordError(ErrorCode p_code)
+            {
+                int expected = static_cast<int>(ErrorCode::Success);
+                m_error.compare_exchange_strong(expected, static_cast<int>(p_code));
+            }
+        };
+
+        // One unit of chunked AddIndex work on the shared append pool.  Each
+        // job runs a single chunk, so it never monopolizes a pool thread that
+        // a split is waiting behind.
+        class AddIndexChunkJob : public Helper::ThreadPool::Job
+        {
+        private:
+            std::shared_ptr<AddIndexChunkContext> m_ctx;
+        public:
+            explicit AddIndexChunkJob(std::shared_ptr<AddIndexChunkContext> ctx) : m_ctx(std::move(ctx))
+            {
+                m_ctx->m_outstanding.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            // Paired with the constructor rather than scoped inside exec() so
+            // the count is released whether the job ran, threw, or was dropped
+            // unrun when the pool aborted -- any of which would otherwise leave
+            // the AddIndex barrier waiting forever.
+            ~AddIndexChunkJob()
+            {
+                if (m_ctx->m_outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    std::lock_guard<std::mutex> lock(m_ctx->m_doneLock);
+                    m_ctx->m_doneCond.notify_all();
+                }
+            }
+
+            inline void exec(IAbortOperation* p_abort) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot support job.exec(abort)!\n");
+            }
+
+            void exec(void* p_workSpace, IAbortOperation* p_abort) override {
+                try {
+                    m_ctx->m_extraIndex->RunNextAddIndexChunk((ExtraWorkSpace*)p_workSpace, *m_ctx);
+                }
+                catch (const std::exception& e) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AddIndexChunkJob: exception %s\n", e.what());
+                    m_ctx->RecordError(ErrorCode::Fail);
+                }
+                catch (...) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AddIndexChunkJob: unknown exception\n");
+                    m_ctx->RecordError(ErrorCode::Fail);
+                }
+            }
+        };
+
         class SPDKThreadPool : public Helper::ThreadPool
         {
         public:
+            // Number of live worker threads.  Submitting work to a pool that
+            // has none would hang any caller that waits for completion.
+            size_t numThreads() const { return m_threads.size(); }
+
             void initSPDK(int numberOfThreads, ExtraDynamicSearcher<ValueType>* extraIndex) 
             {
                 m_abort.SetAbort(false);
@@ -4029,9 +4107,83 @@ namespace SPTAG::SPANN {
             if (m_opt->m_storage == Storage::TIKVIO && p_vectorSet->Count() > 0) {
                 m_versionMap->SetR(begin + (p_vectorSet->Count() - 1) * vidStride + 1);
             }
-            // Phase 1: RNGSelection + serialize + WAL for each vector, group by headID
+
+            const SizeType count = p_vectorSet->Count();
+            // A pool with no worker threads would never run what we queue, so
+            // treat it the same as having no pool at all.
+            const bool poolUsable = m_splitThreadPool && m_splitThreadPool->numThreads() > 0;
+            const SizeType poolSize = poolUsable
+                ? static_cast<SizeType>(m_splitThreadPool->numThreads()) : 1;
+            // max() absorbs a nonsensical AddIndexChunkSize from the config.
+            const SizeType chunkSize = std::max<SizeType>(1,
+                static_cast<SizeType>(m_opt->m_addIndexChunkSize));
+            const SizeType numChunks = count / chunkSize + ((count % chunkSize) ? 1 : 0);
+            if (numChunks <= 1 || !poolUsable) {
+                return AddIndexChunk(p_exWorkSpace, p_vectorSet.get(), begin, vidStride, 0, count, disableSplit);
+            }
+
+            auto ctx = std::make_shared<AddIndexChunkContext>();
+            ctx->m_extraIndex = this;
+            ctx->m_vectorSet = p_vectorSet;
+            ctx->m_begin = begin;
+            ctx->m_vidStride = vidStride;
+            ctx->m_chunkSize = chunkSize;
+            ctx->m_numChunks = numChunks;
+            ctx->m_disableSplit = disableSplit;
+
+            {
+                // Blocks until every queued chunk job has finished, on the
+                // normal path and while unwinding from an exception, so no job
+                // can outlive the vector set it is reading.
+                struct Barrier {
+                    std::shared_ptr<AddIndexChunkContext> m_ctx;
+                    ~Barrier() {
+                        std::unique_lock<std::mutex> lock(m_ctx->m_doneLock);
+                        m_ctx->m_doneCond.wait(lock, [this] {
+                            return m_ctx->m_outstanding.load(std::memory_order_acquire) == 0;
+                        });
+                    }
+                } barrier{ ctx };
+
+                // Keep a bounded number of chunk jobs queued so we neither flood
+                // the shared pool queue (which several backpressure checks read
+                // via jobsize()) nor starve it.  Jobs go to the back of the
+                // queue so splits and appends stay fairly interleaved, and each
+                // job runs a single chunk so it never monopolizes a pool thread
+                // that a split is waiting for.
+                const SizeType maxOutstanding = poolSize * 2;
+                SizeType submitted = 0;
+                while (true) {
+                    while (submitted < numChunks
+                        && ctx->m_outstanding.load(std::memory_order_relaxed) < maxOutstanding) {
+                        // The job claims its outstanding slot in its
+                        // constructor and releases it in its destructor, so
+                        // deleting an un-queued job is enough to undo it.
+                        auto* job = new AddIndexChunkJob(ctx);
+                        try {
+                            m_splitThreadPool->add(job);
+                        }
+                        catch (...) {
+                            delete job;
+                            throw;
+                        }
+                        submitted++;
+                    }
+                    // Work alongside the pool so a pool saturated with splits
+                    // degrades to serial execution instead of stalling here.
+                    if (!RunNextAddIndexChunk(p_exWorkSpace, *ctx)) break;
+                }
+            }
+            return static_cast<ErrorCode>(ctx->m_error.load(std::memory_order_relaxed));
+        }
+
+        // Run the [from, to) slice of p_vectorSet: RNGSelection + serialize +
+        // WAL for each vector, grouped by headID, then flush that group.
+        ErrorCode AddIndexChunk(ExtraWorkSpace* p_exWorkSpace, VectorSet* p_vectorSet,
+            SizeType begin, SizeType vidStride, SizeType from, SizeType to, bool disableSplit)
+        {
             std::unordered_map<SizeType, std::string> headAppends;
-            for (int v = 0; v < p_vectorSet->Count(); v++) {
+            for (SizeType v = from; v < to; v++) {
                 SizeType VID = begin + v * vidStride;
                 uint8_t version;
                 if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
@@ -4063,6 +4215,23 @@ namespace SPTAG::SPANN {
                     return ret;
             }
             return ErrorCode::Success;
+        }
+
+        // Claim the next chunk from the shared cursor and run it, returning
+        // false once the cursor is exhausted.  Called both from
+        // AddIndexChunkJob (on an append-pool thread) and from the calling
+        // thread itself, so both claim work through the same path.
+        bool RunNextAddIndexChunk(ExtraWorkSpace* p_exWorkSpace, AddIndexChunkContext& p_ctx)
+        {
+            std::uint64_t chunk = p_ctx.m_nextChunk.fetch_add(1, std::memory_order_relaxed);
+            if (chunk >= static_cast<std::uint64_t>(p_ctx.m_numChunks)) return false;
+            const SizeType count = p_ctx.m_vectorSet->Count();
+            SizeType from = static_cast<SizeType>(chunk) * p_ctx.m_chunkSize;
+            SizeType to = (count - from > p_ctx.m_chunkSize) ? (from + p_ctx.m_chunkSize) : count;
+            ErrorCode ret = AddIndexChunk(p_exWorkSpace, p_ctx.m_vectorSet.get(),
+                p_ctx.m_begin, p_ctx.m_vidStride, from, to, p_ctx.m_disableSplit);
+            if (ret != ErrorCode::Success) p_ctx.RecordError(ret);
+            return true;
         }
 
         ErrorCode DeleteIndex(SizeType p_id) override {
