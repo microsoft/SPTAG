@@ -9,10 +9,10 @@ unfilter tails, and the exact member-OR posting prefilter:
 ```bash
 cmake --build build --target spannbuilder spannaclbench -j
 
-CFG=Tools/benchmarks/build_spann_attr_sift1m_tagged_4node_static_fullfloat_tail_unbounded_prefilter.ini
+CFG=Tools/benchmarks/build_spann_attr_sift1m_tagged_4node_static_fullfloat_tail_unbounded_ordered_page.ini
 Tools/benchmarks/run_spann_attr_build.sh "$CFG"
 
-IDX=/datadisk/yfcc_fast/sptag_sift1m_tagged_vs_upstream/index_tagged_4node_static_fullfloat_tail_unbounded_prefilter
+IDX=/datadisk/yfcc_fast/sptag_sift1m_tagged_vs_upstream/index_tagged_4node_static_fullfloat_tail_unbounded_ordered_page
 QDIR=/home/v-mochengli/datasets/sift1m/multitenant/query
 
 Release/spannaclbench \
@@ -44,8 +44,8 @@ Release/spannaclbench ... \
 The SIFT1B recommendation mirrors the current SIFT1M raw static STM1 posting
 layout: raw UInt8 vectors in postings, four ACL bundles, cross edges,
 unbounded unfilter tails, team/project ordered-page pruning, and U_extra
-disabled. It retains SIFT1B's documented BKT head construction and search
-defaults rather than copying SIFT1M's KDT head graph or search budget.
+disabled. It retains SIFT1B's documented BKT construction and search defaults
+rather than copying SIFT1M-scale build or search budgets.
 
 ```bash
 CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_ordered_page.ini

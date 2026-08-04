@@ -5410,6 +5410,7 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     auto _ck_d = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                : std::chrono::high_resolution_clock::time_point{};
     bool forceDenseTagSearch = false;
+    bool adaptiveFilteredNprobeEnabled = false;
     float filteredSearchNprobeSafety = 1.0f;
     if (internalIdx != nullptr) {
         const std::string forceDenseParam = internalIdx->GetParameter("ForceDenseTagSearch", "BuildSSDIndex");
@@ -5425,6 +5426,11 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                 filteredSearchNprobeSafety = parsedFilteredSearchNprobeSafety;
             }
         }
+
+        auto* spannIndex = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
+        const auto* searchOptions = spannIndex != nullptr ? spannIndex->GetOptions() : nullptr;
+        adaptiveFilteredNprobeEnabled =
+            searchOptions != nullptr && searchOptions->m_enableAdaptiveFilteredNprobe;
     }
 
     auto _ck_afterIdx = s_wrapperTime ? std::chrono::high_resolution_clock::now()
@@ -5835,50 +5841,46 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             (void)allowedNodeMask;
             (void)headNodeToNode;
 
-        auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
-        int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
-        float vectorSel = EstimateQueryVectorSelectivity(tenantSize2, tagStats, effTagsPtr, effNumTags);
-        vectorSel = std::clamp(vectorSel / std::max(1.0f, filteredSearchNprobeSafety), 1e-6f, 1.0f);
-        searchContext.m_filterSelectivity = vectorSel;
+        if (adaptiveFilteredNprobeEnabled) {
+            auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
+            int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
+            float vectorSel = EstimateQueryVectorSelectivity(
+                tenantSize2, tagStats, effTagsPtr, effNumTags);
+            vectorSel = std::clamp(
+                vectorSel / std::max(1.0f, filteredSearchNprobeSafety), 1e-6f, 1.0f);
+            searchContext.m_filterSelectivity = vectorSel;
 
-        // Per-query selectivity fallback: only reached when the cheap stats-based
-        // estimator could not produce a sub-unity estimate. A full scan over every
-        // head (GetHeadNodeMetaSampleCount can be >1M for partitioned indexes) costs
-        // ~50% of total query time and runs on EVERY query, so cap the work by
-        // striding over at most kSelFallbackMaxSamples heads and extrapolating
-        // passCount. Set SPTAG_DISABLE_SEL_FALLBACK=1 to skip it entirely (A/B), or
-        // SPTAG_SEL_FALLBACK_MAXSAMPLES=N to tune the sample budget.
-        static const bool s_disableSelFallback = []() {
-            const char* e = std::getenv("SPTAG_DISABLE_SEL_FALLBACK");
-            return e && (e[0] == '1' || e[0] == 't' || e[0] == 'T');
-        }();
-        static const SizeType kSelFallbackMaxSamples = []() -> SizeType {
-            const char* e = std::getenv("SPTAG_SEL_FALLBACK_MAXSAMPLES");
-            int v = e ? atoi(e) : 16384;
-            return static_cast<SizeType>(v > 0 ? v : 16384);
-        }();
-        if (!s_disableSelFallback && memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && searchContext.m_filterSelectivity >= 1.0f) {
-            SizeType totalHeads = memoryIndex->GetHeadNodeMetaSampleCount();
-            SizeType stride = (totalHeads > kSelFallbackMaxSamples)
-                ? (totalHeads + kSelFallbackMaxSamples - 1) / kSelFallbackMaxSamples : 1;
-            int passCount = 0, sampled = 0;
-            for (SizeType pid = 0; pid < totalHeads; pid += stride) {
-                if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
-                sampled++;
+            // Per-query selectivity fallback is needed only by adaptive nprobe.
+            // Fixed-nprobe searches must not scan global head metadata for a value
+            // the core search path will ignore.
+            static const bool s_disableSelFallback = []() {
+                const char* e = std::getenv("SPTAG_DISABLE_SEL_FALLBACK");
+                return e && (e[0] == '1' || e[0] == 't' || e[0] == 'T');
+            }();
+            static const SizeType kSelFallbackMaxSamples = []() -> SizeType {
+                const char* e = std::getenv("SPTAG_SEL_FALLBACK_MAXSAMPLES");
+                int v = e ? atoi(e) : 16384;
+                return static_cast<SizeType>(v > 0 ? v : 16384);
+            }();
+            if (!s_disableSelFallback && memoryIndex != nullptr &&
+                memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 &&
+                searchContext.m_filterSelectivity >= 1.0f) {
+                SizeType totalHeads = memoryIndex->GetHeadNodeMetaSampleCount();
+                SizeType stride = (totalHeads > kSelFallbackMaxSamples)
+                    ? (totalHeads + kSelFallbackMaxSamples - 1) / kSelFallbackMaxSamples
+                    : 1;
+                int passCount = 0, sampled = 0;
+                for (SizeType pid = 0; pid < totalHeads; pid += stride) {
+                    if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
+                    sampled++;
+                }
+                totalHeads = (sampled > 0) ? static_cast<SizeType>(sampled) : totalHeads;
+                float fallbackVectorSel = (totalHeads > 0)
+                    ? static_cast<float>(passCount) / static_cast<float>(totalHeads)
+                    : 1.0f;
+                searchContext.m_filterSelectivity =
+                    std::clamp(fallbackVectorSel, 1e-6f, 1.0f);
             }
-            // Extrapolate sampled fraction to the full head population so the
-            // selectivity proxy keeps the same meaning as a full scan.
-            totalHeads = (sampled > 0) ? static_cast<SizeType>(sampled) : totalHeads;
-            // FIX: divide by total head count (same units), not tenantSize.
-            // passCount/tenantSize mixed head-count and vector-count units, so the
-            // fallback always reported pathologically small selectivity (~1/avgPosting).
-            // passCount/totalHeads is the fraction of heads that *may* match — a
-            // sane proxy for vector selectivity when tag distribution across
-            // postings is roughly uniform.
-            float fallbackVectorSel = (totalHeads > 0)
-                ? static_cast<float>(passCount) / static_cast<float>(totalHeads)
-                : 1.0f;
-            searchContext.m_filterSelectivity = std::clamp(fallbackVectorSel, 1e-6f, 1.0f);
         }
     }
     SPTAG::VectorIndex::ThreadLocalSearchContextGuard searchContextGuard(std::move(searchContext));

@@ -413,12 +413,15 @@ void Index<T>::SearchWithResultFilter(COMMON::QueryResultSet<T>& p_query,
                 return neighbor >= 0 && neighbor < m_pSamples.R() ? m_pSamples[neighbor] : nullptr;
             });
 
-        // Result admission is filter-aware, but the traversal control heap must
-        // remain unfiltered. Otherwise a sparse predicate leaves p_query empty,
-        // disables the native adaptive MaxCheck stopping condition, and can walk
-        // the entire bundle graph.
-        if (p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck &&
-            gnode.distance > p_space.m_Results.worst())
+        // Preserve native BKT convergence once the filtered result queue is full.
+        // If a sparse filter cannot fill it, MaxCheck remains the hard fallback.
+        const bool budgetExhausted =
+            p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck;
+        const bool resultQueueFull = p_query.worstDist() < MaxDist;
+        const bool nativeConverged =
+            resultQueueFull && gnode.distance > p_query.worstDist() &&
+            (gnode.distance > p_space.m_Results.worst() || budgetExhausted);
+        if (nativeConverged || (!resultQueueFull && budgetExhausted))
         {
             p_query.SortResult();
             return;
