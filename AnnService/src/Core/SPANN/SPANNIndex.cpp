@@ -1944,8 +1944,11 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     // We split the seed budget across all routed nodes and let each node's
     // BKT contribute its local nearest heads to the priority queue.
     //
-    // The native MaxCheck budget also governs the seed search unless an
-    // explicit SeedMaxCheck override is supplied.
+    // Seed searches only bootstrap the unified graph walk. BKT's internal
+    // convergence heap grows as MaxCheck/16, so inheriting the final MaxCheck
+    // can make it settle many candidates that are never exported to this walk.
+    // Keep the default heap aligned with the exported seed frontier; an
+    // explicit SeedMaxCheck retains control for diagnostics.
     // Unfilter behaves like one logical graph search, so seed from the entry
     // bundle only and let dense cross edges carry the traversal. Filtered queries
     // seed every routed bundle to preserve per-filter coverage. CrossSingleSeed
@@ -1964,11 +1967,15 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     } else {
         seedNodes = p_candidateNodes;
     }
-    int totalSeedK = std::max(16, std::min(p_graphResultNum, 64));
-    int perNodeSeed = std::max(4, totalSeedK / static_cast<int>(seedNodes.size()));
+    const int totalSeedK = std::max(32, std::min(p_graphResultNum, 64));
+    const int seedNodeCount = static_cast<int>(seedNodes.size());
+    const int perNodeSeed =
+        std::max(4, (totalSeedK + seedNodeCount - 1) / seedNodeCount);
+    const int defaultSeedMaxCheck =
+        std::max(1, std::min(m_options.m_maxCheck, perNodeSeed * 16));
     const int seedMaxCheck = (m_options.m_seedMaxCheck > 0)
         ? m_options.m_seedMaxCheck
-        : std::max(1, m_options.m_maxCheck);
+        : defaultSeedMaxCheck;
     int scanned = 0;
     int totalSeeded = 0;
     int seedDroppedByTag = 0;
@@ -2033,21 +2040,14 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     int uextraChecked = 0;       // U_extra heads popped/visited in the PQ
     int uextraKept = 0;          // U_extra heads committed to the result heap
 
-    // Match the original BKT termination rule: once the requested result heap
-    // can be full, let worstDist stop a settled frontier. The old 256-pop floor
-    // was custom to the cross path and forced extra graph work at TopK=10.
-    const int minChecks = p_graphResultNum;
+    // Settle at least the exported seed frontier before applying the distance
+    // cutoff. Stopping as soon as the posting heap filled left almost all graph
+    // work in the entry bundle's seed search instead of the unified graph.
+    const int minChecks = std::max(p_graphResultNum, totalSeedK);
 
     while (!crossGraphWorkspace->FrontierEmpty() && checks < maxChecks) {
         const NodeDistPair cur = crossGraphWorkspace->PopFrontier();
         const SizeType curHeadB = cur.node;
-
-        // Nodes are deduped at push time, so every popped candidate is unique and
-        // expanded exactly once (no stale-duplicate skip needed here).
-        ++checks;
-        const bool curIsUExtra = logUExtra && s_hasRoles && m_extraSearcher &&
-            m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(curHeadB));
-        if (curIsUExtra) ++uextraChecked;
 
         // Early termination: once we've done minChecks and the closest remaining
         // PQ candidate is already worse than the worst kept top-graphResultNum
@@ -2057,6 +2057,13 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         if (checks >= minChecks && cur.distance > p_queryResults->worstDist()) {
             break;
         }
+
+        // Nodes are deduped at push time, so every processed candidate is unique
+        // and expanded exactly once (no stale-duplicate skip needed here).
+        ++checks;
+        const bool curIsUExtra = logUExtra && s_hasRoles && m_extraSearcher &&
+            m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(curHeadB));
+        if (curIsUExtra) ++uextraChecked;
 
         // Push to result heap. AddPoint uses headB (m_index local hid space) to
         // match the existing post-graph code path that translates B -> tenant
