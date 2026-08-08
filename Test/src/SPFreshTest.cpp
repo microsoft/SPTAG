@@ -1326,6 +1326,8 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
 
     auto* spann = dynamic_cast<SPANN::ISPANNIndex*>(index.get());
     BOOST_REQUIRE(spann != nullptr);
+    auto* typedSpann = dynamic_cast<SPANN::Index<float>*>(index.get());
+    BOOST_REQUIRE(typedSpann != nullptr);
     spann->SetVectorTags(tags.data(), baseCount, tagCount);
     spann->SetNodeVectorAssignments(nodeAssignments);
     spann->SetPrimaryNodeVectorAssignments(nodeAssignments);
@@ -1343,6 +1345,31 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
     COMMON::QueryResultSet<float> query(data, 10);
     BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
     BOOST_CHECK_GE(query.GetResult(0)->VID, 0);
+    const SizeType fullPostingScans = query.GetScanned();
+
+    typedSpann->GetOptions()->m_unfilterPureDistanceScanPercent = 50;
+    COMMON::QueryResultSet<float> distancePrefixQuery(data, 10);
+    BOOST_REQUIRE(index->SearchIndex(distancePrefixQuery) == ErrorCode::Success);
+    BOOST_CHECK_GE(distancePrefixQuery.GetResult(0)->VID, 0);
+    BOOST_CHECK_LE(distancePrefixQuery.GetScanned(), fullPostingScans);
+    typedSpann->GetOptions()->m_unfilterPureDistanceScanPercent = 100;
+
+    {
+        VectorIndex::ThreadLocalSearchContext filterContext;
+        filterContext.m_active = true;
+        filterContext.m_queryTags.assign(tags.begin(), tags.begin() + tagCount);
+        filterContext.m_filterSelectivity = 0.5f;
+        filterContext.m_searchHeadBundleNodes = {0};
+        VectorIndex::ThreadLocalSearchContextGuard filterGuard(
+            std::move(filterContext));
+        COMMON::QueryResultSet<float> filteredQuery(data, 10);
+        BOOST_REQUIRE(index->SearchIndex(filteredQuery) == ErrorCode::Success);
+        for (int rank = 0; rank < filteredQuery.GetResultNum(); ++rank) {
+            const auto* result = filteredQuery.GetResult(rank);
+            if (result == nullptr || result->VID < 0) break;
+            BOOST_CHECK_EQUAL(result->VID % 2, 0);
+        }
+    }
 
     // STATIC snapshots deliberately reject arbitrary metadata callbacks, but the
     // empty callback still exercises the metadata-root all-bundle routing fallback.
@@ -1363,6 +1390,9 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
     BOOST_REQUIRE(std::filesystem::exists(headDirectory + "/head_metaonly.bin"));
     BOOST_REQUIRE(std::filesystem::exists(crossEdges));
     BOOST_CHECK_GT(std::filesystem::file_size(crossEdges), 0);
+    BOOST_CHECK_GT(typedSpann->GetInlineHeadCrossEdgeSize(), 0);
+    BOOST_CHECK_GT(typedSpann->GetInlineHeadCrossEdgeTotal(), 0);
+    BOOST_CHECK_GT(typedSpann->GetInlineHeadLocatorLocalBits(), 0);
     const auto nodeGraphWriteTime = std::filesystem::last_write_time(nodeGraph);
     const auto crossEdgesWriteTime = std::filesystem::last_write_time(crossEdges);
 
@@ -1425,13 +1455,52 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
         reinterpret_cast<char*>(&rebuiltMagic), sizeof(rebuiltMagic));
     BOOST_REQUIRE(rebuiltCrossEdges.good());
     BOOST_CHECK_EQUAL(rebuiltMagic, Helper::kHeadCrossEdgesMagic);
+    auto* recoveredTyped = dynamic_cast<SPANN::Index<float>*>(recovered.get());
+    BOOST_REQUIRE(recoveredTyped != nullptr);
+    BOOST_CHECK_GT(recoveredTyped->GetInlineHeadCrossEdgeSize(), 0);
+    BOOST_CHECK_GT(recoveredTyped->GetInlineHeadCrossEdgeTotal(), 0);
+    BOOST_CHECK_GT(recoveredTyped->GetInlineHeadLocatorLocalBits(), 0);
 
+    const auto nodeGraphSizeBeforeSave = std::filesystem::file_size(nodeGraph);
     BOOST_REQUIRE(recovered->SaveIndex(indexDirectory) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(std::filesystem::file_size(nodeGraph), nodeGraphSizeBeforeSave);
     recovered.reset();
+
+    const std::string crossEdgesBackup = crossEdges + ".runtime-inline-test";
+    std::filesystem::rename(crossEdges, crossEdgesBackup);
+    std::shared_ptr<VectorIndex> noCrossReload;
+    BOOST_REQUIRE(
+        VectorIndex::LoadIndex(indexDirectory, noCrossReload) == ErrorCode::Success);
+    auto* noCrossTyped =
+        dynamic_cast<SPANN::Index<float>*>(noCrossReload.get());
+    BOOST_REQUIRE(noCrossTyped != nullptr);
+    BOOST_CHECK_EQUAL(noCrossTyped->GetInlineHeadCrossEdgeSize(), 0);
+    BOOST_CHECK_EQUAL(noCrossTyped->GetInlineHeadCrossEdgeTotal(), 0);
+    BOOST_CHECK_EQUAL(noCrossTyped->GetInlineHeadLocatorLocalBits(), 0);
+    COMMON::QueryResultSet<float> noCrossQuery(data, 10);
+    BOOST_REQUIRE(noCrossReload->SearchIndex(noCrossQuery) == ErrorCode::Success);
+    BOOST_CHECK_GE(noCrossQuery.GetResult(0)->VID, 0);
+    noCrossReload.reset();
+    std::filesystem::rename(crossEdgesBackup, crossEdges);
+
+    {
+        std::ofstream orderedMarker(
+            indexDirectory + "/ordered_page_starts.bin",
+            std::ios::binary | std::ios::trunc);
+        BOOST_REQUIRE(orderedMarker.good());
+        const std::uint32_t marker = 0;
+        orderedMarker.write(reinterpret_cast<const char*>(&marker), sizeof(marker));
+        BOOST_REQUIRE(orderedMarker.good());
+    }
     std::shared_ptr<VectorIndex> reloaded;
     BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, reloaded) == ErrorCode::Success);
     auto* reloadedSpann = dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get());
     BOOST_REQUIRE(reloadedSpann != nullptr);
+    auto* reloadedTyped = dynamic_cast<SPANN::Index<float>*>(reloaded.get());
+    BOOST_REQUIRE(reloadedTyped != nullptr);
+    BOOST_CHECK_GT(reloadedTyped->GetInlineHeadCrossEdgeSize(), 0);
+    BOOST_CHECK_GT(reloadedTyped->GetInlineHeadCrossEdgeTotal(), 0);
+    BOOST_CHECK_GT(reloadedTyped->GetInlineHeadLocatorLocalBits(), 0);
     auto* reloadedRoot = dynamic_cast<KDT::Index<float>*>(
         reloadedSpann->GetMemoryIndex().get());
     BOOST_REQUIRE(reloadedRoot != nullptr);
@@ -1440,7 +1509,77 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
     COMMON::QueryResultSet<float> reloadedQuery(data, 10);
     BOOST_REQUIRE(reloaded->SearchIndex(reloadedQuery) == ErrorCode::Success);
     BOOST_CHECK_GE(reloadedQuery.GetResult(0)->VID, 0);
+    reloadedTyped->GetOptions()->m_unfilterPureDistanceScanPercent = 50;
+    COMMON::QueryResultSet<float> rejectedAttributePrefixQuery(data, 10);
+    BOOST_CHECK(
+        reloaded->SearchIndex(rejectedAttributePrefixQuery) == ErrorCode::Fail);
     std::filesystem::remove_all(indexDirectory);
+}
+
+BOOST_AUTO_TEST_CASE(StaticDistanceOrderSerialization)
+{
+    constexpr SizeType vectorCount = 4;
+    constexpr DimensionType dimension = 2;
+    ByteArray bytes = ByteArray::Alloc(
+        sizeof(float) * static_cast<size_t>(vectorCount) * dimension);
+    auto* data = reinterpret_cast<float*>(bytes.Data());
+    for (SizeType vid = 0; vid < vectorCount; ++vid) {
+        data[static_cast<size_t>(vid) * dimension] = static_cast<float>(vid);
+        data[static_cast<size_t>(vid) * dimension + 1] = static_cast<float>(vid + 10);
+    }
+    auto vectors = std::make_shared<BasicVectorSet>(
+        bytes, VectorValueType::Float, dimension, vectorCount);
+
+    const auto edge = [](SizeType node, float distance, SizeType tonode) {
+        Edge value;
+        value.node = node;
+        value.distance = distance;
+        value.tonode = tonode;
+        return value;
+    };
+    SPANN::Selection selections(vectorCount, ".");
+    selections.m_selections = {
+        edge(0, 4.0f, 2),
+        edge(0, 1.0f, 1),
+        edge(0, 4.0f, 0),
+        edge(1, 0.0f, 3),
+    };
+    std::sort(
+        selections.m_selections.begin(),
+        selections.m_selections.end(),
+        SPANN::Selection::g_edgeComparer);
+
+    SPANN::ExtraStaticSearcher<float> searcher;
+    const std::string posting = searcher.GetPostingListFullData(
+        0, 3, selections, vectors);
+    constexpr size_t stride = sizeof(int) + sizeof(float) * dimension;
+    BOOST_REQUIRE_EQUAL(posting.size(), 3 * stride);
+
+    const std::array<int, 3> expectedVIDs = {1, 0, 2};
+    for (size_t record = 0; record < expectedVIDs.size(); ++record) {
+        int vid = -1;
+        std::memcpy(&vid, posting.data() + record * stride, sizeof(vid));
+        BOOST_CHECK_EQUAL(vid, expectedVIDs[record]);
+
+        std::array<float, dimension> serialized {};
+        std::memcpy(
+            serialized.data(),
+            posting.data() + record * stride + sizeof(vid),
+            sizeof(serialized));
+        BOOST_CHECK_EQUAL(serialized[0], data[static_cast<size_t>(vid) * dimension]);
+        BOOST_CHECK_EQUAL(serialized[1], data[static_cast<size_t>(vid) * dimension + 1]);
+    }
+
+    SPANN::ExtraWorkSpace::PostingReadRange range;
+    range.SetPureDistancePrefix(5, 9, 50);
+    BOOST_CHECK_EQUAL(range.m_scanBegin, 0);
+    BOOST_CHECK_EQUAL(range.m_scanEnd, 3);
+    BOOST_CHECK_EQUAL(range.m_secondScanBegin, 5);
+    BOOST_CHECK_EQUAL(range.m_secondScanEnd, 9);
+    BOOST_CHECK_EQUAL(range.ScanCount(), 7);
+    int offset = 3;
+    BOOST_CHECK(range.NormalizeScanOffset(offset));
+    BOOST_CHECK_EQUAL(offset, 5);
 }
 
 BOOST_AUTO_TEST_CASE(TaggedPureTailUpdate)

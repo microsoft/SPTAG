@@ -111,6 +111,31 @@ namespace SPTAG
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
         public:
+            struct CrossGraphNode
+            {
+                const Index* m_index = nullptr;
+                const std::vector<SizeType>* m_localToGlobal = nullptr;
+            };
+
+            struct CrossGraphSearchContext
+            {
+                std::vector<CrossGraphNode> m_nodes;
+                int m_entryNode = -1;
+                DimensionType m_locatorLocalBits = 0;
+                SizeType m_locatorLocalMask = 0;
+            };
+
+            struct CrossGraphSearchStats
+            {
+                int m_seeded = 0;
+                int m_seedChecked = 0;
+                int m_checked = 0;
+                int m_expanded = 0;
+                int m_crossEdges = 0;
+                double m_treeSearchMs = 0.0;
+                double m_graphSearchMs = 0.0;
+            };
+
             Index()
             {
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
@@ -155,6 +180,7 @@ namespace SPTAG
 
             // Raw graph access for cross-subgraph orchestration above the BKT layer.
             inline const COMMON::RelativeNeighborhoodGraph& GetGraph() const { return m_pGraph; }
+            inline COMMON::RelativeNeighborhoodGraph& GetMutableGraph() { return m_pGraph; }
             inline DimensionType GetNeighborhoodSize() const { return m_pGraph.m_iNeighborhoodSize; }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
@@ -192,11 +218,11 @@ namespace SPTAG
             ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const;
             bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const;
             std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
+            ErrorCode SearchIndexWithCrossEdges(QueryResult& p_query,
+                                                const CrossGraphSearchContext& p_context,
+                                                int p_maxCheck,
+                                                CrossGraphSearchStats* p_stats = nullptr) const;
             ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexWithResultFilter(QueryResult& p_query,
-                                                   std::function<bool(SizeType)> resultFilter,
-                                                   int maxCheck = 0,
-                                                   bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
@@ -245,12 +271,12 @@ namespace SPTAG
                 COMMON::WorkSpace& p_space, bool p_isFirst, int batch) const;
 
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc = nullptr) const;
-            template <bool(*notDeleted)(const COMMON::LabelSet&, SizeType), bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, std::function<bool(const ByteArray&)>)>
-            void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, std::function<bool(const ByteArray&)> filterFunc) const;
-            void SearchWithResultFilter(COMMON::QueryResultSet<T>& p_query,
-                                        COMMON::WorkSpace& p_space,
-                                        bool p_searchDeleted,
-                                        const std::function<bool(SizeType)>& resultFilter) const;
+            template <bool EnableCrossEdges, bool(*notDeleted)(const COMMON::LabelSet&, SizeType), bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, std::function<bool(const ByteArray&)>)>
+            void Search(COMMON::QueryResultSet<T>& p_query,
+                        COMMON::WorkSpace& p_space,
+                        std::function<bool(const ByteArray&)> filterFunc,
+                        const CrossGraphSearchContext* p_crossContext = nullptr,
+                        CrossGraphSearchStats* p_crossStats = nullptr) const;
         };
     } // namespace BKT
 } // namespace SPTAG

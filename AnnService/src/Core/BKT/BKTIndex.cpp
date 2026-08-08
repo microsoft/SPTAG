@@ -297,174 +297,363 @@ p_space.m_iNumberOfCheckedLeaves); \
 */
 
 template <typename T>
-template <bool (*notDeleted)(const COMMON::LabelSet &, SizeType),
+template <bool EnableCrossEdges,
+          bool (*notDeleted)(const COMMON::LabelSet &, SizeType),
           bool (*isDup)(COMMON::QueryResultSet<T> &, SizeType, float),
           bool (*checkFilter)(const std::shared_ptr<MetadataSet> &, SizeType, std::function<bool(const ByteArray &)>)>
 void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space,
-                      std::function<bool(const ByteArray &)> filterFunc) const
+                      std::function<bool(const ByteArray &)> filterFunc,
+                      const CrossGraphSearchContext* p_crossContext,
+                      CrossGraphSearchStats* p_crossStats) const
 {
-    std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
+    std::shared_lock<std::shared_timed_mutex> treeLock;
+    std::vector<std::shared_lock<std::shared_timed_mutex>> crossTreeLocks;
+    if constexpr (EnableCrossEdges)
+    {
+        crossTreeLocks.reserve(p_crossContext->m_nodes.size());
+        for (const auto& nodeContext : p_crossContext->m_nodes)
+        {
+            if (nodeContext.m_index != nullptr)
+            {
+                crossTreeLocks.emplace_back(
+                    *(nodeContext.m_index->m_pTrees.m_lock));
+            }
+        }
+    }
+    else
+    {
+        treeLock = std::shared_lock<std::shared_timed_mutex>(
+            *(m_pTrees.m_lock));
+    }
+    std::chrono::high_resolution_clock::time_point treeStart;
+    if constexpr (EnableCrossEdges)
+    {
+        treeStart = std::chrono::high_resolution_clock::now();
+    }
     m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
     m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots);
-    const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1;
+    std::chrono::high_resolution_clock::time_point graphStart;
+
+    if constexpr (EnableCrossEdges)
+    {
+        graphStart = std::chrono::high_resolution_clock::now();
+        if (p_crossStats != nullptr)
+        {
+            p_crossStats->m_seeded = static_cast<int>(p_space.m_NGQueue.size());
+            p_crossStats->m_seedChecked = p_space.m_iNumberOfCheckedLeaves;
+            p_crossStats->m_treeSearchMs =
+                std::chrono::duration<double, std::milli>(
+                    graphStart - treeStart)
+                    .count();
+        }
+    }
+
+    const auto toQueryNodeCode = [p_crossContext](int p_nodeId) {
+        if (p_nodeId == p_crossContext->m_entryNode) return 0;
+        if (p_nodeId == 0) return p_crossContext->m_entryNode;
+        return p_nodeId;
+    };
+    const auto fromQueryNodeCode = [p_crossContext](int p_nodeCode) {
+        if (p_nodeCode == 0) return p_crossContext->m_entryNode;
+        if (p_nodeCode == p_crossContext->m_entryNode) return 0;
+        return p_nodeCode;
+    };
+    const auto encodeQueryLocator =
+        [p_crossContext, &toQueryNodeCode](
+            int p_nodeId, SizeType p_localId, SizeType& p_locator) -> bool {
+            if (p_nodeId < 0 || p_localId < 0 ||
+                static_cast<std::uint64_t>(p_localId) >
+                    static_cast<std::uint64_t>(p_crossContext->m_locatorLocalMask))
+            {
+                return false;
+            }
+            const std::uint64_t encoded =
+                (static_cast<std::uint64_t>(toQueryNodeCode(p_nodeId))
+                    << p_crossContext->m_locatorLocalBits) |
+                static_cast<std::uint64_t>(p_localId);
+            if (encoded >= static_cast<std::uint64_t>(MaxSize))
+            {
+                return false;
+            }
+            p_locator = static_cast<SizeType>(encoded);
+            return true;
+        };
+    const auto decodeQueryLocator =
+        [p_crossContext, &fromQueryNodeCode](
+            SizeType p_locator, int& p_nodeId, SizeType& p_localId) -> bool {
+            if (p_locator < 0) return false;
+            const int nodeCode = static_cast<int>(
+                static_cast<std::uint64_t>(p_locator) >>
+                p_crossContext->m_locatorLocalBits);
+            p_nodeId = fromQueryNodeCode(nodeCode);
+            p_localId = static_cast<SizeType>(
+                static_cast<std::uint64_t>(p_locator) &
+                static_cast<std::uint64_t>(p_crossContext->m_locatorLocalMask));
+            if (p_nodeId < 0 ||
+                p_nodeId >= static_cast<int>(p_crossContext->m_nodes.size()))
+            {
+                return false;
+            }
+            const auto& nodeContext =
+                p_crossContext->m_nodes[static_cast<size_t>(p_nodeId)];
+            return nodeContext.m_index != nullptr &&
+                nodeContext.m_localToGlobal != nullptr &&
+                p_localId >= 0 &&
+                p_localId < nodeContext.m_index->GetNumSamples() &&
+                static_cast<size_t>(p_localId) <
+                    nodeContext.m_localToGlobal->size();
+        };
+    const auto decodeStoredLocator =
+        [p_crossContext](
+            SizeType p_locator, int& p_nodeId, SizeType& p_localId) -> bool {
+            if (p_locator < 0) return false;
+            p_nodeId = static_cast<int>(
+                static_cast<std::uint64_t>(p_locator) >>
+                p_crossContext->m_locatorLocalBits);
+            p_localId = static_cast<SizeType>(
+                static_cast<std::uint64_t>(p_locator) &
+                static_cast<std::uint64_t>(p_crossContext->m_locatorLocalMask));
+            if (p_nodeId < 0 ||
+                p_nodeId >= static_cast<int>(p_crossContext->m_nodes.size()))
+            {
+                return false;
+            }
+            const auto& nodeContext =
+                p_crossContext->m_nodes[static_cast<size_t>(p_nodeId)];
+            return nodeContext.m_index != nullptr &&
+                nodeContext.m_localToGlobal != nullptr &&
+                p_localId >= 0 &&
+                p_localId < nodeContext.m_index->GetNumSamples() &&
+                static_cast<size_t>(p_localId) <
+                    nodeContext.m_localToGlobal->size();
+        };
+    const auto finishSearch = [&]() {
+        if constexpr (EnableCrossEdges)
+        {
+            if (p_crossStats != nullptr)
+            {
+                p_crossStats->m_checked = p_space.m_iNumberOfCheckedLeaves;
+                p_crossStats->m_graphSearchMs =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::high_resolution_clock::now() - graphStart)
+                        .count();
+            }
+        }
+        p_query.SortResult();
+    };
 
     while (!p_space.m_NGQueue.empty())
     {
         NodeDistPair gnode = p_space.m_NGQueue.pop();
-        SizeType tmpNode = gnode.node;
-        const SizeType *node = m_pGraph[tmpNode];
-        COMMON::PrefetchGraphNeighbors(
-            node, m_pGraph.m_iNeighborhoodSize,
-            [this](SizeType neighbor) -> const void* {
-                return neighbor >= 0 && neighbor < m_pSamples.R() ? m_pSamples[neighbor] : nullptr;
-            });
+        SizeType currentLocal = gnode.node;
+        int currentNode = 0;
+        const Index<T>* currentIndex = this;
+        const std::vector<SizeType>* currentLocalToGlobal = nullptr;
+        if constexpr (EnableCrossEdges)
+        {
+            if (!decodeQueryLocator(gnode.node, currentNode, currentLocal))
+            {
+                continue;
+            }
+            const auto& nodeContext =
+                p_crossContext->m_nodes[static_cast<size_t>(currentNode)];
+            currentIndex = nodeContext.m_index;
+            currentLocalToGlobal = nodeContext.m_localToGlobal;
+            if (p_crossStats != nullptr) ++p_crossStats->m_expanded;
+        }
+
+        SizeType resultNode = currentLocal;
+        if constexpr (EnableCrossEdges)
+        {
+            resultNode =
+                (*currentLocalToGlobal)[static_cast<size_t>(currentLocal)];
+            if (resultNode < 0) continue;
+        }
+
+        const DimensionType localEdgeCount =
+            currentIndex->m_pGraph.m_iNeighborhoodSize;
+        const DimensionType crossEdgeCount = EnableCrossEdges
+            ? currentIndex->m_pGraph.GetRuntimeEdgeSuffixSize()
+            : 0;
+        const DimensionType edgeCount = localEdgeCount + crossEdgeCount;
+        const DimensionType checkPos = localEdgeCount - 1;
+        const SizeType* node = currentIndex->m_pGraph[currentLocal];
+
+        if constexpr (!EnableCrossEdges)
+        {
+            COMMON::PrefetchGraphNeighbors(
+                node, localEdgeCount,
+                [this](SizeType neighbor) -> const void* {
+                    return neighbor >= 0 && neighbor < m_pSamples.R()
+                        ? m_pSamples[neighbor]
+                        : nullptr;
+                });
+        }
 
         if (gnode.distance <= p_query.worstDist())
         {
             SizeType checkNode = node[checkPos];
             if (checkNode < -1)
             {
-                const COMMON::BKTNode &tnode = m_pTrees[-2 - checkNode];
-                SizeType i = -tnode.childStart;
-                do
+                const auto addCollapsedResults = [&]()
                 {
-                    if (notDeleted(m_deletedID, tmpNode))
+                    const COMMON::BKTNode& tnode =
+                        currentIndex->m_pTrees[-2 - checkNode];
+                    SizeType i = -tnode.childStart;
+                    SizeType collapsedLocal = currentLocal;
+                    do
                     {
-                        if (checkFilter(m_pMetadata, tmpNode, filterFunc))
+                        SizeType collapsedResult = collapsedLocal;
+                        if constexpr (EnableCrossEdges)
                         {
-                            if (isDup(p_query, tmpNode, gnode.distance))
+                            if (collapsedLocal < 0 ||
+                                static_cast<size_t>(collapsedLocal) >=
+                                    currentLocalToGlobal->size())
+                            {
                                 break;
+                            }
+                            collapsedResult =
+                                (*currentLocalToGlobal)[
+                                    static_cast<size_t>(collapsedLocal)];
                         }
-                    }
-                    if (i <= 0)
-                        break;
-                    tmpNode = m_pTrees[i].centerid;
-                } while (i++ < tnode.childEnd);
-            }
-            else
-            {
-
-                if (notDeleted(m_deletedID, tmpNode))
-                {
-                    if (checkFilter(m_pMetadata, tmpNode, filterFunc))
-                    {
-                        p_query.AddPoint(tmpNode, gnode.distance);
-                    }
-                }
-            }
-        }
-        else
-        {
-            if (notDeleted(m_deletedID, tmpNode))
-            {
-                if (gnode.distance > p_space.m_Results.worst() ||
-                    p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck)
-                {
-                    p_query.SortResult();
-                    return;
-                }
-            }
-        }
-        for (DimensionType i = 0; i <= checkPos; i++)
-        {
-            SizeType nn_index = node[i];
-            if (nn_index < 0)
-                break;
-
-            if (p_space.CheckAndSet(nn_index))
-                continue;
-            float distance2leaf =
-                m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
-            p_space.m_iNumberOfCheckedLeaves++;
-            if (p_space.m_Results.insert(distance2leaf))
-            {
-                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf));
-            }
-        }
-        if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance)
-        {
-            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space,
-                                 m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves);
-        }
-    }
-    p_query.SortResult();
-}
-
-template <typename T>
-void Index<T>::SearchWithResultFilter(COMMON::QueryResultSet<T>& p_query,
-                                      COMMON::WorkSpace& p_space,
-                                      bool p_searchDeleted,
-                                      const std::function<bool(SizeType)>& resultFilter) const
-{
-    std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
-    m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
-    m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space,
-                         m_iNumberOfInitialDynamicPivots);
-    const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1;
-
-    while (!p_space.m_NGQueue.empty())
-    {
-        NodeDistPair gnode = p_space.m_NGQueue.pop();
-        SizeType tmpNode = gnode.node;
-        const SizeType* node = m_pGraph[tmpNode];
-        COMMON::PrefetchGraphNeighbors(
-            node, m_pGraph.m_iNeighborhoodSize,
-            [this](SizeType neighbor) -> const void* {
-                return neighbor >= 0 && neighbor < m_pSamples.R() ? m_pSamples[neighbor] : nullptr;
-            });
-
-        // Preserve native BKT convergence once the filtered result queue is full.
-        // If a sparse filter cannot fill it, MaxCheck remains the hard fallback.
-        const bool budgetExhausted =
-            p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck;
-        const bool resultQueueFull = p_query.worstDist() < MaxDist;
-        const bool nativeConverged =
-            resultQueueFull && gnode.distance > p_query.worstDist() &&
-            (gnode.distance > p_space.m_Results.worst() || budgetExhausted);
-        if (nativeConverged || (!resultQueueFull && budgetExhausted))
-        {
-            p_query.SortResult();
-            return;
-        }
-
-        if (gnode.distance <= p_query.worstDist())
-        {
-            const SizeType checkNode = node[checkPos];
-            if (checkNode < -1)
-            {
-                const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode];
-                SizeType i = -tnode.childStart;
-                do
-                {
-                    if ((p_searchDeleted || !m_deletedID.Contains(tmpNode)) &&
-                        (!resultFilter || resultFilter(tmpNode)))
-                    {
-                        if (!p_query.AddPoint(tmpNode, gnode.distance))
+                        if (collapsedResult >= 0 &&
+                            notDeleted(
+                                currentIndex->m_deletedID,
+                                collapsedLocal) &&
+                            checkFilter(
+                                currentIndex->m_pMetadata,
+                                collapsedLocal,
+                                filterFunc) &&
+                            isDup(
+                                p_query,
+                                collapsedResult,
+                                gnode.distance))
                         {
                             break;
                         }
-                    }
-                    if (i <= 0) break;
-                    tmpNode = m_pTrees[i].centerid;
-                } while (i++ < tnode.childEnd);
+                        if (i <= 0) break;
+                        collapsedLocal =
+                            currentIndex->m_pTrees[i].centerid;
+                    } while (i++ < tnode.childEnd);
+                };
+                addCollapsedResults();
             }
-            else if ((p_searchDeleted || !m_deletedID.Contains(tmpNode)) &&
-                     (!resultFilter || resultFilter(tmpNode)))
+            else if (notDeleted(
+                         currentIndex->m_deletedID,
+                         currentLocal) &&
+                     checkFilter(
+                         currentIndex->m_pMetadata,
+                         currentLocal,
+                         filterFunc))
             {
-                p_query.AddPoint(tmpNode, gnode.distance);
+                p_query.AddPoint(resultNode, gnode.distance);
             }
         }
-        for (DimensionType i = 0; i <= checkPos; ++i)
+        else if (notDeleted(
+                     currentIndex->m_deletedID,
+                     currentLocal) &&
+                 (gnode.distance > p_space.m_Results.worst() ||
+                  p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck))
         {
-            const SizeType neighbor = node[i];
-            if (neighbor < 0) break;
-            if (p_space.CheckAndSet(neighbor)) continue;
-            const float distance =
-                m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[neighbor], GetFeatureDim());
+            finishSearch();
+            return;
+        }
+
+        for (DimensionType edge = 0; edge < edgeCount; ++edge)
+        {
+            if constexpr (EnableCrossEdges)
+            {
+                constexpr DimensionType kPrefetchAhead = 4;
+                const DimensionType futureEdge =
+                    edge + kPrefetchAhead;
+                if (futureEdge < edgeCount)
+                {
+                    const bool futureIsCross =
+                        futureEdge >= localEdgeCount;
+                    const SizeType futureValue = node[futureEdge];
+                    if (futureValue >= 0)
+                    {
+                        int futureNode = currentNode;
+                        SizeType futureLocal = futureValue;
+                        SizeType futureLocator = -1;
+                        const bool valid = futureIsCross
+                            ? decodeStoredLocator(
+                                  futureValue,
+                                  futureNode,
+                                  futureLocal) &&
+                                encodeQueryLocator(
+                                    futureNode,
+                                    futureLocal,
+                                    futureLocator)
+                            : encodeQueryLocator(
+                                futureNode,
+                                futureLocal,
+                                futureLocator);
+                        if (valid)
+                        {
+                            const auto& futureContext =
+                                p_crossContext->m_nodes[
+                                    static_cast<size_t>(futureNode)];
+                            _mm_prefetch(
+                                reinterpret_cast<const char*>(
+                                    futureContext.m_index
+                                        ->m_pSamples[futureLocal]),
+                                _MM_HINT_T0);
+                        }
+                    }
+                }
+            }
+            const bool isCross =
+                EnableCrossEdges && edge >= localEdgeCount;
+            const SizeType edgeValue = node[edge];
+            if (edgeValue < 0)
+            {
+                if (isCross) break;
+                if constexpr (EnableCrossEdges)
+                    continue;
+                else
+                    break;
+            }
+
+            SizeType targetKey = edgeValue;
+            int targetNode = currentNode;
+            SizeType targetLocal = edgeValue;
+            const Index<T>* targetIndex = currentIndex;
+            if constexpr (EnableCrossEdges)
+            {
+                const bool valid = isCross
+                    ? decodeStoredLocator(
+                          edgeValue, targetNode, targetLocal) &&
+                        encodeQueryLocator(
+                            targetNode, targetLocal, targetKey)
+                    : encodeQueryLocator(
+                        targetNode, targetLocal, targetKey);
+                if (!valid) continue;
+                targetIndex =
+                    p_crossContext->m_nodes[
+                        static_cast<size_t>(targetNode)]
+                        .m_index;
+                if (isCross && p_crossStats != nullptr)
+                {
+                    ++p_crossStats->m_crossEdges;
+                }
+            }
+
+            if (targetLocal < 0 ||
+                targetLocal >= targetIndex->m_pSamples.R() ||
+                p_space.CheckAndSet(targetKey))
+            {
+                continue;
+            }
+            const float distance = m_fComputeDistance(
+                p_query.GetQuantizedTarget(),
+                targetIndex->m_pSamples[targetLocal],
+                GetFeatureDim());
             ++p_space.m_iNumberOfCheckedLeaves;
             if (p_space.m_Results.insert(distance))
             {
-                p_space.m_NGQueue.insert(NodeDistPair(neighbor, distance));
+                p_space.m_NGQueue.insert(
+                    NodeDistPair(targetKey, distance));
             }
         }
         if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance)
@@ -473,7 +662,7 @@ void Index<T>::SearchWithResultFilter(COMMON::QueryResultSet<T>& p_query,
                                  m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves);
         }
     }
-    p_query.SortResult();
+    finishSearch();
 }
 
 template <typename T>
@@ -607,35 +796,35 @@ void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace
     switch (flags)
     {
     case 0b000:
-        Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(
+        Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(
             p_query, p_space, filterFunc);
         break;
     case 0b001:
-        Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(
+        Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(
             p_query, p_space, filterFunc);
         break;
     case 0b010:
-        Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(
+        Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(
             p_query, p_space, filterFunc);
         break;
     case 0b011:
-        Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(
+        Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(
             p_query, p_space, filterFunc);
         break;
     case 0b100:
-        Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space,
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space,
                                                                                                   filterFunc);
         break;
     case 0b101:
-        Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space,
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space,
                                                                                                  filterFunc);
         break;
     case 0b110:
-        Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space,
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space,
                                                                                                   filterFunc);
         break;
     case 0b111:
-        Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space,
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space,
                                                                                                  filterFunc);
         break;
     default:
@@ -816,27 +1005,6 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
 }
 
 template <typename T>
-ErrorCode Index<T>::SearchIndexWithResultFilter(QueryResult& p_query,
-                                                 std::function<bool(SizeType)> resultFilter,
-                                                 int maxCheck,
-                                                 bool p_searchDeleted) const
-{
-    if (!m_bReady)
-        return ErrorCode::EmptyIndex;
-
-    auto workSpace = RentWorkSpace(p_query.GetResultNum(), nullptr, maxCheck);
-    auto& queryResults = *((COMMON::QueryResultSet<T>*)&p_query);
-    if (m_pQuantizer && !queryResults.HasQuantizedTarget())
-    {
-        queryResults.SetTarget(queryResults.GetTarget(), m_pQuantizer);
-    }
-    SearchWithResultFilter(queryResults, *workSpace, p_searchDeleted, resultFilter);
-    queryResults.SetScanned(workSpace->m_iNumberOfCheckedLeaves);
-    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
-    return ErrorCode::Success;
-}
-
-template <typename T>
 std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool p_searchDeleted, std::function<bool(const ByteArray&)> p_filterFunc, int p_maxCheck) const
 {
     if (!m_bReady)
@@ -879,15 +1047,81 @@ template <typename T> ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_pt
 
 template <typename T> std::unique_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc, int p_maxCheck) const
 {
+    const int maxCheck = p_maxCheck > 0 ? p_maxCheck : m_iMaxCheck;
     auto workSpace = m_workSpaceFactory->GetWorkSpace();
     if (!workSpace)
     {
         workSpace.reset(new COMMON::WorkSpace());
-        workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+        workSpace->Initialize(std::max(16, maxCheck), m_iHashTableExp);
     }
-    workSpace->Reset(p_maxCheck > 0? p_maxCheck: m_iMaxCheck, batch);
+    workSpace->Reset(maxCheck, batch);
     workSpace->m_filterFunc = p_filterFunc;
     return std::move(workSpace);
+}
+
+template <typename T>
+ErrorCode Index<T>::SearchIndexWithCrossEdges(
+    QueryResult& p_query,
+    const CrossGraphSearchContext& p_context,
+    int p_maxCheck,
+    CrossGraphSearchStats* p_stats) const
+{
+    if (!m_bReady)
+        return ErrorCode::EmptyIndex;
+    if (p_context.m_entryNode < 0 ||
+        p_context.m_entryNode >= static_cast<int>(p_context.m_nodes.size()) ||
+        p_context.m_locatorLocalBits <= 0 ||
+        p_context.m_locatorLocalMask < 0)
+    {
+        return ErrorCode::Fail;
+    }
+
+    const auto& entryContext =
+        p_context.m_nodes[static_cast<size_t>(p_context.m_entryNode)];
+    if (entryContext.m_index != this ||
+        entryContext.m_localToGlobal == nullptr ||
+        entryContext.m_localToGlobal->size() !=
+            static_cast<size_t>(GetNumSamples()))
+    {
+        return ErrorCode::Fail;
+    }
+    for (const auto& nodeContext : p_context.m_nodes)
+    {
+        if (nodeContext.m_index == nullptr)
+        {
+            if (nodeContext.m_localToGlobal != nullptr)
+                return ErrorCode::Fail;
+            continue;
+        }
+        if (!nodeContext.m_index->m_bReady ||
+            nodeContext.m_localToGlobal == nullptr ||
+            nodeContext.m_localToGlobal->size() !=
+                static_cast<size_t>(
+                    nodeContext.m_index->GetNumSamples()) ||
+            nodeContext.m_index->GetFeatureDim() != GetFeatureDim())
+        {
+            return ErrorCode::Fail;
+        }
+    }
+
+    if (p_stats != nullptr)
+        *p_stats = CrossGraphSearchStats();
+
+    auto workSpace =
+        RentWorkSpace(p_query.GetResultNum(), nullptr, p_maxCheck);
+    auto& results = *((COMMON::QueryResultSet<T>*)&p_query);
+    if (m_pQuantizer && !results.HasQuantizedTarget())
+    {
+        results.SetTarget(results.GetTarget(), m_pQuantizer);
+    }
+    Search<true,
+           StaticDispatch::AlwaysTrue,
+           StaticDispatch::CheckDup,
+           StaticDispatch::AlwaysTrue>(
+        results, *workSpace, nullptr, &p_context, p_stats);
+    results.SetScanned(workSpace->m_iNumberOfCheckedLeaves);
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+    return ErrorCode::Success;
 }
 
 template <typename T> ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
@@ -904,7 +1138,12 @@ template <typename T> ErrorCode Index<T>::SearchTree(QueryResult &p_query) const
 
     COMMON::QueryResultSet<T> *p_results = (COMMON::QueryResultSet<T> *)&p_query;
     m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
-    m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+    m_pTrees.SearchTrees(
+        m_pSamples,
+        m_fComputeDistance,
+        *p_results,
+        *workSpace,
+        m_iNumberOfInitialDynamicPivots);
     BasicResult *res = p_query.GetResults();
     for (int i = 0; i < p_query.GetResultNum(); i++)
     {

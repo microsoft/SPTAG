@@ -150,7 +150,6 @@ namespace SPTAG {
             int m_ioThreads;
             int m_searchPostingPageLimit;
             int m_searchInternalResultNum;
-            int m_seedMaxCheck;
             bool m_collectPostingContributionStats;
             bool m_forceDenseTagSearch;
             int m_directSparseMaxPostings;
@@ -162,10 +161,8 @@ namespace SPTAG {
             bool m_logPhaseTime;
             bool m_unifiedNprobeBudget;
             double m_multiNodeBudgetKeepRatio;
-            int m_crossSingleSeed;
             bool m_disableCrossEdges;
             bool m_filterKeepCross;
-            int m_crossExpandLimit;
             bool m_disableCrossSubgraph;
             bool m_logUExtra;
             bool m_logCrossStats;
@@ -177,6 +174,7 @@ namespace SPTAG {
             bool m_ablateTail;
             bool m_unfilterPurePages;
             int m_unfilterExtraTailPages;
+            int m_unfilterPureDistanceScanPercent;
             bool m_enableHierPostingFilter;
             int m_rerank;
             bool m_recall_analysis;

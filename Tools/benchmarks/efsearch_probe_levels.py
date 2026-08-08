@@ -37,23 +37,27 @@ def read_effective_ssd_ini_values(index_dir: str, tenant: int) -> dict[str, str]
         if "=" not in line:
             continue
         key, value = (part.strip() for part in line.split("=", 1))
-        if section == "BuildSSDIndex":
+        section_key = section.lower()
+        key = key.lower()
+        if section_key == "base":
             values[key] = value
-        elif section == "SearchSSDIndex":
-            if key in {"isExecute", "BuildSsdIndex"}:
+        elif section_key == "buildssdindex":
+            values[key] = value
+        elif section_key == "searchssdindex":
+            if key in {"isexecute", "buildssdindex"}:
                 continue
-            if key == "InternalResultNum":
-                key = "SearchInternalResultNum"
-            elif key == "PostingPageLimit":
-                key = "SearchPostingPageLimit"
+            if key == "internalresultnum":
+                key = "searchinternalresultnum"
+            elif key == "postingpagelimit":
+                key = "searchpostingpagelimit"
             values[key] = value
     return values
 
 
 def read_ini_value(index_dir: str, tenant: int, key: str) -> str:
     values = read_effective_ssd_ini_values(index_dir, tenant)
-    if key in values:
-        return values[key]
+    if key.lower() in values:
+        return values[key.lower()]
     raise ValueError(
         f"Missing {key} in {Path(index_dir) / f'tenant_{tenant}' / 'indexloader.ini'}"
     )
@@ -80,12 +84,12 @@ def main() -> None:
     index_dir = os.environ["INDEX_DIR"]
     query_dir = os.environ["QUERY_DIR"]
     tenant = int(os.environ.get("TENANT", "0"))
-    maxcheck = int(os.environ.get("TEST_MAXCHECK", "0"))
+    maxcheck = int(read_ini_value(index_dir, tenant, "MaxCheck"))
     warmup = int(os.environ.get("WARMUP", "200"))
     num_q = int(os.environ.get("NUM_QUERIES", "2000"))
     measure_offset = int(os.environ.get("MEASURE_OFFSET", "0"))
     levels = [s.strip() for s in os.environ.get("LEVELS", "unfilter,org").split(",") if s.strip()]
-    value_type = os.environ.get("SPTAG_VALUE_TYPE", "Int8")
+    value_type = read_ini_value(index_dir, tenant, "ValueType")
     topk = int(
         os.environ.get(
             "TOPK", read_ini_value(index_dir, tenant, "ResultNum")
@@ -94,9 +98,6 @@ def main() -> None:
     rerank_l = int(read_ini_value(index_dir, tenant, "RerankL"))
     configured_search_internal_result_num = int(
         read_ini_value(index_dir, tenant, "SearchInternalResultNum")
-    )
-    seed_max_check = int(
-        read_ini_value_or_default(index_dir, tenant, "SeedMaxCheck", "0")
     )
     configured_force_dense_tag_search = parse_bool(
         read_ini_value(index_dir, tenant, "ForceDenseTagSearch"),
@@ -188,7 +189,6 @@ def main() -> None:
             "level": level,
             "nprobe": effective_nprobe,
             "rerank_l": rerank_l,
-            "seed_max_check": seed_max_check,
             "configured_search_internal_result_num": configured_search_internal_result_num,
             "num_queries": int(nq),
             "measure_offset": int(measure_offset),

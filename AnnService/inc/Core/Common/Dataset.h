@@ -315,6 +315,44 @@ namespace SPTAG
             inline const DimensionType& C() const { return mycols; }
             inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() * C(); }
 
+            ErrorCode RepackColumns(DimensionType p_cols)
+            {
+                if (p_cols <= 0 || colStart != 0 || incRows != 0 || data == nullptr) {
+                    return ErrorCode::Fail;
+                }
+                if (p_cols == mycols) return ErrorCode::Success;
+
+                const size_t rowCount = static_cast<size_t>(rows);
+                const size_t columnCount = static_cast<size_t>(p_cols);
+                if (rowCount > 0 &&
+                    columnCount > (std::numeric_limits<size_t>::max)() / sizeof(T) / rowCount) {
+                    return ErrorCode::MemoryOverFlow;
+                }
+
+                const size_t newStride = columnCount * sizeof(T);
+                char* replacement = static_cast<char*>(ALIGN_ALLOC(rowCount * newStride));
+                if (replacement == nullptr) return ErrorCode::MemoryOverFlow;
+                std::memset(replacement, -1, rowCount * newStride);
+
+                const size_t copyBytes =
+                    static_cast<size_t>((std::min)(mycols, p_cols)) * sizeof(T);
+                for (SizeType row = 0; row < rows; ++row) {
+                    std::memcpy(
+                        replacement + static_cast<size_t>(row) * newStride,
+                        At(row),
+                        copyBytes);
+                }
+
+                char* previous = data;
+                const bool releasePrevious = ownData;
+                data = replacement;
+                ownData = true;
+                cols = static_cast<DimensionType>(newStride);
+                mycols = p_cols;
+                if (releasePrevious) ALIGN_FREE(previous);
+                return ErrorCode::Success;
+            }
+
 #define GETITEM(index) \
             if (index >= rows) { \
             SizeType incIndex = index - rows; \
@@ -399,7 +437,9 @@ namespace SPTAG
                 IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&(r));
                 IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)(&c));
 
-                if (data == nullptr || r != rows + incRows) Initialize(r, c, blockSize, capacity);
+                if (data == nullptr || r != rows + incRows || c != mycols) {
+                    Initialize(r, c, blockSize, capacity);
+                }
                 
                 for (SizeType i = 0; i < r; i++) {
                     IOBINARY(pInput, ReadBinary, sizeof(T) * mycols, (char*)At(i));

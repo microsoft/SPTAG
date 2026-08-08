@@ -153,6 +153,7 @@ namespace SPTAG
                 return nullptr;
             }
             inline const COMMON::RelativeNeighborhoodGraph& GetGraph() const { return m_pGraph; }
+            inline COMMON::RelativeNeighborhoodGraph& GetMutableGraph() { return m_pGraph; }
             inline DimensionType GetNeighborhoodSize() const { return m_pGraph.m_iNeighborhoodSize; }
             inline bool ContainSample(const SizeType idx) const {
                 if (m_bMetadataOnly) return idx >= 0 && idx < m_metaOnlyCount;
@@ -190,10 +191,6 @@ namespace SPTAG
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchIndexWithMaxCheck(QueryResult& p_query, int maxCheck,
                                               bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexWithResultFilter(QueryResult& p_query,
-                                                   std::function<bool(SizeType)> resultFilter,
-                                                   int maxCheck = 0,
-                                                   bool p_searchDeleted = false) const;
 
             std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
             ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const;
@@ -242,10 +239,6 @@ namespace SPTAG
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const;
             template <typename Q, bool(*notDeleted)(const COMMON::LabelSet&, SizeType)>
             void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const;
-            template <typename Q, bool(*notDeleted)(const COMMON::LabelSet&, SizeType)>
-            void SearchWithResultFilter(COMMON::QueryResultSet<T>& p_query,
-                                        COMMON::WorkSpace& p_space,
-                                        const std::function<bool(SizeType)>& resultFilter) const;
         };
     } // namespace KDT
 } // namespace SPTAG

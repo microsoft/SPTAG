@@ -57,55 +57,6 @@ namespace SPTAG
             SizeType assignmentCount = 0;
         };
 
-        struct CrossGraphCandidateCompare
-        {
-            bool operator()(const NodeDistPair& p_left, const NodeDistPair& p_right) const
-            {
-                return p_left.distance > p_right.distance;
-            }
-        };
-
-        struct CrossGraphWorkSpace : public COMMON::WorkSpace
-        {
-            void Prepare(int p_maxCheck, int p_resultNum, int p_hashExp)
-            {
-                if (m_capacity < p_maxCheck || m_hashExp != p_hashExp) {
-                    Initialize(p_maxCheck, p_hashExp);
-                    m_capacity = p_maxCheck;
-                    m_hashExp = p_hashExp;
-                }
-                Reset(p_maxCheck, p_resultNum);
-                const size_t frontierCapacity = std::max(
-                    static_cast<size_t>(p_maxCheck) * 2,
-                    static_cast<size_t>(p_resultNum) * 16);
-                if (m_frontier.capacity() < frontierCapacity) {
-                    m_frontier.reserve(frontierCapacity);
-                }
-                m_frontier.clear();
-            }
-
-            bool FrontierEmpty() const { return m_frontier.empty(); }
-
-            void PushFrontier(const NodeDistPair& p_candidate)
-            {
-                m_frontier.push_back(p_candidate);
-                std::push_heap(m_frontier.begin(), m_frontier.end(), CrossGraphCandidateCompare{});
-            }
-
-            NodeDistPair PopFrontier()
-            {
-                std::pop_heap(m_frontier.begin(), m_frontier.end(), CrossGraphCandidateCompare{});
-                NodeDistPair candidate = m_frontier.back();
-                m_frontier.pop_back();
-                return candidate;
-            }
-
-        private:
-            int m_capacity = 0;
-            int m_hashExp = -1;
-            std::vector<NodeDistPair> m_frontier;
-        };
-
         template<typename T>
 	    class SPANNResultIterator;
 
@@ -147,16 +98,18 @@ namespace SPTAG
             mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
             mutable std::mutex m_globalHeadVIDToLocalHIDMutex;
             mutable std::mutex m_headBundleLoadLock;
-            // Cross-edge graph, resolved into the same dense head-local-id (B) space as
-            // ordinary RNG neighbors. This keeps cross edges on the hot path as plain
-            // adjacency-list reads: source B -> targets B[], with target B resolved to
-            // (bundle node, local id) by dense arrays. It replaces the old
-            // unordered_map<globalVID, vector<globalVID>> + per-edge hash lookups.
-            mutable std::vector<std::uint32_t> m_headCrossEdgeOffsetByB;  // UINT32_MAX => no edges
-            mutable std::vector<std::uint16_t> m_headCrossEdgeCountByB;
-            mutable std::vector<SizeType> m_headCrossEdgeTargetsB;
+            // Runtime-only cross edges are appended directly after each bundle RNG row.
+            // The on-disk head_cross_edges.bin format remains unchanged; load resolves
+            // each target into an encoded (bundle, local-id) locator. Native BKT/KDT
+            // searches keep using the ordinary bundle-local RNG prefix.
+            mutable DimensionType m_headInlineCrossEdgeSize = 0;
+            mutable size_t m_headInlineCrossEdgeTotal = 0;
+            mutable DimensionType m_headLocatorLocalBits = 0;
+            mutable SizeType m_headLocatorLocalMask = 0;
             mutable std::vector<std::int16_t> m_headBundleNodeByB;        // -1 if unresolved
             mutable std::vector<SizeType> m_headBundleLocalByB;           // local id inside bundle
+            mutable std::atomic<bool> m_headBundleDenseMapsReady{false};
+            mutable std::mutex m_headBundleDenseMapsMutex;
             mutable std::atomic<bool> m_headCrossEdgesLoaded{false};
             mutable std::mutex m_headCrossEdgesMutex;
             mutable std::atomic<bool> m_headCrossEdgesDirty{false};
@@ -189,7 +142,6 @@ namespace SPTAG
             COMMON::VersionLabel m_versionMap;
             std::shared_ptr<IExtraSearcher> m_extraSearcher;
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
-            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<CrossGraphWorkSpace>> m_crossGraphWorkSpaceFactory;
 
             Options m_options;
 
@@ -221,8 +173,6 @@ namespace SPTAG
             Index()
             {
                 m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
-                m_crossGraphWorkSpaceFactory =
-                    std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<CrossGraphWorkSpace>>();
                 //m_workSpaceFactory = std::make_unique<SPTAG::COMMON::SharedPoolWorkSpaceFactory<ExtraWorkSpace>>();
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
@@ -235,6 +185,9 @@ namespace SPTAG
             inline Options* GetOptions() { return &m_options; }
             inline const std::vector<HeadBundleNodeInfo>& GetHeadBundleNodes() const { return m_headBundleNodes; }
             inline bool HasHeadBundleNodes() const { return !m_headBundleNodes.empty(); }
+            inline DimensionType GetInlineHeadCrossEdgeSize() const { return m_headInlineCrossEdgeSize; }
+            inline size_t GetInlineHeadCrossEdgeTotal() const { return m_headInlineCrossEdgeTotal; }
+            inline DimensionType GetInlineHeadLocatorLocalBits() const { return m_headLocatorLocalBits; }
 
             // v5: Σ bundle.headCount — canonical "total head count" after cross-edges unified
             // the per-bundle subgraphs into one logical graph. Replaces m_index->GetNumSamples()
@@ -371,6 +324,7 @@ namespace SPTAG
             ErrorCode InitializeHeadBundleRuntime(const std::string& p_baseDir);
             ErrorCode SetupMetadataOnlyHeadStore(const std::string& p_baseDir);
             ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;
+            ErrorCode EnsureHeadBundleDenseMaps() const;
             ErrorCode LoadHeadCrossEdges() const;
             ErrorCode EnsureStaticTailCrossEdges();
             bool SearchStaticTailCrossGraph(
@@ -378,18 +332,14 @@ namespace SPTAG
                 int p_ownerNode,
                 int p_candidateCount,
                 std::vector<std::pair<SizeType, float>>& p_candidates) const;
-
-            // Multi-BKT cross-subgraph unified best-first traversal. Used when
-            // a query tag scope spans multiple routing nodes and cross-edge
-            // data is available. Uses the entry node's BKT to seed, then
-            // unwinds a single priority queue across all bundle nodes via
-            // RNG edges (intra-node) + cross-edges (inter-node).
-            ErrorCode CrossSubgraphGraphSearch(
-                QueryResult& p_query,
+            ErrorCode SearchHeadBundleCrossEdgesNative(
+                COMMON::QueryResultSet<T>* p_queryResults,
+                int p_entryNode,
+                int p_graphResultNum,
+                int& p_scannedOut) const;
+            ErrorCode SearchHeadBundlesNative(
                 COMMON::QueryResultSet<T>* p_queryResults,
                 const std::vector<int>& p_candidateNodes,
-                const std::uint32_t* p_queryTags,
-                int p_numQueryTags,
                 int p_graphResultNum,
                 int& p_scannedOut) const;
 

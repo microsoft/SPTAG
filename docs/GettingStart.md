@@ -175,6 +175,176 @@ SearchPostingPageLimit=3
 
 ```
 
+#### **SIFT1B with attributes (raw STATIC STM1)**
+
+For SIFT1B with four categorical attributes (`org`, `dept`, `team`, and
+`project`) plus one numeric attribute (`price`), use the native sectioned INI
+below. The tracked copy is
+`Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini`.
+The INI is the single source of truth for build and search parameters; do not
+override them with `SPTAG_*` environment variables.
+
+The tag file is headerless row-major `uint32`, with five values per vector in
+the order `[org, dept, team, project, price]`. The group-tag file contains the
+`org` value for each vector, one integer per line.
+
+```ini
+[Base]
+VectorPath=sift1b/sift1b_base.u8bin
+VectorOffset=8
+VectorCount=1000000000
+Dim=128
+VectorType=UInt8
+DistCalcMethod=L2
+IndexAlgoType=BKT
+IndexDirectory=sift1b/sift1b_spann_raw_static_tail_unbounded_distance_order
+
+[Tags]
+TagFile=sift1b/sift1b_build/sift1b_tags5.u32
+TagOffset=0
+NumTagsPerVec=5
+Tenant=0
+
+[Build]
+BuildSignatures=true
+WithMetaIndex=false
+ShareBuildOwnership=true
+
+[SelectHead]
+isExecute=true
+SelectHeadType=PerTagBKT
+TreeNumber=1
+BKTKmeansK=32
+BKTLeafSize=8
+SamplesNumber=1000
+SaveBKT=false
+Ratio=0.12
+BKTLambdaFactor=1.0
+ParallelBKTBuild=true
+NumberOfThreads=45
+SelectThreshold=10
+SplitFactor=6
+SplitThreshold=25
+
+[BuildHead]
+isExecute=true
+NumberOfThreads=45
+TPTNumber=32
+TPTLeafSize=2000
+NeighborhoodSize=32
+MaxCheckForRefineGraph=16324
+MaxCheck=16324
+RefineIterations=3
+BKTLambdaFactor=-1.0
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+Storage=STATIC
+NumberOfThreads=45
+InternalResultNum=64
+PostingPageLimit=6
+PostingVectorLimit=118
+ReplicaCount=8
+MaxCheck=16324
+TailReplicaCount=8
+UnfilterTailBufferLength=-1
+CrossEdges=1
+CrossExtraEdges=10
+OutputEmptyReplicaID=false
+EnableDeltaEncoding=false
+EnablePostingListRearrange=false
+EnableOrderedPageStart=false
+EnableDataCompression=false
+SSDIndexFileNum=1
+UseDirectIO=false
+Batches=1
+AsyncMergeInSearch=false
+PostingQuantizer=None
+Rerank=0
+RerankL=0
+EnableHierPostingFilter=false
+StaticACLTagCols=4
+TmpDir=sift1b/sift1b_spann_raw_static_tail_unbounded_distance_order_tmp
+
+[SearchSSDIndex]
+isExecute=true
+BuildSsdIndex=false
+InternalResultNum=96
+NumberOfThreads=1
+HashTableExponent=4
+ResultNum=10
+MaxCheck=1024
+MaxDistRatio=8.0
+SearchPostingPageLimit=3
+UnifiedNprobeBudget=true
+MultiNodeBudgetKeepRatio=0.60
+DisableCrossEdges=false
+FilterKeepCross=false
+DisableCrossSubgraph=false
+LogUExtra=false
+LogCrossStats=false
+LogPathStats=false
+DumpHeads=0
+FilterKeepUExtra=false
+EnableUnfilterTail=true
+AblateUExtra=false
+AblateTail=false
+UnfilterPurePages=false
+UnfilterExtraTailPages=0
+UnfilterPureDistanceScanPercent=100
+EnableHierPostingFilter=true
+
+[MultiTenant]
+ACLCols=0,1,2,3
+HierLevelWidths=4,16,64,256
+NumericCols=1
+PerVectorTagsFile=sift1b/sift1b_build/sift1b_group_tags.txt
+PivotForceNodeCount=4
+InPlaceBuild=1
+PersistSelectHead=1
+ResumeBuild=1
+DualPoolAugment=0
+DualPoolExtraRatio=0
+```
+
+Build it with:
+
+```bash
+Tools/benchmarks/run_spann_attr_build.sh \
+  Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini
+```
+
+Each STATIC posting record stores the original 128-byte UInt8 vector, a
+4-byte vector ID, and five inline `uint32` tags (152 bytes total). With
+`Ratio=0.12` and `ReplicaCount=8`, the full index requires multi-terabyte
+storage; this profile intentionally uses no posting quantizer or rerank file.
+With `EnableOrderedPageStart=false`, pure records preserve build selection
+order `(head distance, VID)` and tail records retain their separate
+`(head distance, VID)` order. The pure/tail boundary remains contiguous so
+filtered queries can exclude tail replicas without per-record role metadata.
+
+`SearchPostingPageLimit` is retained for compatibility and explicit capped
+benchmarks. Normal STATIC filtered queries read the complete pure prefix
+reported by posting metadata, and unfiltered queries read the complete posting,
+including the unfilter tail. `UseDirectIO=false` selects buffered I/O. To match
+the SIFT1B paper protocol, warm the complete query set and then measure the same
+query set so its posting working set can reside in the Linux page cache.
+
+For a benchmark-only bounded-tail sweep, set `UnfilterPurePages=true` and
+`UnfilterExtraTailPages=N` in the native `[SearchSSDIndex]` section. `N=0`
+still scans tail records that share the final physical page of the pure prefix;
+positive values permit at most `N` additional tail pages. Keep the documented
+default (`UnfilterPurePages=false`, `UnfilterExtraTailPages=0`) for normal
+adaptive reads of the complete posting.
+
+For a distance-prefix computation sweep, keep the complete tail and set
+`UnfilterPureDistanceScanPercent` to a value in `[1,100]`. The reader scans the
+nearest percentage of the distance-ordered pure prefix plus every tail record;
+`100` is the normal full-posting path. This option is rejected for
+attribute-ordered snapshots and cannot be combined with `UnfilterPurePages` or
+`UnfilterExtraTailPages`.
+
 For sift1m dataset, use the default configuration below (buildconfig.ini) and run .\SSDServing.exe buildconfig.ini:
 ```
 [Base]

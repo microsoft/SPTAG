@@ -689,8 +689,9 @@ namespace SPTAG
                 std::uint16_t threadPoolSize = 4,
                 std::uint64_t maxFileSize = (300ULL << 30))
             {
+                const bool readOnly = (openMode & O_ACCMODE) == O_RDONLY;
                 if (!fileexists(filePath)) {
-                    if (openMode == (O_RDONLY | O_DIRECT)) {
+                    if (readOnly) {
                         SPTAGLIB_LOG(LogLevel::LL_Error, "Failed to open file handle: %s\n", filePath);
                         return false;
                     }
@@ -699,20 +700,27 @@ namespace SPTAG
                 else {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::Open a file\n");
                     m_currSize = filesize(filePath);
-                    if (openMode == (O_RDONLY | O_DIRECT) || m_currSize >= maxFileSize) {
+                    if (readOnly || m_currSize >= maxFileSize) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file has been created with enough space.\n");
                     } else {
 			            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::Open failed! currSize(%llu) < maxFileSize(%llu)\n", m_currSize, maxFileSize);
                         if (!NewFile(filePath, maxFileSize)) return false;
                    }
                 }
-                m_fileHandle = open(filePath, O_RDWR | O_DIRECT);
+                m_fileHandle = open(filePath, openMode);
                 if (m_fileHandle == -1) {
                     auto err_str = strerror(errno);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileIO::Open failed: %s\n", err_str);
                     return false;
                 }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file %s opened, fd=%d threads=%d maxNumBlocks=%d\n", filePath, m_fileHandle, threadPoolSize, maxNumBlocks);
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "AsyncFileIO::InitializeFileIo: file %s opened, fd=%d mode=%s threads=%d maxNumBlocks=%d\n",
+                    filePath,
+                    m_fileHandle,
+                    (openMode & O_DIRECT) != 0 ? "direct" : "buffered",
+                    threadPoolSize,
+                    maxNumBlocks);
 
                 // Use shared AIO pool if available, otherwise create own contexts.
                 // NOTE: the SharedAIOPool only holds libaio contexts; it does NOT carry

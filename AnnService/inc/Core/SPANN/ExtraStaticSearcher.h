@@ -142,8 +142,12 @@ namespace SPTAG
         { \
         bool postingMatched = false; \
         bool postingContributedUnique = false; \
-        const int staticScanBegin = this->StaticScanBegin(p_exWorkSpace, staticPostingSlot, listInfo); \
-        const int staticScanEnd = this->StaticScanEnd(p_exWorkSpace, staticPostingSlot, listInfo); \
+        for (int staticScanRange = 0; staticScanRange < 2; ++staticScanRange) { \
+        int staticScanBegin = 0; \
+        int staticScanEnd = 0; \
+        if (!this->GetStaticScanRange( \
+                p_exWorkSpace, staticPostingSlot, listInfo, \
+                staticScanRange, staticScanBegin, staticScanEnd)) continue; \
         for (int i = staticScanBegin; i < staticScanEnd; i++) { \
             uint64_t offsetVectorID, offsetVector;\
             (this->*m_parsePosting)(offsetVectorID, offsetVector, i, listInfo->listEleCount);\
@@ -162,12 +166,14 @@ namespace SPTAG
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
+        } \
         if (postingMatched) ++p_exWorkSpace->m_postingProbeStats.m_matchedPostings; \
         if (postingContributedUnique) ++p_exWorkSpace->m_postingProbeStats.m_uniqueMatchedPostings; \
         } \
 
 #define ProcessPostingOffset() \
-        while (p_exWorkSpace->m_offset < this->StaticScanEnd(p_exWorkSpace, p_exWorkSpace->m_pi, listInfo)) { \
+        while (this->NormalizeStaticScanOffset( \
+                p_exWorkSpace, p_exWorkSpace->m_pi, listInfo, p_exWorkSpace->m_offset)) { \
             uint64_t offsetVectorID, offsetVector;\
             (this->*m_parsePosting)(offsetVectorID, offsetVector, p_exWorkSpace->m_offset, listInfo->listEleCount);\
             p_exWorkSpace->m_offset++;\
@@ -182,7 +188,8 @@ namespace SPTAG
             foundResult = true;\
             break;\
         } \
-        if (p_exWorkSpace->m_offset == this->StaticScanEnd(p_exWorkSpace, p_exWorkSpace->m_pi, listInfo)) { \
+        if (!this->NormalizeStaticScanOffset( \
+                p_exWorkSpace, p_exWorkSpace->m_pi, listInfo, p_exWorkSpace->m_offset)) { \
             p_exWorkSpace->m_pi++; \
             if (p_exWorkSpace->m_pi < p_exWorkSpace->m_postingIDs.size()) { \
                 SizeType nextPostingID = p_exWorkSpace->m_postingIDs[p_exWorkSpace->m_pi]; \
@@ -275,13 +282,20 @@ namespace SPTAG
                 m_staticCrossGraphSearch = std::move(p_search);
             }
 
+            int StaticWorkspaceBufferBytes() const
+            {
+                const int configuredBuildPages = m_opt == nullptr ? 0 : m_opt->m_postingPageLimit;
+                const int postingPages = (std::max)(m_staticMaxListPageCount, configuredBuildPages);
+                return (std::max)(1, postingPages + 1) << PageSizeEx;
+            }
+
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
             {
                 if (clear) {
-                    p_exWorkSpace->Clear(m_opt->m_searchInternalResultNum, max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
+                    p_exWorkSpace->Clear(m_opt->m_searchInternalResultNum, StaticWorkspaceBufferBytes(), false, m_opt->m_enableDataCompression);
                 }
                 else {
-                    p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, m_opt->m_searchInternalResultNum, max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
+                    p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, m_opt->m_searchInternalResultNum, StaticWorkspaceBufferBytes(), false, m_opt->m_enableDataCompression);
                     int wid = 0;
                     if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
                     {
@@ -309,6 +323,9 @@ namespace SPTAG
                 m_staticACLTagCols = 0;
                 m_staticMetadataBytes = sizeof(int);
                 m_staticMaxListPageCount = 0;
+                m_staticAttributeOrdered =
+                    fileexists((p_opt.m_indexDirectory + FolderSep +
+                                "ordered_page_starts.bin").c_str());
                 std::string curFile = m_extraFullGraphFile;
                 const size_t configuredTagBytes =
                     (!m_staticPipePQ && p_opt.m_numTagsPerVec > 0)
@@ -323,28 +340,31 @@ namespace SPTAG
                         "rearrangement, or compression.\n");
                     return false;
                 }
-                const size_t recordBytes = m_staticPipePQ
-                    ? sizeof(int) + static_cast<size_t>(m_staticPipePQCodeBytes)
-                    : p_opt.m_dim * sizeof(ValueType) + sizeof(int) + configuredTagBytes;
-                const int tailPageBudget = p_opt.m_tailReplicaCount > 0
-                    ? p_opt.m_unfilterTailBufferLength
-                    : 0;
-                p_opt.m_searchPostingPageLimit = max(
-                    p_opt.m_searchPostingPageLimit,
-                    static_cast<int>((p_opt.m_postingVectorLimit * recordBytes + PageSize - 1) / PageSize) +
-                        (std::max)(0, tailPageBudget));
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
+                    int loadedListCount = 0;
+                    try {
+                        loadedListCount = LoadingHeadInfo(curFile, m_listInfos);
+                    }
+                    catch (std::exception& e)
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error occurs when loading HeadInfo:%s\n", e.what());
+                        return false;
+                    }
+
                     auto curIndexFile = f_createAsyncIO();
+#ifndef _MSC_VER
+                    const int staticOpenMode = O_RDONLY |
+                        (p_opt.m_useDirectIO ? O_DIRECT : O_NOATIME);
+#endif
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(),
 #ifndef _MSC_VER
 #ifdef BATCH_READ
-                        O_RDONLY | O_DIRECT, p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
+                        staticOpenMode, p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
-                        O_RDONLY | O_DIRECT, p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+                        staticOpenMode, p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
 #endif
 #else
-                        GENERIC_READ, (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, (std::uint16_t)p_opt.m_ioThreads
+                        GENERIC_READ, StaticWorkspaceBufferBytes(), 2, 2, (std::uint16_t)p_opt.m_ioThreads
 #endif
                     )) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
@@ -352,25 +372,14 @@ namespace SPTAG
                     }
 
                     m_indexFiles.emplace_back(curIndexFile);
-                    try {
-                        m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos);
-                    } 
-                    catch (std::exception& e)
-                    {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error occurs when loading HeadInfo:%s\n", e.what());
-                        return false;
-                    }
+                    m_totalListCount += loadedListCount;
 
                     curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
                 } while (fileexists(curFile.c_str()));
-                if (m_staticTailPageBudget < 0 && m_staticMaxListPageCount > 0) {
-                    p_opt.m_searchPostingPageLimit = (std::max)(
-                        p_opt.m_searchPostingPageLimit, m_staticMaxListPageCount);
-                    SPTAGLIB_LOG(
-                        Helper::LogLevel::LL_Info,
-                        "Static unbounded tail: expanded search posting page limit to %d.\n",
-                        p_opt.m_searchPostingPageLimit);
-                }
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Static adaptive posting reads: maximum physical posting size is %d pages.\n",
+                    m_staticMaxListPageCount);
                 m_oneContext = (m_indexFiles.size() == 1);
 
                 if (m_staticHasMetadata && p_opt.m_numTagsPerVec > 0 &&
@@ -477,7 +486,7 @@ namespace SPTAG
                     const int readPageCount = readRange.m_readPageCount;
                     diskRead += readPageCount;
                     diskIO += 1;
-                    const int scanCount = readRange.m_scanEnd - readRange.m_scanBegin;
+                    const int scanCount = readRange.ScanCount();
                     listElements += scanCount;
                     scannedListElements += scanCount;
 
@@ -648,15 +657,26 @@ namespace SPTAG
                         }
 
                         const int staticPostingSlot = static_cast<int>(pi);
-                        const int scanBegin = StaticScanBegin(p_exWorkSpace, staticPostingSlot, listInfo);
-                        const int scanEnd = StaticScanEnd(p_exWorkSpace, staticPostingSlot, listInfo);
-                        for (int i = scanBegin; i < scanEnd; ++i) {
-                            uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : m_vectorInfoSize * i;
-                            const char* record = p_postingListFullData + offsetVectorID;
-                            int vectorID;
-                            std::memcpy(&vectorID, record, sizeof(vectorID));
-                            if (!StaticRecordMatchesFilter(p_exWorkSpace, record)) continue;
-                            if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
+                        for (int scanRange = 0; scanRange < 2; ++scanRange) {
+                            int scanBegin = 0;
+                            int scanEnd = 0;
+                            if (!GetStaticScanRange(
+                                    p_exWorkSpace,
+                                    staticPostingSlot,
+                                    listInfo,
+                                    scanRange,
+                                    scanBegin,
+                                    scanEnd)) {
+                                continue;
+                            }
+                            for (int i = scanBegin; i < scanEnd; ++i) {
+                                uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : m_vectorInfoSize * i;
+                                const char* record = p_postingListFullData + offsetVectorID;
+                                int vectorID;
+                                std::memcpy(&vectorID, record, sizeof(vectorID));
+                                if (!StaticRecordMatchesFilter(p_exWorkSpace, record)) continue;
+                                if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
+                            }
                         }
                     }
                 }
@@ -722,7 +742,7 @@ namespace SPTAG
                     const int readPageCount = readRange.m_readPageCount;
                     diskRead += readPageCount;
                     diskIO += 1;
-                    listElements += readRange.m_scanEnd - readRange.m_scanBegin;
+                    listElements += readRange.ScanCount();
 
                     size_t totalBytes = static_cast<size_t>(readPageCount) << PageSizeEx;
                     
@@ -1772,6 +1792,7 @@ namespace SPTAG
                 }
 
                 m_opt = &p_opt;
+                m_staticAttributeOrdered = p_opt.m_enableOrderedPageStart;
                 m_staticBuildVectorOwners.clear();
                 m_staticBuildHeadOwners.clear();
                 int numThreads = p_opt.m_iSSDNumberOfThreads;
@@ -2186,7 +2207,6 @@ namespace SPTAG
                 if (p_opt.m_postingPageLimit > 0)
                 {
                     p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * vectorInfoSize + PageSize - 1) / PageSize));
-                    p_opt.m_searchPostingPageLimit = p_opt.m_postingPageLimit;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build index with posting page limit:%d\n", p_opt.m_postingPageLimit);
                     postingSizeLimit = static_cast<int>(p_opt.m_postingPageLimit * PageSize / vectorInfoSize);
                 }
@@ -2944,6 +2964,39 @@ namespace SPTAG
 
             bool RejectUnsupportedStaticFilter(const ExtraWorkSpace* p_exWorkSpace) const
             {
+                if (m_opt != nullptr) {
+                    const int purePercent = m_opt->m_unfilterPureDistanceScanPercent;
+                    if (purePercent < 1 || purePercent > 100) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "UnfilterPureDistanceScanPercent must be in [1,100], got %d.\n",
+                            purePercent);
+                        return true;
+                    }
+                    if (purePercent < 100) {
+                        if (m_staticPipePQ) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "UnfilterPureDistanceScanPercent currently supports raw STATIC postings only.\n");
+                            return true;
+                        }
+                        if (m_staticAttributeOrdered) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "UnfilterPureDistanceScanPercent requires distance-ordered pure postings; "
+                                "this index contains ordered_page_starts.bin and is attribute-ordered.\n");
+                            return true;
+                        }
+                        if (m_opt->m_unfilterPurePages ||
+                            m_opt->m_unfilterExtraTailPages > 0) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "UnfilterPureDistanceScanPercent retains the complete tail and cannot be "
+                                "combined with UnfilterPurePages or UnfilterExtraTailPages.\n");
+                            return true;
+                        }
+                    }
+                }
                 if (p_exWorkSpace == nullptr) return false;
                 if (p_exWorkSpace->m_filterFunc) {
                     SPTAGLIB_LOG(
@@ -2981,10 +3034,29 @@ namespace SPTAG
             {
                 const int scanCount = StaticScanLimit(p_exWorkSpace, p_listInfo);
                 if (scanCount <= 0) return 0;
-                if (scanCount >= p_listInfo->listEleCount) return p_listInfo->listPageCount;
-                const size_t bytes = static_cast<size_t>(p_listInfo->pageOffset) +
-                    static_cast<size_t>(scanCount) * static_cast<size_t>(m_vectorInfoSize);
-                return static_cast<int>((bytes + PageSize - 1) >> PageSizeEx);
+                int pageCount = p_listInfo->listPageCount;
+                if (scanCount < p_listInfo->listEleCount) {
+                    const size_t bytes = static_cast<size_t>(p_listInfo->pageOffset) +
+                        static_cast<size_t>(scanCount) * static_cast<size_t>(m_vectorInfoSize);
+                    pageCount = static_cast<int>((bytes + PageSize - 1) >> PageSizeEx);
+                } else if (m_opt != nullptr && m_staticHasMetadata &&
+                           !HasStaticMetadataFilter(p_exWorkSpace) &&
+                           (m_opt->m_unfilterPurePages ||
+                            m_opt->m_unfilterExtraTailPages > 0)) {
+                    const int pureCount = (std::max)(
+                        0, (std::min)(p_listInfo->pureEleCount, p_listInfo->listEleCount));
+                    int purePageCount = 0;
+                    if (pureCount > 0) {
+                        const size_t pureBytes = static_cast<size_t>(p_listInfo->pageOffset) +
+                            static_cast<size_t>(pureCount) * static_cast<size_t>(m_vectorInfoSize);
+                        purePageCount = static_cast<int>(
+                            (pureBytes + PageSize - 1) >> PageSizeEx);
+                    }
+                    const int cappedPageCount = purePageCount +
+                        (std::max)(0, m_opt->m_unfilterExtraTailPages);
+                    pageCount = (std::min)(pageCount, cappedPageCount);
+                }
+                return pageCount;
             }
 
             bool TryOrderedPageStartQuery(const ExtraWorkSpace* p_exWorkSpace,
@@ -3031,7 +3103,47 @@ namespace SPTAG
                 range.m_scanEnd = scanLimit;
                 range.m_readStartPage = 0;
                 range.m_readPageCount = StaticReadPageCount(p_exWorkSpace, p_listInfo);
-
+                const bool usePureDistancePrefix =
+                    m_opt != nullptr &&
+                    m_opt->m_unfilterPureDistanceScanPercent < 100 &&
+                    !HasStaticMetadataFilter(p_exWorkSpace);
+                if (usePureDistancePrefix) {
+                    range.SetPureDistancePrefix(
+                        p_listInfo->pureEleCount,
+                        scanLimit,
+                        m_opt->m_unfilterPureDistanceScanPercent);
+                    if (range.m_secondScanEnd <= range.m_secondScanBegin) {
+                        const size_t bytes = static_cast<size_t>(p_listInfo->pageOffset) +
+                            static_cast<size_t>(range.m_scanEnd) *
+                                static_cast<size_t>(m_vectorInfoSize);
+                        range.m_readPageCount = bytes == 0
+                            ? 0
+                            : static_cast<int>((bytes + PageSize - 1) >> PageSizeEx);
+                    }
+                }
+                if (range.m_readPageCount <= 0) {
+                    range.m_scanEnd = 0;
+                    range.m_secondScanBegin = -1;
+                    range.m_secondScanEnd = -1;
+                } else {
+                    const std::int64_t endBytes =
+                        static_cast<std::int64_t>(range.m_readPageCount) * PageSize -
+                        p_listInfo->pageOffset;
+                    const int readableRecords = endBytes <= 0
+                        ? 0
+                        : static_cast<int>(endBytes / m_vectorInfoSize);
+                    range.m_scanEnd = (std::min)(range.m_scanEnd, readableRecords);
+                    if (range.m_secondScanEnd > range.m_secondScanBegin) {
+                        range.m_secondScanBegin =
+                            (std::min)(range.m_secondScanBegin, readableRecords);
+                        range.m_secondScanEnd =
+                            (std::min)(range.m_secondScanEnd, readableRecords);
+                        if (range.m_secondScanEnd <= range.m_secondScanBegin) {
+                            range.m_secondScanBegin = -1;
+                            range.m_secondScanEnd = -1;
+                        }
+                    }
+                }
                 size_t attrIndex = 0;
                 std::int32_t queryBit = kOrderedPageStartEmpty;
                 if (scanLimit <= 0 || p_postingId < 0 ||
@@ -3058,7 +3170,8 @@ namespace SPTAG
                 // either boundary. Include one physical page on both sides and scan only
                 // records fully present in the resulting buffer.
                 const int readStart = (std::max)(0, lowerPage - 1);
-                const int readEnd = (std::min)(pageCount, (std::max)(lowerPage + 1, upperPage + 1));
+                const int readEnd =
+                    (std::min)(pageCount, (std::max)(lowerPage + 1, upperPage + 1));
                 if (readEnd <= readStart) return range;
 
                 const std::int64_t recordBytes = m_vectorInfoSize;
@@ -3076,9 +3189,56 @@ namespace SPTAG
 
                 range.m_scanBegin = clampedBegin;
                 range.m_scanEnd = clampedEnd;
+                range.m_secondScanBegin = -1;
+                range.m_secondScanEnd = -1;
                 range.m_readStartPage = readStart;
                 range.m_readPageCount = readEnd - readStart;
                 return range;
+            }
+
+            bool GetStaticScanRange(const ExtraWorkSpace* p_exWorkSpace,
+                                    int p_slot,
+                                    const ListInfo* p_listInfo,
+                                    int p_range,
+                                    int& p_begin,
+                                    int& p_end) const
+            {
+                if (p_exWorkSpace != nullptr && p_slot >= 0 &&
+                    static_cast<size_t>(p_slot) < p_exWorkSpace->m_postingReadRanges.size()) {
+                    return p_exWorkSpace->m_postingReadRanges[static_cast<size_t>(p_slot)]
+                        .GetScanRange(p_range, p_begin, p_end);
+                }
+                if (p_range != 0) return false;
+                p_begin = 0;
+                p_end = StaticScanLimit(p_exWorkSpace, p_listInfo);
+                return p_end > p_begin;
+            }
+
+            int StaticScanRecordCount(const ExtraWorkSpace* p_exWorkSpace,
+                                      int p_slot,
+                                      const ListInfo* p_listInfo) const
+            {
+                if (p_exWorkSpace != nullptr && p_slot >= 0 &&
+                    static_cast<size_t>(p_slot) < p_exWorkSpace->m_postingReadRanges.size()) {
+                    return p_exWorkSpace->m_postingReadRanges[static_cast<size_t>(p_slot)]
+                        .ScanCount();
+                }
+                return StaticScanLimit(p_exWorkSpace, p_listInfo);
+            }
+
+            bool NormalizeStaticScanOffset(const ExtraWorkSpace* p_exWorkSpace,
+                                           int p_slot,
+                                           const ListInfo* p_listInfo,
+                                           int& p_offset) const
+            {
+                if (p_exWorkSpace != nullptr && p_slot >= 0 &&
+                    static_cast<size_t>(p_slot) < p_exWorkSpace->m_postingReadRanges.size()) {
+                    return p_exWorkSpace->m_postingReadRanges[static_cast<size_t>(p_slot)]
+                        .NormalizeScanOffset(p_offset);
+                }
+                const int end = StaticScanLimit(p_exWorkSpace, p_listInfo);
+                p_offset = (std::max)(0, p_offset);
+                return p_offset < end;
             }
 
             int StaticScanBegin(const ExtraWorkSpace* p_exWorkSpace,
@@ -3623,7 +3783,7 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& p_listInfos)
+            int LoadingHeadInfo(const std::string& p_file, std::vector<ListInfo>& p_listInfos)
             {
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
@@ -3833,37 +3993,11 @@ namespace SPTAG
                         if (listInfo->pureEleCount < listInfo->listEleCount) {
                             m_staticHasUnfilterTail = true;
                         }
-                        if (m_staticTailPageBudget > 0 && p_postingPageLimit > 0 &&
-                            listInfo->listPageCount > p_postingPageLimit) {
-                            SPTAGLIB_LOG(
-                                Helper::LogLevel::LL_Error,
-                                "Static tail posting needs %u pages but SearchPostingPageLimit is %d; "
-                                "refusing to truncate the tail.\n",
-                                listInfo->listPageCount, p_postingPageLimit);
-                            throw std::runtime_error("Static tail search page limit too small");
-                        }
                     }
                     listInfo->listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
                     if (!m_enableDataCompression)
                     {
                         listInfo->listTotalBytes = listInfo->listEleCount * m_vectorInfoSize;
-                        if (m_staticTailPageBudget >= 0) {
-                            listInfo->listEleCount = min(
-                                listInfo->listEleCount,
-                                (min(static_cast<int>(listInfo->listPageCount), p_postingPageLimit) <<
-                                 PageSizeEx) /
-                                    m_vectorInfoSize);
-                            if (m_staticHasUnfilterTail &&
-                                listInfo->listEleCount < listInfo->pureEleCount) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                             "Static tail load truncated pure prefix: pure=%d loaded=%d\n",
-                                             listInfo->pureEleCount, listInfo->listEleCount);
-                                throw std::runtime_error("Static tail pure prefix truncated");
-                            }
-                            listInfo->listPageCount = static_cast<std::uint16_t>(
-                                ceil((m_vectorInfoSize * listInfo->listEleCount + listInfo->pageOffset) *
-                                     1.0 / (1 << PageSizeEx)));
-                        }
                     }
                     totalListElementCount += listInfo->listEleCount;
                     int pageCount = listInfo->listPageCount;
@@ -4481,6 +4615,7 @@ namespace SPTAG
             int m_staticTailPageBudget = 0;
             int m_staticMaxListPageCount = 0;
             bool m_staticHasMetadata = false;
+            bool m_staticAttributeOrdered = false;
             int m_staticNumTagsPerVec = 0;
             int m_staticACLTagCols = 0;
             int m_staticMetadataBytes = sizeof(int);

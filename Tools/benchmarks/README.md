@@ -43,12 +43,13 @@ Release/spannaclbench ... \
 
 The SIFT1B recommendation mirrors the current SIFT1M raw static STM1 posting
 layout: raw UInt8 vectors in postings, four ACL bundles, cross edges,
-unbounded unfilter tails, team/project ordered-page pruning, and U_extra
-disabled. It retains SIFT1B's documented BKT construction and search defaults
-rather than copying SIFT1M-scale build or search budgets.
+unbounded unfilter tails, distance-ordered pure/tail segments, and U_extra
+disabled. Attribute tuple reordering is not enabled. It retains SIFT1B's
+documented BKT construction and search defaults rather than copying
+SIFT1M-scale build or search budgets.
 
 ```bash
-CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_ordered_page.ini
+CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini
 Tools/benchmarks/run_spann_attr_build.sh "$CFG"
 ```
 
@@ -83,10 +84,18 @@ full-posting path. The configured attributes must remain globally monotonic
 after ACL tuple sorting; the builder rejects an incompatible schema rather than
 allowing a range lookup to drop matches.
 
-For an explicit no-order naive control, set
-`EnableOrderedPageStart=false`. The builder ignores `OrderedPageStartAttrs`,
-does not sort pure records, removes any stale `ordered_page_starts.bin`, and
-the query path cannot perform ordered page pruning.
+For the distance-order path, set `EnableOrderedPageStart=false`. The builder
+does not apply the attribute tuple sort: pure records retain the selection
+order `(head distance, VID)`, while tail records retain their separate
+`(head distance, VID)` order. It removes any stale
+`ordered_page_starts.bin`, and the query path cannot perform ordered page
+pruning. This is the canonical SIFT1B recommendation; ordered page starts
+remain an optional sparse-filter experiment.
+
+`UnfilterPureDistanceScanPercent` can benchmark computation reduction on this
+distance-ordered layout. Values below `100` retain the nearest pure prefix and
+the complete tail suffix. The runtime rejects this setting on attribute-ordered
+snapshots and when bounded-tail page controls are active.
 
 `build_spann_attr_sift1m_tagged_4node_static_fullfloat_tail_unbounded.ini`
 is the matching SIFT1M no-order control; it explicitly sets this parameter to

@@ -291,8 +291,65 @@ namespace SPTAG {
             {
                 int m_scanBegin = 0;
                 int m_scanEnd = -1;
+                int m_secondScanBegin = -1;
+                int m_secondScanEnd = -1;
                 int m_readStartPage = 0;
                 int m_readPageCount = 0;
+
+                void SetPureDistancePrefix(int p_pureCount,
+                                           int p_totalCount,
+                                           int p_percent)
+                {
+                    const int pureCount = (std::max)(
+                        0, (std::min)(p_pureCount, p_totalCount));
+                    const int prefixCount = pureCount == 0
+                        ? 0
+                        : static_cast<int>(
+                            (static_cast<std::int64_t>(pureCount) * p_percent + 99) / 100);
+                    m_scanBegin = 0;
+                    m_scanEnd = (std::min)(pureCount, prefixCount);
+                    if (pureCount < p_totalCount) {
+                        m_secondScanBegin = pureCount;
+                        m_secondScanEnd = p_totalCount;
+                    } else {
+                        m_secondScanBegin = -1;
+                        m_secondScanEnd = -1;
+                    }
+                }
+
+                int ScanCount() const
+                {
+                    const int first = (std::max)(0, m_scanEnd - m_scanBegin);
+                    const int second = (std::max)(0, m_secondScanEnd - m_secondScanBegin);
+                    return first + second;
+                }
+
+                bool GetScanRange(int p_range, int& p_begin, int& p_end) const
+                {
+                    if (p_range == 0) {
+                        p_begin = m_scanBegin;
+                        p_end = m_scanEnd;
+                    } else if (p_range == 1) {
+                        p_begin = m_secondScanBegin;
+                        p_end = m_secondScanEnd;
+                    } else {
+                        return false;
+                    }
+                    return p_begin >= 0 && p_end > p_begin;
+                }
+
+                bool NormalizeScanOffset(int& p_offset) const
+                {
+                    if (m_scanEnd > m_scanBegin) {
+                        p_offset = (std::max)(p_offset, m_scanBegin);
+                        if (p_offset < m_scanEnd) return true;
+                    }
+                    if (m_secondScanEnd > m_secondScanBegin) {
+                        p_offset = (std::max)(p_offset, m_secondScanBegin);
+                        if (p_offset < m_secondScanEnd) return true;
+                    }
+                    return false;
+                }
             };
 
             // Query-local source/destination range for a selected posting. Static

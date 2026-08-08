@@ -148,8 +148,7 @@ DefineSSDParameter(m_queryCountLimit, int, (std::numeric_limits<int>::max)(), "Q
 DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler") // Mutable
 DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum") // Mutable; [SearchSSDIndex] InternalResultNum aliases here
-DefineSSDParameter(m_seedMaxCheck, int, 0, "SeedMaxCheck") // Mutable; 0 derives from the exported seed width
-DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable
+DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable; STATIC reads are sized from posting metadata
 DefineSSDParameter(m_collectPostingContributionStats, bool, false, "CollectPostingContributionStats") // Mutable; diagnostic only
 DefineSSDParameter(m_forceDenseTagSearch, bool, false, "ForceDenseTagSearch") // Mutable
 DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings") // Sparse-tag sidecar threshold
@@ -161,10 +160,8 @@ DefineSSDParameter(m_logAdaptiveNprobe, bool, false, "LogAdaptiveNprobe") // Mut
 DefineSSDParameter(m_logPhaseTime, bool, false, "LogPhaseTime") // Mutable; diagnostic timing only
 DefineSSDParameter(m_unifiedNprobeBudget, bool, true, "UnifiedNprobeBudget") // Mutable
 DefineSSDParameter(m_multiNodeBudgetKeepRatio, double, 0.60, "MultiNodeBudgetKeepRatio") // Mutable
-DefineSSDParameter(m_crossSingleSeed, int, -1, "CrossSingleSeed") // Mutable; -1 auto, 0 off, 1 on
 DefineSSDParameter(m_disableCrossEdges, bool, false, "DisableCrossEdges") // Mutable
 DefineSSDParameter(m_filterKeepCross, bool, false, "FilterKeepCross") // Mutable
-DefineSSDParameter(m_crossExpandLimit, int, 0, "CrossExpandLimit") // Mutable; 0 is unlimited
 DefineSSDParameter(m_disableCrossSubgraph, bool, false, "DisableCrossSubgraph") // Mutable
 DefineSSDParameter(m_logUExtra, bool, false, "LogUExtra") // Mutable
 DefineSSDParameter(m_logCrossStats, bool, false, "LogCrossStats") // Mutable
@@ -176,6 +173,9 @@ DefineSSDParameter(m_ablateUExtra, bool, false, "AblateUExtra") // Mutable
 DefineSSDParameter(m_ablateTail, bool, false, "AblateTail") // Mutable
 DefineSSDParameter(m_unfilterPurePages, bool, false, "UnfilterPurePages") // Mutable
 DefineSSDParameter(m_unfilterExtraTailPages, int, 0, "UnfilterExtraTailPages") // Mutable
+// STATIC distance-order diagnostic: scan the nearest pure prefix while retaining
+// the complete tail suffix. 100 preserves normal full-posting behavior.
+DefineSSDParameter(m_unfilterPureDistanceScanPercent, int, 100, "UnfilterPureDistanceScanPercent") // Mutable
 DefineSSDParameter(m_enableHierPostingFilter, bool, false, "EnableHierPostingFilter") // Mutable
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")

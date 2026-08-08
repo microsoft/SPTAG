@@ -35,6 +35,7 @@ namespace SPTAG
         {
         public:
             NeighborhoodGraph() : m_iGraphSize(0),
+                m_iRuntimeEdgeSuffixSize(0),
                 m_iTPTNumber(32),
                 m_iTPTLeafSize(2000),
                 m_iSamples(1000),
@@ -771,7 +772,47 @@ break;
 
             inline std::uint64_t BufferSize() const
             {
-                return m_pNeighborhoodGraph.BufferSize();
+                return sizeof(SizeType) + sizeof(DimensionType) +
+                    sizeof(SizeType) * static_cast<std::uint64_t>(m_iGraphSize) *
+                        static_cast<std::uint64_t>(m_iNeighborhoodSize);
+            }
+
+            ErrorCode SetRuntimeEdgeSuffixSize(DimensionType p_suffixSize)
+            {
+                if (p_suffixSize < 0 ||
+                    p_suffixSize > (std::numeric_limits<DimensionType>::max)() - m_iNeighborhoodSize) {
+                    return ErrorCode::Fail;
+                }
+
+                const DimensionType rowSize = m_iNeighborhoodSize + p_suffixSize;
+                if (m_pNeighborhoodGraph.C() != rowSize) {
+                    const ErrorCode ret = m_pNeighborhoodGraph.RepackColumns(rowSize);
+                    if (ret != ErrorCode::Success) return ret;
+                } else if (p_suffixSize > 0) {
+                    for (SizeType row = 0; row < m_iGraphSize; ++row) {
+                        std::memset(
+                            m_pNeighborhoodGraph[row] + m_iNeighborhoodSize,
+                            -1,
+                            static_cast<size_t>(p_suffixSize) * sizeof(SizeType));
+                    }
+                }
+                m_iRuntimeEdgeSuffixSize = p_suffixSize;
+                return ErrorCode::Success;
+            }
+
+            inline DimensionType GetRuntimeEdgeSuffixSize() const
+            {
+                return m_iRuntimeEdgeSuffixSize;
+            }
+
+            inline SizeType* RuntimeEdgeSuffix(SizeType p_node)
+            {
+                return m_pNeighborhoodGraph[p_node] + m_iNeighborhoodSize;
+            }
+
+            inline const SizeType* RuntimeEdgeSuffix(SizeType p_node) const
+            {
+                return m_pNeighborhoodGraph[p_node] + m_iNeighborhoodSize;
             }
 
             ErrorCode LoadGraph(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
@@ -781,6 +822,7 @@ break;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                m_iRuntimeEdgeSuffixSize = 0;
                 return ret;
             }
 
@@ -791,6 +833,7 @@ break;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                m_iRuntimeEdgeSuffixSize = 0;
                 return ret;
             }
 
@@ -801,6 +844,7 @@ break;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                m_iRuntimeEdgeSuffixSize = 0;
                 return ErrorCode::Success;
             }
 
@@ -855,6 +899,7 @@ break;
         protected:
             // Graph structure
             SizeType m_iGraphSize;
+            DimensionType m_iRuntimeEdgeSuffixSize;
             COMMON::Dataset<SizeType> m_pNeighborhoodGraph;
             FineGrainedLock m_dataUpdateLock;
         public:
