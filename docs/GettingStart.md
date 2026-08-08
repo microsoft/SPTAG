@@ -180,7 +180,7 @@ SearchPostingPageLimit=3
 For SIFT1B with four categorical attributes (`org`, `dept`, `team`, and
 `project`) plus one numeric attribute (`price`), use the native sectioned INI
 below. The tracked copy is
-`Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini`.
+`Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_capped_distance_order.ini`.
 The INI is the single source of truth for build and search parameters; do not
 override them with `SPTAG_*` environment variables.
 
@@ -197,7 +197,7 @@ Dim=128
 VectorType=UInt8
 DistCalcMethod=L2
 IndexAlgoType=BKT
-IndexDirectory=sift1b/sift1b_spann_raw_static_tail_unbounded_distance_order
+IndexDirectory=sift1b/sift1b_spann_raw_static_tail_capped_distance_order
 
 [Tags]
 TagFile=sift1b/sift1b_build/sift1b_tags5.u32
@@ -248,7 +248,7 @@ PostingVectorLimit=118
 ReplicaCount=8
 MaxCheck=16324
 TailReplicaCount=8
-UnfilterTailBufferLength=-1
+UnfilterTailBufferLength=6
 CrossEdges=1
 CrossExtraEdges=10
 OutputEmptyReplicaID=false
@@ -265,7 +265,7 @@ Rerank=0
 RerankL=0
 EnableHierPostingFilter=false
 StaticACLTagCols=4
-TmpDir=sift1b/sift1b_spann_raw_static_tail_unbounded_distance_order_tmp
+TmpDir=sift1b/sift1b_spann_raw_static_tail_capped_distance_order_tmp
 
 [SearchSSDIndex]
 isExecute=true
@@ -312,13 +312,19 @@ Build it with:
 
 ```bash
 Tools/benchmarks/run_spann_attr_build.sh \
-  Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini
+  Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_capped_distance_order.ini
 ```
 
 Each STATIC posting record stores the original 128-byte UInt8 vector, a
 4-byte vector ID, and five inline `uint32` tags (152 bytes total). With
 `Ratio=0.12` and `ReplicaCount=8`, the full index requires multi-terabyte
 storage; this profile intentionally uses no posting quantizer or rerank file.
+`PostingPageLimit=6` caps each pure prefix at 161 records. The matching
+`UnfilterTailBufferLength=6` permits at most six additional physical tail
+pages beyond the pages occupied by that pure prefix; tail records may also
+fill slack in the final pure page. A posting therefore occupies at most
+`purePages + 6`, or 12 physical pages when the pure prefix reaches its
+six-page limit.
 With `EnableOrderedPageStart=false`, pure records preserve build selection
 order `(head distance, VID)` and tail records retain their separate
 `(head distance, VID)` order. The pure/tail boundary remains contiguous so

@@ -41,22 +41,24 @@ Release/spannaclbench ... \
 
 ## SIFT1B Raw STM1 Recommendation
 
-The SIFT1B recommendation mirrors the current SIFT1M raw static STM1 posting
-layout: raw UInt8 vectors in postings, four ACL bundles, cross edges,
-unbounded unfilter tails, distance-ordered pure/tail segments, and U_extra
-disabled. Attribute tuple reordering is not enabled. It retains SIFT1B's
-documented BKT construction and search defaults rather than copying
-SIFT1M-scale build or search budgets.
+The SIFT1B recommendation uses raw UInt8 vectors in postings, four ACL
+bundles, cross edges, distance-ordered pure/tail segments, and U_extra
+disabled. Pure postings have a six-page budget and tail replicas have the
+same six-page budget beyond the pure prefix. Attribute tuple reordering is
+not enabled. It retains SIFT1B's documented BKT construction and search
+defaults rather than copying SIFT1M-scale build or search budgets.
 
 ```bash
-CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini
+CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_capped_distance_order.ini
 Tools/benchmarks/run_spann_attr_build.sh "$CFG"
 ```
 
 It consumes `sift1b_tags5.u32` and the group-tag routing file, but no quantizer
 codes, quantizer pivots, `FullVectorFile`, or rerank source. Its 152-byte STM1
-records and unbounded tail replicas require multi-terabyte final storage.
+records still require multi-terabyte final storage.
 
+`build_spann_attr_sift1b_raw_static_tail_unbounded_distance_order.ini` is
+retained only to reproduce the existing unbounded-tail diagnostic artifact.
 `build_spann_attr_sift1b_pipepq32_r010_tail_unbounded.ini` remains available
 only as a quantized PipePQ32 comparison control; it is not the raw-vector
 recommendation.
