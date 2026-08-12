@@ -604,6 +604,7 @@ namespace SPTAG {
             virtual bool HasHybridPostings() const { return false; }
             virtual double GetPostingAvgRecords(bool /*p_useHybrid*/ = false) const { return -1.0; }
             virtual double GetPostingAvgPages(bool /*p_useHybrid*/ = false) const { return -1.0; }
+            virtual double GetPostingAvgBytes(bool /*p_useHybrid*/ = false) const { return -1.0; }
         };
     } // SPANN
 } // SPTAG

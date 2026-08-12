@@ -240,6 +240,12 @@ namespace SPTAG
                 return m_avgPagesPerList;
             }
 
+            virtual double GetPostingAvgBytes(bool p_useHybrid = false) const override
+            {
+                if (p_useHybrid) return m_hasHybridPostings ? m_hybridAvgBytesPerList : -1.0;
+                return m_avgBytesPerList;
+            }
+
             void SetVectorTags(const uint32_t* p_tags, int p_numVectors,
                                int p_numTagsPerVec) override
             {
@@ -423,8 +429,10 @@ namespace SPTAG
                 m_hasHybridPostings = false;
                 m_avgRecordsPerList = -1.0;
                 m_avgPagesPerList = -1.0;
+                m_avgBytesPerList = -1.0;
                 m_hybridAvgRecordsPerList = -1.0;
                 m_hybridAvgPagesPerList = -1.0;
+                m_hybridAvgBytesPerList = -1.0;
                 m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
                 m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
                 m_enableDataCompression = p_opt.m_enableDataCompression;
@@ -626,16 +634,19 @@ namespace SPTAG
                     m_hasHybridPostings = true;
                     m_hybridAvgRecordsPerList = ComputeAverageRecords(m_hybridListInfos);
                     m_hybridAvgPagesPerList = ComputeAveragePages(m_hybridListInfos);
+                    m_hybridAvgBytesPerList = ComputeAverageBytes(m_hybridListInfos);
                     SPTAGLIB_LOG(
                         Helper::LogLevel::LL_Info,
-                        "Loaded hybrid posting sidecar %s: avg records %.2f, avg pages %.2f, max pages %d.\n",
+                        "Loaded hybrid posting sidecar %s: avg records %.2f, avg pages %.2f, avg bytes %.2f, max pages %d.\n",
                         m_hybridGraphFile.c_str(),
                         m_hybridAvgRecordsPerList,
                         m_hybridAvgPagesPerList,
+                        m_hybridAvgBytesPerList,
                         m_hybridMaxListPageCount);
                 }
                 m_avgRecordsPerList = ComputeAverageRecords(m_listInfos);
                 m_avgPagesPerList = ComputeAveragePages(m_listInfos);
+                m_avgBytesPerList = ComputeAverageBytes(m_listInfos);
 
                 if (m_enablePostingListRearrange) m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingListRearrange;
                 else m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingList;
@@ -4982,6 +4993,16 @@ namespace SPTAG
                 return total / static_cast<double>(p_listInfos.size());
             }
 
+            double ComputeAverageBytes(const std::vector<ListInfo>& p_listInfos) const
+            {
+                if (p_listInfos.empty()) return -1.0;
+                double total = 0.0;
+                for (const auto& listInfo : p_listInfos) {
+                    total += static_cast<double>(listInfo.listTotalBytes);
+                }
+                return total / static_cast<double>(p_listInfos.size());
+            }
+
             bool m_available = false;
 
             std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
@@ -5018,8 +5039,10 @@ namespace SPTAG
             bool m_hasHybridPostings = false;
             double m_avgRecordsPerList = -1.0;
             double m_avgPagesPerList = -1.0;
+            double m_avgBytesPerList = -1.0;
             double m_hybridAvgRecordsPerList = -1.0;
             double m_hybridAvgPagesPerList = -1.0;
+            double m_hybridAvgBytesPerList = -1.0;
 
             bool m_staticPipePQ = false;
             int m_staticPipePQCodeBytes = 0;
