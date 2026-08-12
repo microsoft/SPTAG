@@ -1587,6 +1587,21 @@ BOOST_AUTO_TEST_CASE(StaticHybridWorkspaceResetAndOptionDefaults)
     SPANN::Options opt;
     BOOST_CHECK(!opt.m_enableHybridDistance);
     BOOST_CHECK_EQUAL(opt.m_hybridPostingFile, "SPTAGHybridList.bin");
+    BOOST_CHECK_EQUAL(opt.m_hybridHeadGraphFile, "head_hybrid_edges.bin");
+    BOOST_CHECK_EQUAL(opt.m_hybridVectorWeight, 1.0f);
+    BOOST_CHECK(opt.m_hybridCategoricalCols.empty());
+    BOOST_CHECK(opt.m_hybridCategoricalWeights.empty());
+    BOOST_CHECK(opt.m_hybridNumericCols.empty());
+    BOOST_CHECK(opt.m_hybridNumericWeights.empty());
+    BOOST_CHECK_EQUAL(opt.m_hybridGraphDegree, 16);
+    BOOST_CHECK_EQUAL(opt.m_hybridCandidateCount, 128);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostResultSafety, 2.0f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostIOFixedUS, 8.0f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostPageUS, 4.0f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostVectorUS, 0.04f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostHeadOriginalUS, 0.0f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostHeadHybridUS, 0.0f);
+    BOOST_CHECK(!opt.m_logHybridRoute);
 
     SPANN::ExtraWorkSpace workspace;
     workspace.m_useHybridPostings = true;
