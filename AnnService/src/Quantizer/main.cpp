@@ -243,6 +243,7 @@ int main(int argc, char *argv[])
 
         break;
     }
+#ifdef RABITQ
     case QuantizerType::RaBitQQuantizer: {
         if (options->m_inputValueType != VectorValueType::Float) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RaBitQ global quantization requires Float input vectors.\n");
@@ -290,6 +291,7 @@ int main(int argc, char *argv[])
         }
         break;
     }
+#endif
     default: {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer type.\n");
         exit(1);

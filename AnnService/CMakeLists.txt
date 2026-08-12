@@ -3,20 +3,39 @@
 
 set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
 set(Zstd ${PROJECT_SOURCE_DIR}/ThirdParty/zstd)
-set(RaBitQOfficial ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficial)
-set(RaBitQOfficialPatches ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficialPatches)
-
-if(NOT EXISTS ${RaBitQOfficial}/include/rabitqlib/defines.hpp)
-    message(FATAL_ERROR "RaBitQOfficial submodule is missing. Run: git submodule update --init --recursive")
-endif()
 
 include_directories(${AnnService})
 include_directories(${Zstd}/lib)
-include_directories(${RaBitQOfficialPatches}/include)
-include_directories(${RaBitQOfficial}/include)
 
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
+
+list(REMOVE_ITEM HDR_FILES
+    ${AnnService}/inc/Core/Common/DistanceUtils.h
+    ${AnnService}/inc/Core/Common/SIMDUtils.h
+    ${AnnService}/inc/Core/Common/InstructionUtils.h
+    ${AnnService}/inc/Core/Common/CommonUtils.h
+    )
+
+list(REMOVE_ITEM SRC_FILES
+    ${AnnService}/src/Core/Common/DistanceUtils.cpp
+    ${AnnService}/src/Core/Common/SIMDUtils.cpp
+    ${AnnService}/src/Core/Common/InstructionUtils.cpp
+    )
+
+add_library (DistanceUtils STATIC
+    inc/Core/Common/DistanceUtils.h
+    inc/Core/Common/SIMDUtils.h
+    inc/Core/Common/InstructionUtils.h
+    inc/Core/Common/CommonUtils.h
+    src/Core/Common/DistanceUtils.cpp
+    src/Core/Common/SIMDUtils.cpp
+    src/Core/Common/InstructionUtils.cpp
+    )
+
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -fPIC)
+endif()
 
 set(SPDK_LIBRARIES "")
 if (SPDK)
@@ -51,95 +70,91 @@ else()
     )
 endif()
 
-list(REMOVE_ITEM HDR_FILES
-    ${AnnService}/inc/Core/Common/DistanceUtils.h
-    ${AnnService}/inc/Core/Common/SIMDUtils.h 
-    ${AnnService}/inc/Core/Common/InstructionUtils.h
-    ${AnnService}/inc/Core/Common/CommonUtils.h
+set (RabitQ_LIBRARIES "")
+if (RABITQ)
+    add_definitions(-DRABITQ)
+    set(RaBitQOfficial ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficial)
+    set(RaBitQOfficialPatches ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficialPatches)
+
+    if(NOT EXISTS ${RaBitQOfficial}/include/rabitqlib/defines.hpp)
+        message(FATAL_ERROR "RaBitQOfficial submodule is missing. Run: git submodule update --init --recursive")
+    endif()
+
+    include_directories(${RaBitQOfficialPatches}/include)
+    include_directories(${RaBitQOfficial}/include)
+
+    set(RABITQ_OFFICIAL_COMMON_SOURCES
+        ${RaBitQOfficialPatches}/src/utils/cpu_features.cpp
+        ${RaBitQOfficialPatches}/src/simd/dispatch.cpp
+    )
+    set(RABITQ_OFFICIAL_AVX2_SOURCES
+        ${RaBitQOfficial}/src/simd/pack_excode_avx2.cpp
+        ${RaBitQOfficial}/src/simd/space_excode_avx2.cpp
+        ${RaBitQOfficial}/src/simd/space_avx2.cpp
+        ${RaBitQOfficial}/src/simd/fastscan_avx2.cpp
+        ${RaBitQOfficial}/src/simd/warmup_avx2.cpp
+        ${RaBitQOfficial}/src/simd/rotator_avx2.cpp
+        ${RaBitQOfficial}/src/index/hnsw_search_avx2.cpp
+    )
+    set(RABITQ_OFFICIAL_AVX512_SOURCES
+        ${RaBitQOfficial}/src/simd/pack_excode_avx512.cpp
+        ${RaBitQOfficial}/src/simd/space_excode_avx512.cpp
+        ${RaBitQOfficial}/src/simd/space_avx512.cpp
+        ${RaBitQOfficial}/src/simd/fastscan_avx512.cpp
+        ${RaBitQOfficial}/src/simd/rotator_avx512.cpp
+        ${RaBitQOfficial}/src/index/hnsw_search_avx512_core.cpp
+    )
+    set(RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES
+        ${RaBitQOfficial}/src/simd/warmup_avx512.cpp
+        ${RaBitQOfficial}/src/index/hnsw_search_avx512_popcnt.cpp
     )
 
-list(REMOVE_ITEM SRC_FILES
-    ${AnnService}/src/Core/Common/DistanceUtils.cpp
-    ${AnnService}/src/Core/Common/SIMDUtils.cpp
-    ${AnnService}/src/Core/Common/InstructionUtils.cpp
+    set(RABITQ_OFFICIAL_SOURCES
+        ${RABITQ_OFFICIAL_COMMON_SOURCES}
+        ${RABITQ_OFFICIAL_AVX2_SOURCES}
+    )
+    if(NOT MSVC)
+        list(APPEND RABITQ_OFFICIAL_SOURCES
+            ${RABITQ_OFFICIAL_AVX512_SOURCES}
+            ${RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES})
+    endif()
+
+    add_library(RaBitQOfficialCore STATIC ${RABITQ_OFFICIAL_SOURCES})
+    target_include_directories(RaBitQOfficialCore PUBLIC
+        ${RaBitQOfficialPatches}/include
+        ${RaBitQOfficial}/include)
+    set_target_properties(RaBitQOfficialCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+        target_compile_options(RaBitQOfficialCore PRIVATE -fopenmp)
+        set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
+            PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+        set_source_files_properties(${RABITQ_OFFICIAL_AVX512_SOURCES}
+            PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mfma")
+        set_source_files_properties(${RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES}
+            PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mavx512vpopcntdq -mfma")
+    elseif(MSVC)
+        target_compile_definitions(RaBitQOfficialCore PRIVATE RABITQ_NO_AVX512=1)
+        target_compile_options(RaBitQOfficialCore PRIVATE
+            /openmp
+            "/FI${RaBitQOfficialPatches}/include/rabitqlib/utils/compiler_compat.hpp")
+        set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
+            PROPERTIES COMPILE_FLAGS "/arch:AVX2")
+    endif()
+    set (RabitQ_LIBRARIES RabitQOfficialCore)
+else()
+    list(REMOVE_ITEM HDR_FILES
+	    ${AnnService}/inc/Core/Common/RaBitQQuantizer.h
     )
 
-add_library (DistanceUtils STATIC 
-    inc/Core/Common/DistanceUtils.h
-    inc/Core/Common/SIMDUtils.h
-    inc/Core/Common/InstructionUtils.h
-    inc/Core/Common/CommonUtils.h
-    src/Core/Common/DistanceUtils.cpp
-    src/Core/Common/SIMDUtils.cpp
-    src/Core/Common/InstructionUtils.cpp
+    list(REMOVE_ITEM SRC_FILES
+	    ${AnnService}/src/Core/Common/RaBitQQuantizer.cpp
     )
-
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -fPIC)
-endif()
-
-set(RABITQ_OFFICIAL_COMMON_SOURCES
-    ${RaBitQOfficialPatches}/src/utils/cpu_features.cpp
-    ${RaBitQOfficialPatches}/src/simd/dispatch.cpp
-    )
-set(RABITQ_OFFICIAL_AVX2_SOURCES
-    ${RaBitQOfficial}/src/simd/pack_excode_avx2.cpp
-    ${RaBitQOfficial}/src/simd/space_excode_avx2.cpp
-    ${RaBitQOfficial}/src/simd/space_avx2.cpp
-    ${RaBitQOfficial}/src/simd/fastscan_avx2.cpp
-    ${RaBitQOfficial}/src/simd/warmup_avx2.cpp
-    ${RaBitQOfficial}/src/simd/rotator_avx2.cpp
-    ${RaBitQOfficial}/src/index/hnsw_search_avx2.cpp
-    )
-set(RABITQ_OFFICIAL_AVX512_SOURCES
-    ${RaBitQOfficial}/src/simd/pack_excode_avx512.cpp
-    ${RaBitQOfficial}/src/simd/space_excode_avx512.cpp
-    ${RaBitQOfficial}/src/simd/space_avx512.cpp
-    ${RaBitQOfficial}/src/simd/fastscan_avx512.cpp
-    ${RaBitQOfficial}/src/simd/rotator_avx512.cpp
-    ${RaBitQOfficial}/src/index/hnsw_search_avx512_core.cpp
-    )
-set(RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES
-    ${RaBitQOfficial}/src/simd/warmup_avx512.cpp
-    ${RaBitQOfficial}/src/index/hnsw_search_avx512_popcnt.cpp
-    )
-
-set(RABITQ_OFFICIAL_SOURCES
-    ${RABITQ_OFFICIAL_COMMON_SOURCES}
-    ${RABITQ_OFFICIAL_AVX2_SOURCES}
-    )
-if(NOT MSVC)
-    list(APPEND RABITQ_OFFICIAL_SOURCES
-        ${RABITQ_OFFICIAL_AVX512_SOURCES}
-        ${RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES})
-endif()
-
-add_library(RaBitQOfficialCore STATIC ${RABITQ_OFFICIAL_SOURCES})
-target_include_directories(RaBitQOfficialCore PUBLIC
-    ${RaBitQOfficialPatches}/include
-    ${RaBitQOfficial}/include)
-set_target_properties(RaBitQOfficialCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    target_compile_options(RaBitQOfficialCore PRIVATE -fopenmp)
-    set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
-        PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
-    set_source_files_properties(${RABITQ_OFFICIAL_AVX512_SOURCES}
-        PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mfma")
-    set_source_files_properties(${RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES}
-        PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mavx512vpopcntdq -mfma")
-elseif(MSVC)
-    target_compile_definitions(RaBitQOfficialCore PRIVATE RABITQ_NO_AVX512=1)
-    target_compile_options(RaBitQOfficialCore PRIVATE
-        /openmp
-        "/FI${RaBitQOfficialPatches}/include/rabitqlib/utils/compiler_compat.hpp")
-    set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
-        PROPERTIES COMPILE_FLAGS "/arch:AVX2")
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLib DistanceUtils RaBitQOfficialCore ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLib DistanceUtils ${RabitQ_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLibStatic DistanceUtils RaBitQOfficialCore ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLibStatic DistanceUtils ${RabitQ_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
 
 if (MSVC)
     # SPANNIndex.cpp can exceed COFF section limits in Debug without /bigobj.
