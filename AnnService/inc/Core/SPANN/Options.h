@@ -90,6 +90,8 @@ namespace SPTAG {
             bool m_enablePostingListRearrange;
             bool m_enableOrderedPageStart;
             std::string m_orderedPageStartAttrs;
+            bool m_enableHybridDistance;
+            std::string m_hybridPostingFile;
             bool m_enableDataCompression;
             bool m_enableDictTraining;
             int m_minDictTraingBufferSize;

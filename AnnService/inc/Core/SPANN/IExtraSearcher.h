@@ -217,6 +217,7 @@ namespace SPTAG {
                 m_deduper.Init(p_maxCheck, p_hashExp);
                 Clear(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
                 m_relaxedMono = false;
+                m_useHybridPostings = false;
             }
 
             void Initialize(va_list& arg) {
@@ -283,6 +284,7 @@ namespace SPTAG {
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
+                m_useHybridPostings = false;
             }
 
             std::vector<int> m_postingIDs;
@@ -378,6 +380,8 @@ namespace SPTAG {
             int m_offset = 0;
 
             bool m_loadPosting = false;
+
+            bool m_useHybridPostings = false;
 
             bool m_relaxedMono = false;
 
@@ -597,6 +601,9 @@ namespace SPTAG {
             // Dual-pool: return true if the head at ordinal headOrd is unfilter-only (role==1).
             virtual bool IsUnfilterOnlyHead(int headOrd) const { return false; }
             virtual bool HasHeadRoles() const { return false; }
+            virtual bool HasHybridPostings() const { return false; }
+            virtual double GetPostingAvgRecords(bool /*p_useHybrid*/ = false) const { return -1.0; }
+            virtual double GetPostingAvgPages(bool /*p_useHybrid*/ = false) const { return -1.0; }
         };
     } // SPANN
 } // SPTAG

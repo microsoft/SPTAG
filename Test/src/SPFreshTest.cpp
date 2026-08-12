@@ -1582,6 +1582,22 @@ BOOST_AUTO_TEST_CASE(StaticDistanceOrderSerialization)
     BOOST_CHECK_EQUAL(offset, 5);
 }
 
+BOOST_AUTO_TEST_CASE(StaticHybridWorkspaceResetAndOptionDefaults)
+{
+    SPANN::Options opt;
+    BOOST_CHECK(!opt.m_enableHybridDistance);
+    BOOST_CHECK_EQUAL(opt.m_hybridPostingFile, "SPTAGHybridList.bin");
+
+    SPANN::ExtraWorkSpace workspace;
+    workspace.m_useHybridPostings = true;
+    workspace.Initialize(8, 4, 2, PageSize, false, false);
+    BOOST_CHECK(!workspace.m_useHybridPostings);
+
+    workspace.m_useHybridPostings = true;
+    workspace.Clear(2, PageSize, false, false);
+    BOOST_CHECK(!workspace.m_useHybridPostings);
+}
+
 BOOST_AUTO_TEST_CASE(TaggedPureTailUpdate)
 {
     constexpr SizeType baseCount = 1024;
