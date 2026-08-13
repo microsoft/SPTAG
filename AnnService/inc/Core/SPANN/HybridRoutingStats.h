@@ -20,7 +20,7 @@ namespace SPANN
 {
 
 constexpr std::uint32_t kHybridRoutingStatsMagic = 0x53525948U; // HYRS
-constexpr std::uint32_t kHybridRoutingStatsVersion = 2;
+constexpr std::uint32_t kHybridRoutingStatsVersion = 3;
 
 struct HybridRoutingStatsHeader
 {
@@ -28,6 +28,8 @@ struct HybridRoutingStatsHeader
     std::uint32_t m_version = kHybridRoutingStatsVersion;
     std::int32_t m_categoricalColumnCount = 0;
     std::int32_t m_maskCount = 0;
+    std::int32_t m_numTagColumns = 0;
+    std::int32_t m_headCount = 0;
     std::uint64_t m_generationFingerprint = 0;
 };
 
@@ -41,6 +43,8 @@ class HybridRoutingStats
 {
 public:
     std::vector<int> m_categoricalColumns;
+    int m_numTagColumns = 0;
+    std::vector<std::uint32_t> m_headAttributes;
     std::uint64_t m_generationFingerprint = 0;
     HybridRouteLayout m_original;
     HybridRouteLayout m_hybrid;
@@ -48,14 +52,36 @@ public:
     bool Empty() const
     {
         return m_original.m_enrichmentByMask.empty() ||
-            m_hybrid.m_enrichmentByMask.empty();
+            m_hybrid.m_enrichmentByMask.empty() ||
+            m_numTagColumns <= 0 ||
+            m_headAttributes.empty();
+    }
+
+    SizeType HeadCount() const
+    {
+        return m_numTagColumns > 0
+            ? static_cast<SizeType>(
+                  m_headAttributes.size() /
+                  static_cast<size_t>(m_numTagColumns))
+            : 0;
+    }
+
+    const std::uint32_t* HeadAttributes(SizeType p_head) const
+    {
+        if (p_head < 0 || p_head >= HeadCount()) {
+            return nullptr;
+        }
+        return m_headAttributes.data() +
+            static_cast<size_t>(p_head) *
+                static_cast<size_t>(m_numTagColumns);
     }
 
     double Enrichment(bool p_hybrid, std::uint64_t p_columnMask) const
     {
-        const auto& values = p_hybrid
-            ? m_hybrid.m_enrichmentByMask
-            : m_original.m_enrichmentByMask;
+        // Original navigation is vector-only, so the queried filter is not
+        // aligned with the head attributes used to measure posting enrichment.
+        if (!p_hybrid) return 1.0;
+        const auto& values = m_hybrid.m_enrichmentByMask;
         if (values.empty()) return 1.0;
         if (p_columnMask >= values.size()) return 1.0;
         const double value =
@@ -143,6 +169,8 @@ public:
                 m_categoricalColumns.size());
         header.m_maskCount = static_cast<std::int32_t>(
             m_original.m_enrichmentByMask.size());
+        header.m_numTagColumns = m_numTagColumns;
+        header.m_headCount = HeadCount();
         header.m_generationFingerprint =
             m_generationFingerprint;
         bool ok =
@@ -151,6 +179,11 @@ public:
                 m_categoricalColumns.data(), sizeof(int),
                 m_categoricalColumns.size(), file) ==
                 m_categoricalColumns.size() &&
+            std::fwrite(
+                m_headAttributes.data(),
+                sizeof(std::uint32_t),
+                m_headAttributes.size(), file) ==
+                m_headAttributes.size() &&
             WriteLayout(file, m_original) &&
             WriteLayout(file, m_hybrid);
         if (std::fclose(file) != 0) ok = false;
@@ -172,10 +205,21 @@ public:
         return true;
     }
 
-    bool Load(const std::string& p_path, std::string& p_error)
+    bool Load(const std::string& p_path,
+              int p_expectedNumTagColumns,
+              int p_expectedHeadCount,
+              std::uint64_t p_expectedGenerationFingerprint,
+              std::string& p_error)
     {
         *this = HybridRoutingStats();
         p_error.clear();
+        if (p_expectedNumTagColumns <= 0 ||
+            p_expectedHeadCount <= 0 ||
+            p_expectedGenerationFingerprint == 0) {
+            p_error =
+                "invalid expected hybrid routing statistics";
+            return false;
+        }
         FILE* file = std::fopen(p_path.c_str(), "rb");
         if (file == nullptr) {
             p_error = "cannot open " + p_path;
@@ -188,19 +232,45 @@ public:
             header.m_version == kHybridRoutingStatsVersion &&
             header.m_categoricalColumnCount >= 0 &&
             header.m_categoricalColumnCount <= 16 &&
-            header.m_generationFingerprint != 0 &&
+            header.m_numTagColumns ==
+                p_expectedNumTagColumns &&
+            header.m_headCount ==
+                p_expectedHeadCount &&
+            header.m_generationFingerprint ==
+                p_expectedGenerationFingerprint &&
             header.m_maskCount ==
                 (1 << header.m_categoricalColumnCount);
         if (ok) {
             m_generationFingerprint =
                 header.m_generationFingerprint;
+            m_numTagColumns =
+                header.m_numTagColumns;
             m_categoricalColumns.resize(
                 static_cast<size_t>(
                     header.m_categoricalColumnCount));
-            ok = std::fread(
+            const size_t headCount =
+                static_cast<size_t>(header.m_headCount);
+            const size_t tagColumns =
+                static_cast<size_t>(
+                    header.m_numTagColumns);
+            ok = headCount <=
+                (std::numeric_limits<size_t>::max)() /
+                    tagColumns;
+            const size_t attributeCount =
+                ok ? headCount * tagColumns : 0;
+            if (ok) {
+                m_headAttributes.resize(attributeCount);
+            }
+            ok = ok &&
+                std::fread(
                      m_categoricalColumns.data(), sizeof(int),
                      m_categoricalColumns.size(), file) ==
                      m_categoricalColumns.size() &&
+                std::fread(
+                    m_headAttributes.data(),
+                    sizeof(std::uint32_t),
+                    m_headAttributes.size(), file) ==
+                    m_headAttributes.size() &&
                 ReadLayout(
                     file, header.m_maskCount, m_original) &&
                 ReadLayout(
@@ -228,6 +298,12 @@ private:
             static_cast<size_t>(1) <<
             m_categoricalColumns.size();
         return m_generationFingerprint != 0 &&
+            m_numTagColumns > 0 &&
+            !m_headAttributes.empty() &&
+            m_headAttributes.size() %
+                    static_cast<size_t>(
+                        m_numTagColumns) ==
+                0 &&
             m_original.m_enrichmentByMask.size() ==
                    maskCount &&
             m_hybrid.m_enrichmentByMask.size() == maskCount &&

@@ -607,7 +607,12 @@ struct DNFPredicate {
             if (c.lits.empty()) continue;
             bool all = true;
             for (const auto& l : c.lits) {
-                if ((int)l.col >= numTags || !DNFEvalOp(l.op, vecTags[l.col], l.val)) { all = false; break; }
+                if (numTags <= 0 ||
+                    l.col >= static_cast<uint32_t>(numTags) ||
+                    !DNFEvalOp(l.op, vecTags[l.col], l.val)) {
+                    all = false;
+                    break;
+                }
             }
             if (all) return true;
         }

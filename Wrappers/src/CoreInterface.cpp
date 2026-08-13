@@ -66,7 +66,9 @@ static_assert(sizeof(LegacyTagRoutingStatRecord) == sizeof(uint32_t) + 2 * sizeo
               "Unexpected legacy TagRoutingStatRecord layout");
 
 constexpr std::uint32_t kTagRoutingStatsMagic = 0x53525454U; // TTRS
-constexpr std::uint32_t kTagRoutingStatsVersion = 3;
+constexpr std::uint32_t kTagRoutingStatsVersion = 4;
+constexpr std::uint32_t kLegacyRoutingColumn =
+    (std::numeric_limits<std::uint32_t>::max)();
 
 std::uint64_t MakeTagRoutingKey(
     std::uint32_t column,
@@ -224,6 +226,70 @@ bool LoadTagRoutingStatsFile(
     generationFingerprint =
         header.generationFingerprint;
     return true;
+}
+
+bool LoadHybridRoutingStatsHeader(
+    const std::string& path,
+    SPTAG::SPANN::HybridRoutingStatsHeader& header)
+{
+    header = SPTAG::SPANN::HybridRoutingStatsHeader();
+    FILE* file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr) return false;
+    bool ok =
+        std::fread(&header, sizeof(header), 1, file) == 1 &&
+        header.m_magic ==
+            SPTAG::SPANN::kHybridRoutingStatsMagic &&
+        header.m_version ==
+            SPTAG::SPANN::kHybridRoutingStatsVersion &&
+        header.m_categoricalColumnCount >= 0 &&
+        header.m_categoricalColumnCount <= 16 &&
+        header.m_maskCount ==
+            (1 << header.m_categoricalColumnCount) &&
+        header.m_numTagColumns > 0 &&
+        header.m_headCount > 0 &&
+        header.m_generationFingerprint != 0;
+    std::uint64_t expectedBytes = sizeof(header);
+    const auto addBytes =
+        [&expectedBytes](std::uint64_t count,
+                         std::uint64_t width) {
+            if (count >
+                ((std::numeric_limits<
+                      std::uint64_t>::max)() -
+                 expectedBytes) /
+                    width) {
+                return false;
+            }
+            expectedBytes += count * width;
+            return true;
+        };
+    if (ok) {
+        ok =
+            addBytes(
+                static_cast<std::uint64_t>(
+                    header.m_categoricalColumnCount),
+                sizeof(int)) &&
+            addBytes(
+                static_cast<std::uint64_t>(
+                    header.m_headCount) *
+                    static_cast<std::uint64_t>(
+                        header.m_numTagColumns),
+                sizeof(std::uint32_t)) &&
+            addBytes(
+                2ULL *
+                    (4ULL +
+                     static_cast<std::uint64_t>(
+                         header.m_maskCount)),
+                sizeof(double)) &&
+            std::fseek(file, 0, SEEK_END) == 0;
+    }
+    const long fileBytes = ok
+        ? std::ftell(file)
+        : -1;
+    ok = ok && fileBytes >= 0 &&
+        static_cast<std::uint64_t>(fileBytes) ==
+            expectedBytes;
+    std::fclose(file);
+    return ok;
 }
 
 std::string ReadBuildSSDIndexValue(
@@ -556,6 +622,10 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
                             MakeTagRoutingKey(
                                 static_cast<std::uint32_t>(
                                     tagColumn),
+                                tag));
+                        postingTags.push_back(
+                            MakeTagRoutingKey(
+                                kLegacyRoutingColumn,
                                 tag));
                     }
                 }
@@ -926,15 +996,23 @@ float EstimateQueryVectorSelectivity(
         }
 
         std::int64_t vectorCount = 0;
-        for (const auto& entry : *tagStats) {
-            if (static_cast<std::uint32_t>(
-                    entry.first) == tag) {
-                vectorCount = (std::min)(
-                    static_cast<std::int64_t>(
-                        tenantSize),
-                    vectorCount +
+        const auto exactLegacy = tagStats->find(
+            MakeTagRoutingKey(
+                kLegacyRoutingColumn, tag));
+        if (exactLegacy != tagStats->end()) {
+            vectorCount =
+                exactLegacy->second.vectorCount;
+        } else {
+            for (const auto& entry : *tagStats) {
+                if (static_cast<std::uint32_t>(
+                        entry.first) == tag) {
+                    vectorCount = (std::min)(
                         static_cast<std::int64_t>(
-                            entry.second.vectorCount));
+                            tenantSize),
+                        vectorCount +
+                            static_cast<std::int64_t>(
+                                entry.second.vectorCount));
+                }
             }
         }
         if (vectorCount <= 0) {
@@ -3040,6 +3118,21 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
 
         if (indexType == TenantIndexType::SPANN)
         {
+            bool hybridDistanceEnabled = false;
+            for (const auto& parameter :
+                 m_extraSSDBuildParams) {
+                if (!SPTAG::Helper::StrUtils::
+                        StrEqualIgnoreCase(
+                            parameter.first.c_str(),
+                            "EnableHybridDistance")) {
+                    continue;
+                }
+                SPTAG::Helper::Convert::
+                    ConvertStringTo<bool>(
+                        parameter.second.c_str(),
+                        hybridDistanceEnabled);
+                break;
+            }
             const char* skipPivotEnv = std::getenv("SPTAG_DISABLE_PIVOT_ESTIMATOR");
             const bool skipPivot = skipPivotEnv != nullptr &&
                 (skipPivotEnv[0] == '1' ||
@@ -3049,7 +3142,40 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             if (skipPivot) {
                 fprintf(stderr, "[INFO] Tenant %d: SPTAG_DISABLE_PIVOT_ESTIMATOR set, skipping node-aware planning\n", tenantId);
             }
-            if (!skipPivot && !tenantLocalTags.empty()) {
+            if (hybridDistanceEnabled) {
+                auto& globalAssignments =
+                    m_tenantPlannedNodeVectors[
+                        tenantId];
+                globalAssignments.assign(1, {});
+                globalAssignments[0].reserve(
+                    static_cast<size_t>(
+                        tenantVecCount));
+                for (SizeType vectorId = 0;
+                     vectorId < tenantVecCount;
+                     ++vectorId) {
+                    globalAssignments[0].push_back(
+                        vectorId);
+                }
+                m_tenantPlannedPrimaryNodeVectors[
+                    tenantId] = globalAssignments;
+                m_tenantPivotLevels[tenantId] = -1;
+                m_tenantPivotNodeCounts[tenantId] = 1;
+                m_tenantNodePivotTags[tenantId] = {
+                    std::vector<std::uint32_t>()};
+                auto& tagToNodes =
+                    m_tenantTagToNodes[tenantId];
+                tagToNodes.clear();
+                for (std::uint32_t tag :
+                     tenantLocalTags) {
+                    tagToNodes[tag] = {0};
+                }
+                fprintf(
+                    stderr,
+                    "[INFO] Tenant %d: hybrid distance uses one global "
+                    "head/posting node over all %d vectors; attribute pivot "
+                    "partitioning is disabled\n",
+                    tenantId, tenantVecCount);
+            } else if (!skipPivot && !tenantLocalTags.empty()) {
                 // Routing/bundle planning must consider only the CATEGORICAL tag
                 // columns. Numeric attributes are inlined as the last
                 // SPTAG_NUMERIC_COLS columns (raw, high-cardinality values); if
@@ -3759,6 +3885,7 @@ ByteArray TenantIndexManager::GetTagRoutingStatsBlob(int p_tenantId) const
     std::unordered_map<std::uint32_t, TagRoutingStats>
         aggregate;
     aggregate.reserve(routeIt->second.size());
+    bool hasExactLegacyStats = false;
     const auto countIt =
         m_tenantVectorCounts.find(p_tenantId);
     const std::int64_t vectorLimit =
@@ -3766,22 +3893,37 @@ ByteArray TenantIndexManager::GetTagRoutingStatsBlob(int p_tenantId) const
             ? (std::numeric_limits<std::int32_t>::max)()
             : countIt->second;
     for (const auto& entry : routeIt->second) {
-        auto& stats = aggregate[
-            static_cast<std::uint32_t>(entry.first)];
-        stats.vectorCount = static_cast<int>(
-            (std::min)(
-                vectorLimit,
-                static_cast<std::int64_t>(
-                    stats.vectorCount) +
-                    entry.second.vectorCount));
-        stats.postingCount = static_cast<int>(
-            (std::min)(
-                static_cast<std::int64_t>(
-                    (std::numeric_limits<
-                         std::int32_t>::max)()),
-                static_cast<std::int64_t>(
-                    stats.postingCount) +
-                    entry.second.postingCount));
+        if (static_cast<std::uint32_t>(
+                entry.first >> 32) ==
+            kLegacyRoutingColumn) {
+            aggregate[
+                static_cast<std::uint32_t>(
+                    entry.first)] =
+                entry.second;
+            hasExactLegacyStats = true;
+        }
+    }
+    if (!hasExactLegacyStats) {
+        aggregate.clear();
+        for (const auto& entry : routeIt->second) {
+            auto& stats = aggregate[
+                static_cast<std::uint32_t>(
+                    entry.first)];
+            stats.vectorCount = static_cast<int>(
+                (std::min)(
+                    vectorLimit,
+                    static_cast<std::int64_t>(
+                        stats.vectorCount) +
+                        entry.second.vectorCount));
+            stats.postingCount = static_cast<int>(
+                (std::min)(
+                    static_cast<std::int64_t>(
+                        (std::numeric_limits<
+                             std::int32_t>::max)()),
+                    static_cast<std::int64_t>(
+                        stats.postingCount) +
+                        entry.second.postingCount));
+        }
     }
 
     std::vector<LegacyTagRoutingStatRecord> entries;
@@ -3822,6 +3964,11 @@ ByteArray TenantIndexManager::
     std::vector<TagRoutingStatRecord> entries;
     entries.reserve(routeIt->second.size());
     for (const auto& [key, stats] : routeIt->second) {
+        if (static_cast<std::uint32_t>(
+                key >> 32) ==
+            kLegacyRoutingColumn) {
+            continue;
+        }
         entries.push_back(TagRoutingStatRecord{
             static_cast<std::uint32_t>(
                 key >> 32),
@@ -4154,27 +4301,27 @@ bool TenantIndexManager::LoadTenantTagRoutingStats()
             if (IniEnablesHybridDistance(iniPath)) {
                 std::string postingFile =
                     ReadBuildSSDIndexValue(
-                        iniPath, "HybridPostingFile");
+                        iniPath, "SSDIndex");
                 if (postingFile.empty() ||
                     postingFile == "Undefined!") {
                     postingFile =
-                        "SPTAGHybridList.bin";
+                        "SPTAGFullList.bin";
                 }
-                SPTAG::SPANN::HybridRoutingStats
-                    hybridStats;
-                std::string error;
-                if (!hybridStats.Load(
+                SPTAG::SPANN::HybridRoutingStatsHeader
+                    hybridHeader;
+                if (!LoadHybridRoutingStatsHeader(
                         entry.second + "/" +
-                            postingFile + ".stats",
-                        error) ||
+                            postingFile +
+                            ".hybrid.stats",
+                        hybridHeader) ||
                     generationFingerprint == 0 ||
                     generationFingerprint !=
-                        hybridStats
+                        hybridHeader
                             .m_generationFingerprint) {
                     fprintf(
                         stderr,
                         "[WARN] Tenant %d: tag routing stats generation "
-                        "does not match hybrid postings; filtered search is "
+                        "does not match the primary hybrid posting; filtered search is "
                         "disabled until BuildSignatures regenerates it\n",
                         tenantId);
                     continue;
@@ -4940,8 +5087,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     int directSparseMaxPostings = 320;
     bool hybridDistanceEnabled = false;
     bool staticStorage = false;
-    std::string hybridPostingFile =
-        "SPTAGHybridList.bin";
+    std::string primaryPostingFile =
+        "SPTAGFullList.bin";
     if (!EnsureTenantLoaded(p_tenantId)) return false;
     {
         std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
@@ -4970,15 +5117,6 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                             hybridConfigured.c_str(),
                             hybridDistanceEnabled);
                 }
-                const std::string postingConfigured =
-                    internalIdx->GetParameter(
-                        "HybridPostingFile",
-                        "BuildSSDIndex");
-                if (!postingConfigured.empty() &&
-                    postingConfigured != "Undefined!") {
-                    hybridPostingFile =
-                        postingConfigured;
-                }
                 if (auto* spann = dynamic_cast<
                         SPTAG::SPANN::ISPANNIndex*>(
                         internalIdx.get())) {
@@ -4988,6 +5126,11 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                         options != nullptr &&
                         options->m_storage ==
                             SPTAG::Storage::STATIC;
+                    if (options != nullptr &&
+                        !options->m_ssdIndex.empty()) {
+                        primaryPostingFile =
+                            options->m_ssdIndex;
+                    }
                 }
             }
         }
@@ -5321,7 +5464,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             }
             PivotEstimatorComputation pivotComputation;
             const PivotEstimatorCandidate* pivotCandidate = nullptr;
-            if (BuildPivotEstimatorComputation(
+            if (!hybridDistanceEnabled &&
+                BuildPivotEstimatorComputation(
                     routingTags, p_numVectors,
                     routingTagCount,
                                                0, 0.99, 10.0, 1.0, std::string(), pivotComputation)) {
@@ -5504,6 +5648,11 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                     static_cast<size_t>(1 << 20)));
             for (int vid = 0; vid < p_numVectors;
                  ++vid) {
+                std::vector<std::uint32_t>
+                    rawTags;
+                rawTags.reserve(
+                    static_cast<size_t>(
+                        staticACLTagCols));
                 for (int column = 0;
                      column < staticACLTagCols;
                      ++column) {
@@ -5516,6 +5665,20 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                         MakeTagRoutingKey(
                             static_cast<std::uint32_t>(
                                 column),
+                            tag)];
+                    rawTags.push_back(tag);
+                }
+                std::sort(
+                    rawTags.begin(), rawTags.end());
+                rawTags.erase(
+                    std::unique(
+                        rawTags.begin(),
+                        rawTags.end()),
+                    rawTags.end());
+                for (std::uint32_t tag : rawTags) {
+                    ++tagVectorCounts[
+                        MakeTagRoutingKey(
+                            kLegacyRoutingColumn,
                             tag)];
                 }
             }
@@ -5532,24 +5695,23 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             }
             std::uint64_t routeGeneration = 0;
             if (hybridDistanceEnabled) {
-                SPTAG::SPANN::HybridRoutingStats
-                    hybridStats;
-                std::string error;
-                if (!hybridStats.Load(
+                SPTAG::SPANN::HybridRoutingStatsHeader
+                    hybridHeader;
+                if (!LoadHybridRoutingStatsHeader(
                         workDir + "/" +
-                            hybridPostingFile +
-                            ".stats",
-                        error)) {
+                            primaryPostingFile +
+                            ".hybrid.stats",
+                        hybridHeader)) {
                     fprintf(
                         stderr,
                         "[ERROR] Tenant %d: cannot bind "
-                        "tag routing stats to hybrid "
-                        "postings: %s\n",
-                        p_tenantId, error.c_str());
+                        "tag routing stats to the primary "
+                        "hybrid posting\n",
+                        p_tenantId);
                     return false;
                 }
                 routeGeneration =
-                    hybridStats
+                    hybridHeader
                         .m_generationFingerprint;
             }
             if (!SaveTagRoutingStatsFile(
@@ -5593,6 +5755,49 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 SaveHeadNodeRoutingIndexFile(workDir, pivotCandidate->pivotLevel,
                                              pivotCandidate->nodePivotTags,
                                              m_tenantTagToNodes[p_tenantId], headNodeToNode);
+            } else if (hybridDistanceEnabled) {
+                std::vector<int> headNodeToNode(
+                    static_cast<size_t>(
+                        numHeadSamples),
+                    0);
+                m_tenantPivotLevels[p_tenantId] =
+                    -1;
+                m_tenantPivotNodeCounts[p_tenantId] =
+                    1;
+                m_tenantNodePivotTags[p_tenantId] = {
+                    std::vector<std::uint32_t>()};
+                auto& tagToNodes =
+                    m_tenantTagToNodes[p_tenantId];
+                tagToNodes.clear();
+                for (int vid = 0;
+                     vid < p_numVectors; ++vid) {
+                    for (int column = 0;
+                         column < staticACLTagCols;
+                         ++column) {
+                        tagToNodes[
+                            p_tagsPtr[
+                                static_cast<size_t>(
+                                    vid) *
+                                    p_numTagsPerVec +
+                                column]] = {0};
+                    }
+                }
+                m_tenantHeadNodeToNode[
+                    p_tenantId] =
+                    headNodeToNode;
+                for (SizeType hid = 0;
+                     hid < numHeadSamples;
+                     ++hid) {
+                    memoryIndex->
+                        SetHeadNodeBundleNodeId(
+                            hid, 0);
+                }
+                SaveHeadNodeRoutingIndexFile(
+                    workDir, -1,
+                    m_tenantNodePivotTags[
+                        p_tenantId],
+                    tagToNodes,
+                    headNodeToNode);
             }
             SaveHeadNodeMetaFile(workDir, memoryIndex);
             fprintf(stderr, "[INFO] Tenant %d: head_node_meta generated for %d heads "
@@ -5801,6 +6006,10 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                             static_cast<std::uint32_t>(
                                 t),
                             tag));
+                    postingRoutingKeys.push_back(
+                        MakeTagRoutingKey(
+                            kLegacyRoutingColumn,
+                            tag));
                     // Also insert into hierarchical mask at level t
                     posting_hier_masks[pid].Insert(
                         t, tag, hierWidths);
@@ -5882,11 +6091,27 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         static_cast<size_t>(p_numVectors) * static_cast<size_t>(numBaseCols),
         static_cast<size_t>(1 << 20)));
     for (int vid = 0; vid < p_numVectors; ++vid) {
+        std::vector<std::uint32_t> rawTags;
+        rawTags.reserve(
+            static_cast<size_t>(
+                numBaseCols));
         for (int t = 0; t < numBaseCols; ++t) {
             uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
             ++tagVectorCounts[
                 MakeTagRoutingKey(
                     static_cast<std::uint32_t>(t),
+                    tag)];
+            rawTags.push_back(tag);
+        }
+        std::sort(rawTags.begin(), rawTags.end());
+        rawTags.erase(
+            std::unique(
+                rawTags.begin(), rawTags.end()),
+            rawTags.end());
+        for (std::uint32_t tag : rawTags) {
+            ++tagVectorCounts[
+                MakeTagRoutingKey(
+                    kLegacyRoutingColumn,
                     tag)];
         }
     }
@@ -5912,21 +6137,22 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     }
     std::uint64_t routeGeneration = 0;
     if (hybridDistanceEnabled) {
-        SPTAG::SPANN::HybridRoutingStats hybridStats;
-        std::string error;
-        if (!hybridStats.Load(
+        SPTAG::SPANN::HybridRoutingStatsHeader
+            hybridHeader;
+        if (!LoadHybridRoutingStatsHeader(
                 workDir + "/" +
-                    hybridPostingFile + ".stats",
-                error)) {
+                    primaryPostingFile +
+                    ".hybrid.stats",
+                hybridHeader)) {
             fprintf(
                 stderr,
                 "[ERROR] Tenant %d: cannot bind tag routing stats to "
-                "hybrid postings: %s\n",
-                p_tenantId, error.c_str());
+                "the primary hybrid posting\n",
+                p_tenantId);
             return false;
         }
         routeGeneration =
-            hybridStats.m_generationFingerprint;
+            hybridHeader.m_generationFingerprint;
     }
     if (!SaveTagRoutingStatsFile(
             workDir + "/tag_routing_stats.bin",
@@ -6518,7 +6744,8 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         if (hybridDistanceEnabled) {
             // Hybrid-enabled filtered queries must reach the core cost router.
             // Tag-pure and sparse early returns cannot compare the original and
-            // hybrid graph/posting layouts, so they are not eligible here.
+            // hybrid navigation and posting scan-range costs, so they are not
+            // eligible here.
             forceDenseTagSearch = true;
         }
     }

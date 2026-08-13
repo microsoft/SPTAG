@@ -3,6 +3,7 @@
 
 #include "inc/CoreInterface.h"
 #include "inc/Helper/AtomicFile.h"
+#include "inc/Helper/HeadCrossEdges.h"
 #include "inc/Test.h"
 
 #include <algorithm>
@@ -304,10 +305,12 @@ BOOST_AUTO_TEST_CASE(HybridTagRoutingStatsPersistRepairAndReload)
         tags[static_cast<size_t>(i) * kNumTagsPerVec + 2] =
             3000U + static_cast<uint32_t>(i / 8);
         tags[static_cast<size_t>(i) * kNumTagsPerVec + 3] =
-            i < 2
-                ? 4000U
-                : 3000U +
-                      static_cast<uint32_t>(i / 2);
+            i == 8
+                ? 3001U
+                : (i < 2
+                       ? 4000U
+                       : 3000U +
+                             static_cast<uint32_t>(i / 2));
         tags[static_cast<size_t>(i) * kNumTagsPerVec + 4] =
             0x80000000U +
             static_cast<uint32_t>(i);
@@ -323,11 +326,14 @@ BOOST_AUTO_TEST_CASE(HybridTagRoutingStatsPersistRepairAndReload)
     builder.SetStorageBackend("STATIC");
     builder.SetBuildParam("DistCalcMethod", "L2", "Base");
     builder.SetBuildParam("IndexAlgoType", "BKT", "Base");
-    builder.SetBuildParam("SelectHeadType", "Random", "SelectHead");
+    builder.SetBuildParam("SelectHeadType", "BKT", "SelectHead");
     builder.SetBuildParam("Ratio", "0.25", "SelectHead");
+    builder.SetBuildParam("BKTLambdaFactor", "-1", "SelectHead");
     builder.SetBuildParam("NumberOfThreads", "1", "SelectHead");
     builder.SetBuildParam("NumberOfThreads", "1", "BuildHead");
-    builder.SetBuildParam("NeighborhoodSize", "16", "BuildHead");
+    builder.SetBuildParam("NeighborhoodSize", "32", "BuildHead");
+    builder.SetBuildParam("RefineIterations", "3", "BuildHead");
+    builder.SetBuildParam("BKTLambdaFactor", "-1", "BuildHead");
     builder.SetSSDBuildParam("InternalResultNum", "16");
     builder.SetSSDBuildParam("SearchInternalResultNum", "8");
     builder.SetSSDBuildParam("NumberOfThreads", "2");
@@ -337,7 +343,7 @@ BOOST_AUTO_TEST_CASE(HybridTagRoutingStatsPersistRepairAndReload)
     builder.SetSSDBuildParam("TailReplicaCount", "2");
     builder.SetSSDBuildParam("EnableUnfilterTail", "true");
     builder.SetSSDBuildParam("UnfilterTailBufferLength", "-1");
-    builder.SetSSDBuildParam("CrossEdges", "1");
+    builder.SetSSDBuildParam("CrossEdges", "0");
     builder.SetSSDBuildParam("CrossExtraEdges", "4");
     builder.SetSSDBuildParam("ExcludeHead", "true");
     builder.SetSSDBuildParam("StaticACLTagCols", "4");
@@ -348,7 +354,7 @@ BOOST_AUTO_TEST_CASE(HybridTagRoutingStatsPersistRepairAndReload)
         "HybridCategoricalWeights", "8,16,32,64");
     builder.SetSSDBuildParam("HybridNumericCols", "4");
     builder.SetSSDBuildParam("HybridNumericWeights", "0.01");
-    builder.SetSSDBuildParam("HybridGraphDegree", "8");
+    builder.SetSSDBuildParam("HybridGraphDegree", "16");
     builder.SetSSDBuildParam("HybridCandidateCount", "32");
 
     ByteArray vectorBytes(
@@ -374,10 +380,42 @@ BOOST_AUTO_TEST_CASE(HybridTagRoutingStatsPersistRepairAndReload)
         tenantDir + "/tag_routing_stats.bin";
     BOOST_REQUIRE(PathExists(routeStats));
     BOOST_REQUIRE(PathExists(
-        tenantDir + "/SPTAGHybridList.bin.stats"));
-    BOOST_REQUIRE(PathExists(
         tenantDir +
-        "/HeadIndex/head_hybrid_edges.bin"));
+        "/SPTAGFullList.bin.hybrid.stats"));
+    BOOST_CHECK(!PathExists(
+        tenantDir + "/SPTAGHybridList.bin"));
+    const std::string crossEdges =
+        tenantDir + "/HeadIndex/" +
+        SPTAG::Helper::kHeadCrossEdgesFileName;
+    BOOST_REQUIRE(PathExists(crossEdges));
+    {
+        std::ifstream input(crossEdges, std::ios::binary);
+        BOOST_REQUIRE(input.good());
+        SPTAG::Helper::HeadCrossEdgesHeader header{};
+        input.read(
+            reinterpret_cast<char*>(&header),
+            sizeof(header));
+        BOOST_REQUIRE(input.good());
+        BOOST_CHECK_EQUAL(
+            header.version,
+            SPTAG::Helper::
+                kHybridHeadCrossEdgesVersion);
+        BOOST_CHECK_EQUAL(
+            header.maxEdgesPerHead, 16);
+        BOOST_CHECK_EQUAL(
+            header.reserved,
+            SPTAG::Helper::kHybridHeadCrossEdgesMarker);
+        SPTAG::Helper::
+            HybridHeadCrossEdgesExtension extension{};
+        input.read(
+            reinterpret_cast<char*>(&extension),
+            sizeof(extension));
+        BOOST_REQUIRE(input.good());
+        BOOST_CHECK_NE(
+            extension.generationFingerprint, 0);
+        BOOST_CHECK_NE(
+            extension.contentFingerprint, 0);
+    }
     {
         struct RouteRecord {
             std::uint32_t column;
@@ -416,7 +454,7 @@ BOOST_AUTO_TEST_CASE(HybridTagRoutingStatsPersistRepairAndReload)
                 records[index].column == 3) {
                 foundColumn3 = true;
                 BOOST_CHECK_EQUAL(
-                    records[index].vectorCount, 2);
+                    records[index].vectorCount, 3);
             }
         }
         BOOST_CHECK(foundColumn2);

@@ -115,7 +115,6 @@ namespace SPTAG
             {
                 const Index* m_index = nullptr;
                 const std::vector<SizeType>* m_localToGlobal = nullptr;
-                const std::vector<SizeType>* m_hybridEdges = nullptr;
             };
 
             struct CrossGraphSearchContext
@@ -124,6 +123,8 @@ namespace SPTAG
                 int m_entryNode = -1;
                 DimensionType m_locatorLocalBits = 0;
                 SizeType m_locatorLocalMask = 0;
+                bool m_useHybridDistance = false;
+                std::function<float(int, SizeType, float)> m_queryDistance;
             };
 
             struct CrossGraphSearchStats
@@ -135,24 +136,6 @@ namespace SPTAG
                 int m_crossEdges = 0;
                 double m_treeSearchMs = 0.0;
                 double m_graphSearchMs = 0.0;
-            };
-
-            struct RuntimeEdgeSearchContext :
-                CrossGraphSearchContext
-            {
-                DimensionType m_hybridEdgeCount = 0;
-                // -1 preserves the legacy behavior of reading each graph's
-                // own runtime suffix width.
-                DimensionType m_crossEdgeCount = 0;
-                bool m_useHybridEdges = false;
-                std::vector<std::uint8_t> m_allowedNodes;
-                std::function<float(int, SizeType, float)> m_queryDistance;
-            };
-
-            struct RuntimeEdgeSearchStats :
-                CrossGraphSearchStats
-            {
-                int m_hybridEdges = 0;
             };
 
             Index()
@@ -241,11 +224,6 @@ namespace SPTAG
                                                 const CrossGraphSearchContext& p_context,
                                                 int p_maxCheck,
                                                 CrossGraphSearchStats* p_stats = nullptr) const;
-            ErrorCode SearchIndexWithRuntimeEdges(
-                QueryResult& p_query,
-                const RuntimeEdgeSearchContext& p_context,
-                int p_maxCheck,
-                RuntimeEdgeSearchStats* p_stats = nullptr) const;
             ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
@@ -299,8 +277,8 @@ namespace SPTAG
             void Search(COMMON::QueryResultSet<T>& p_query,
                         COMMON::WorkSpace& p_space,
                         std::function<bool(const ByteArray&)> filterFunc,
-                        const RuntimeEdgeSearchContext* p_crossContext = nullptr,
-                        RuntimeEdgeSearchStats* p_crossStats = nullptr) const;
+                        const CrossGraphSearchContext* p_crossContext = nullptr,
+                        CrossGraphSearchStats* p_crossStats = nullptr) const;
         };
     } // namespace BKT
 } // namespace SPTAG

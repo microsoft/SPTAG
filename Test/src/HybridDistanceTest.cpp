@@ -6,8 +6,11 @@
 #include "inc/Core/SPANN/HybridRoutingStats.h"
 #include "inc/Test.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -105,6 +108,19 @@ BOOST_AUTO_TEST_CASE(UsesOnlyConstrainedQueryAttributes)
         1e-9);
 }
 
+BOOST_AUTO_TEST_CASE(RejectsOutOfRangeDNFColumns)
+{
+    Cache::DNFPredicate dnf;
+    Cache::DNFClause clause;
+    clause.lits.push_back(
+        {std::numeric_limits<std::uint32_t>::max(),
+         10, Cache::DNF_EQ, 0});
+    dnf.clauses.push_back(clause);
+
+    const std::uint32_t tags[] = {10};
+    BOOST_CHECK(!dnf.Matches(tags, 1));
+}
+
 BOOST_AUTO_TEST_CASE(EstimatesCostFromYieldAndPhysicalLayout)
 {
     HybridPostingLayoutStats layout;
@@ -147,15 +163,25 @@ BOOST_AUTO_TEST_CASE(FingerprintIsHeadOrderIndependentAndConfigSensitive)
     HybridGenerationFingerprint left(config, 3, 4, 16);
     left.AddHead(7, first);
     left.AddHead(9, second);
+    left.AddEdgeBody(1234);
     HybridGenerationFingerprint right(config, 3, 4, 16);
     right.AddHead(9, second);
     right.AddHead(7, first);
+    right.AddEdgeBody(1234);
     BOOST_CHECK_EQUAL(left.Value(), right.Value());
 
     HybridGenerationFingerprint changed(config, 3, 5, 16);
     changed.AddHead(7, first);
     changed.AddHead(9, second);
+    changed.AddEdgeBody(1234);
     BOOST_CHECK_NE(left.Value(), changed.Value());
+
+    HybridGenerationFingerprint changedBody(
+        config, 3, 4, 16);
+    changedBody.AddHead(7, first);
+    changedBody.AddHead(9, second);
+    changedBody.AddEdgeBody(1235);
+    BOOST_CHECK_NE(left.Value(), changedBody.Value());
 }
 
 BOOST_AUTO_TEST_CASE(RejectsKDTHeadBundles)
@@ -184,32 +210,119 @@ BOOST_AUTO_TEST_CASE(RejectsKDTHeadBundles)
         ErrorCode::FailedParseValue);
 }
 
-BOOST_AUTO_TEST_CASE(PersistsStrictHybridGraphTopology)
+BOOST_AUTO_TEST_CASE(RejectsIncludedHeadPostings)
 {
-    const std::string path = "hybrid_head_graph_test.bin";
+    auto index = VectorIndex::CreateInstance(
+        IndexAlgoType::SPANN,
+        VectorValueType::Float);
+    BOOST_REQUIRE(index != nullptr);
+    BOOST_REQUIRE(
+        index->SetParameter(
+            "IndexAlgoType", "BKT",
+            "Base") == ErrorCode::Success);
+    BOOST_REQUIRE(
+        index->SetParameter(
+            "EnableHybridDistance", "true",
+            "BuildSSDIndex") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index->SetParameter(
+            "ExcludeHead", "false",
+            "BuildSSDIndex") ==
+        ErrorCode::Success);
+
+    const float vectors[] = {
+        0.0f, 0.0f,
+        1.0f, 1.0f};
+    BOOST_CHECK(
+        index->BuildIndex(
+            vectors, 2, 2, false,
+            false) ==
+        ErrorCode::FailedParseValue);
+}
+
+BOOST_AUTO_TEST_CASE(PersistsHybridEdgesInCrossEdgeFormat)
+{
+    const std::string path =
+        "hybrid_head_cross_edges_test.bin";
     std::filesystem::remove(path);
 
     HybridHeadGraph graph;
     graph.m_numTagColumns = 2;
     graph.m_degree = 2;
     graph.m_generationFingerprint = 1234;
+    graph.m_contentFingerprint = 5678;
     graph.m_nodes.resize(1);
     graph.m_nodes[0].m_nodeID = 0;
     graph.m_nodes[0].m_headCount = 2;
     graph.m_nodes[0].m_attributes = {10, 20, 10, 21};
     graph.m_nodes[0].m_neighbors = {1, -1, 0, -1};
+    Helper::HeadCrossEdgesBodyFingerprint bodyFingerprint;
+    bodyFingerprint.AddRecord(100, 1);
+    bodyFingerprint.AddEntry({200, 0.0f});
+    bodyFingerprint.AddRecord(200, 1);
+    bodyFingerprint.AddEntry({100, 0.0f});
+    graph.m_edgeBodyFingerprint =
+        bodyFingerprint.Value();
 
     std::string error;
-    BOOST_REQUIRE(graph.Save(path, error));
-    HybridHeadGraph loaded;
-    BOOST_REQUIRE(loaded.Load(path, {2}, 2, 2, error));
-    BOOST_CHECK_EQUAL(loaded.TotalHeads(), 2);
-    BOOST_CHECK_EQUAL(loaded.TotalEdges(), 2);
-    BOOST_CHECK_EQUAL(loaded.m_nodes[0].m_attributes[3], 21);
-
-    HybridHeadGraph rejected;
-    BOOST_CHECK(!rejected.Load(path, {3}, 2, 2, error));
-    BOOST_CHECK(!error.empty());
+    BOOST_REQUIRE(
+        graph.SaveCrossEdges(
+            path, {{100, 200}}, 8, error));
+    std::ifstream input(path, std::ios::binary);
+    BOOST_REQUIRE(input.good());
+    Helper::HeadCrossEdgesHeader header{};
+    input.read(
+        reinterpret_cast<char*>(&header),
+        sizeof(header));
+    BOOST_REQUIRE(input.good());
+    BOOST_CHECK_EQUAL(
+        header.magic,
+        Helper::kHeadCrossEdgesMagic);
+    BOOST_CHECK_EQUAL(
+        header.version,
+        Helper::kHybridHeadCrossEdgesVersion);
+    BOOST_CHECK_EQUAL(header.totalHeads, 2);
+    BOOST_CHECK_EQUAL(header.maxEdgesPerHead, 2);
+    BOOST_CHECK_EQUAL(
+        header.reserved,
+        Helper::kHybridHeadCrossEdgesMarker);
+    Helper::HybridHeadCrossEdgesExtension extension{};
+    input.read(
+        reinterpret_cast<char*>(&extension),
+        sizeof(extension));
+    BOOST_REQUIRE(input.good());
+    BOOST_CHECK_EQUAL(
+        extension.generationFingerprint, 1234);
+    BOOST_CHECK_EQUAL(
+        extension.contentFingerprint, 5678);
+    const std::array<std::int32_t, 2>
+        expectedSources = {100, 200};
+    const std::array<std::int32_t, 2>
+        expectedTargets = {200, 100};
+    for (size_t record = 0;
+         record < expectedSources.size();
+         ++record) {
+        std::int32_t source = -1;
+        std::int32_t edgeCount = 0;
+        Helper::HeadCrossEdgeEntry edge{};
+        input.read(
+            reinterpret_cast<char*>(&source),
+            sizeof(source));
+        input.read(
+            reinterpret_cast<char*>(&edgeCount),
+            sizeof(edgeCount));
+        input.read(
+            reinterpret_cast<char*>(&edge),
+            sizeof(edge));
+        BOOST_REQUIRE(input.good());
+        BOOST_CHECK_EQUAL(
+            source, expectedSources[record]);
+        BOOST_CHECK_EQUAL(edgeCount, 1);
+        BOOST_CHECK_EQUAL(
+            edge.neighborGlobalVID,
+            expectedTargets[record]);
+    }
     std::filesystem::remove(path);
 }
 
@@ -220,6 +333,10 @@ BOOST_AUTO_TEST_CASE(PersistsRoutingStatisticsAndConservativeDNFMask)
 
     HybridRoutingStats stats;
     stats.m_categoricalColumns = {0, 2};
+    stats.m_numTagColumns = 3;
+    stats.m_headAttributes = {
+        10, 11, 12,
+        20, 21, 22};
     stats.m_generationFingerprint = 1234;
     stats.m_original.m_layout = {
         100.0, 5.0, 20480.0, 0.5};
@@ -233,9 +350,17 @@ BOOST_AUTO_TEST_CASE(PersistsRoutingStatisticsAndConservativeDNFMask)
     std::string error;
     BOOST_REQUIRE(stats.Save(path, error));
     HybridRoutingStats loaded;
-    BOOST_REQUIRE(loaded.Load(path, error));
+    BOOST_REQUIRE(
+        loaded.Load(path, 3, 2, 1234, error));
     BOOST_CHECK_CLOSE(
         loaded.Enrichment(true, 3), 6.0, 0.001);
+    BOOST_CHECK_CLOSE(
+        loaded.Enrichment(false, 3), 1.0, 0.001);
+    BOOST_CHECK_EQUAL(loaded.HeadCount(), 2);
+    BOOST_REQUIRE(
+        loaded.HeadAttributes(1) != nullptr);
+    BOOST_CHECK_EQUAL(
+        loaded.HeadAttributes(1)[2], 22);
 
     Cache::DNFPredicate dnf;
     Cache::DNFClause first;
@@ -262,18 +387,52 @@ BOOST_AUTO_TEST_CASE(PersistsRoutingStatisticsAndConservativeDNFMask)
             nullptr, {{0, 10}, {1, 20}}),
         0);
 
+    BOOST_CHECK(
+        !loaded.Load(path, 3, 3, 1234, error));
+    BOOST_CHECK(
+        !loaded.Load(path, 3, 2, 4321, error));
     {
         std::fstream corrupt(
             path,
             std::ios::in | std::ios::out |
                 std::ios::binary);
         BOOST_REQUIRE(corrupt.good());
+        const std::int32_t excessiveHeads =
+            (std::numeric_limits<std::int32_t>::max)();
+        corrupt.seekp(
+            offsetof(
+                HybridRoutingStatsHeader,
+                m_headCount));
+        corrupt.write(
+            reinterpret_cast<const char*>(
+                &excessiveHeads),
+            sizeof(excessiveHeads));
+    }
+    BOOST_CHECK(
+        !loaded.Load(path, 3, 2, 1234, error));
+    {
+        std::fstream corrupt(
+            path,
+            std::ios::in | std::ios::out |
+                std::ios::binary);
+        BOOST_REQUIRE(corrupt.good());
+        const std::int32_t headCount = 2;
+        corrupt.seekp(
+            offsetof(
+                HybridRoutingStatsHeader,
+                m_headCount));
+        corrupt.write(
+            reinterpret_cast<const char*>(
+                &headCount),
+            sizeof(headCount));
+        corrupt.seekp(0);
         const std::uint32_t badMagic = 0;
         corrupt.write(
             reinterpret_cast<const char*>(&badMagic),
             sizeof(badMagic));
     }
-    BOOST_CHECK(!loaded.Load(path, error));
+    BOOST_CHECK(
+        !loaded.Load(path, 3, 2, 1234, error));
     BOOST_CHECK(!error.empty());
     std::filesystem::remove(path);
 }

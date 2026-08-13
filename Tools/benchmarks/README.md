@@ -39,15 +39,25 @@ Release/spannaclbench ... \
   --search-ini Tools/benchmarks/search_turbopuffer_sift1m_tenant0_n20.ini
 ```
 
-## Random-Head Hybrid Distance Routing
+## BKT-Head Hybrid Distance Routing
 
-`build_spann_attr_sift1m_tagged_4node_static_hybrid_distance.ini` is the
-hybrid-on experiment; `build_spann_attr_sift1m_tagged_4node_static_random_control.ini`
-is its matched hybrid-off control. Both use deterministic
-`SelectHeadType=Random`. Hybrid mode preserves the original pure-vector graph
-and complete pure+tail STM1 postings for unfiltered and broad-filter queries,
-then adds a separate hybrid graph and no-tail STM1 sidecar for restrictive
-filters:
+`build_spann_attr_sift1m_global_static_hybrid_distance.ini` is the hybrid-on
+experiment; `build_spann_attr_sift1m_global_static_bkt_control.ini` is its
+matched hybrid-off control. Both retain the canonical SIFT1M BKT head
+selection and degree-32 vector graph. Hybrid mode appends degree-16
+hybrid-distance edges through the standard `head_cross_edges.bin` runtime
+suffix; its marked version-2 extension binds the suffix to both the build
+generation and deterministic hybrid content, including the ordered serialized
+edge body. It does not create a second graph store or attribute subset. Its
+sole STM1 posting is:
+
+```text
+H | (O \ H)
+```
+
+Here `H` is the hybrid-distance pure prefix and `O` is the complete original
+vector-distance pure+tail posting. The suffix preserves every record in `O`
+that is absent from `H`, sorted by vector distance:
 
 ```text
 D_hybrid = w_v D_vector
@@ -55,9 +65,12 @@ D_hybrid = w_v D_vector
          + sum_j w_num,j |query_j - head_j|
 ```
 
-Unfiltered queries are never eligible for the hybrid route. Filtered queries
-compare both layouts with persisted selectivity, enrichment, duplicate ratio,
-and physical posting statistics:
+Unfiltered queries always navigate the original degree-32 graph and scan the
+full contiguous pure+tail posting. Filtered queries use the persisted cost
+model to choose either hybrid navigation plus the pure prefix, or original
+navigation plus the full posting. No second posting, overlap bitmap, sparse
+exact-set reconstruction, or single-attribute partition exists. Exact
+record-level flat or DNF filtering remains authoritative on either route:
 
 ```text
 Y_r = min(R_r, s E_r R_r U_r)

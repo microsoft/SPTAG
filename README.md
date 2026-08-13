@@ -226,6 +226,17 @@ This fork adds production-grade multi-tenant support on top of SPANN:
 ### ACL/Tag Filtered Search
 - **STM1 static metadata**: static records store `[VID | tags[N] | vector]`;
   flat ACL checks are exact and scan only each posting's pure prefix.
+- **Hybrid STM1 v2 posting**: let `O` be the original vector-distance
+  pure+tail posting and `H` the hybrid-distance pure prefix. The single
+  posting stores `H | (O \ H)`; the suffix preserves every original record
+  absent from `H`, is sorted by vector distance, and contains no duplicate
+  VID from the prefix. Filtered search chooses the pure prefix or the full
+  posting; unfiltered search always scans the full contiguous posting.
+- **Hybrid BKT navigation**: the original degree-32 vector graph is unchanged;
+  degree-16 hybrid edges use the generation- and content-bound
+  `head_cross_edges.bin` runtime suffix rather than a second graph store.
+  Hybrid mode requires `ExcludeHead=true` so global head VIDs remain
+  available for deterministic suffix validation after reload.
 - **Trailing numeric attributes**: if tags include numeric columns after categorical
   ACL columns, set `[BuildSSDIndex] StaticACLTagCols=<categorical-column-count>`
   (SIFT tags5 uses `4`). The default `0` checks every tag column and is only safe

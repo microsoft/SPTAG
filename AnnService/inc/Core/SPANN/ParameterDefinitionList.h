@@ -84,8 +84,6 @@ DefineSSDParameter(m_enablePostingListRearrange, bool, false, "EnablePostingList
 DefineSSDParameter(m_enableOrderedPageStart, bool, false, "EnableOrderedPageStart")
 DefineSSDParameter(m_orderedPageStartAttrs, std::string, std::string(""), "OrderedPageStartAttrs")
 DefineSSDParameter(m_enableHybridDistance, bool, false, "EnableHybridDistance")
-DefineSSDParameter(m_hybridPostingFile, std::string, std::string("SPTAGHybridList.bin"), "HybridPostingFile")
-DefineSSDParameter(m_hybridHeadGraphFile, std::string, std::string("head_hybrid_edges.bin"), "HybridHeadGraphFile")
 DefineSSDParameter(m_hybridGenerationFingerprint, std::string, std::string("0"), "HybridGenerationFingerprint")
 DefineSSDParameter(m_hybridVectorWeight, float, 1.0f, "HybridVectorWeight")
 DefineSSDParameter(m_hybridCategoricalCols, std::string, std::string(""), "HybridCategoricalCols")

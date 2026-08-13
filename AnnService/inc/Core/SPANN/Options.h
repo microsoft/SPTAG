@@ -91,8 +91,6 @@ namespace SPTAG {
             bool m_enableOrderedPageStart;
             std::string m_orderedPageStartAttrs;
             bool m_enableHybridDistance;
-            std::string m_hybridPostingFile;
-            std::string m_hybridHeadGraphFile;
             std::string m_hybridGenerationFingerprint;
             float m_hybridVectorWeight;
             std::string m_hybridCategoricalCols;

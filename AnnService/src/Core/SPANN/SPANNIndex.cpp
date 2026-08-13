@@ -7,7 +7,6 @@
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
-#include "inc/Core/SPANN/HybridArtifactPaths.h"
 #include "inc/Core/SPANN/HeadCrossEdgeBuilder.h"
 #include "inc/Core/SPANN/PrimaryHeadCSR.h"
 #include "inc/Helper/AtomicFile.h"
@@ -54,6 +53,8 @@ constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
 constexpr std::int32_t kHeadBundleManifestVersion = 2;
 
 constexpr std::int32_t kHeadNodeRoutingIndexVersion = 1;
+constexpr int kRequiredHybridBaseGraphDegree = 32;
+constexpr int kRequiredHybridGraphDegree = 16;
 
 bool ParseHybridGeneration(
     const std::string& p_value,
@@ -616,31 +617,14 @@ template <typename T> ErrorCode Index<T>::SaveLoadedHeadBundles(const std::strin
             hybridEnabledValue.c_str(), hybridEnabled);
     }
     if (hybridEnabled) {
-        std::string artifactError;
-        if (!ValidateHybridArtifactPaths(
-                m_options, sourceBaseDir,
-                artifactError) ||
-            !ValidateHybridArtifactPaths(
-                m_options, baseDir,
-                artifactError)) {
-            SPTAGLIB_LOG(
-                Helper::LogLevel::LL_Error,
-                "Invalid hybrid artifact paths: %s.\n",
-                artifactError.c_str());
-            return ErrorCode::Fail;
-        }
-        std::string graphFile = GetParameter(
-            "HybridHeadGraphFile", "BuildSSDIndex");
-        if (graphFile.empty() || graphFile == "Undefined!") {
-            graphFile = "head_hybrid_edges.bin";
-        }
         if (!CopyFileAtomically(
-                sourceHeadDir + FolderSep + graphFile,
-                targetHeadDir + FolderSep + graphFile)) {
+                sourceHeadDir + FolderSep +
+                    Helper::kHeadCrossEdgesFileName,
+                targetHeadDir + FolderSep +
+                    Helper::kHeadCrossEdgesFileName)) {
             SPTAGLIB_LOG(
                 Helper::LogLevel::LL_Error,
-                "Failed to checkpoint hybrid head graph %s.\n",
-                graphFile.c_str());
+                "Failed to checkpoint hybrid head cross edges.\n");
             return ErrorCode::FailedCreateFile;
         }
     }
@@ -1262,13 +1246,15 @@ template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std:
         std::lock_guard<std::mutex> mapLock(m_globalHeadVIDToLocalHIDMutex);
         m_globalHeadVIDToLocalHID.clear();
     }
-    m_headHybridEdgeSize = 0;
-    m_headHybridEdgeTotal = 0;
     m_hybridHeadGraph.Clear();
     m_hybridDistance = HybridDistanceConfig();
     m_headHybridGraphLoaded.store(false, std::memory_order_release);
     m_headInlineCrossEdgeSize = 0;
     m_headInlineCrossEdgeTotal = 0;
+    m_headInlineEdgesHybrid = false;
+    m_headInlineCrossEdgeGeneration = 0;
+    m_headInlineCrossEdgeContent = 0;
+    m_headInlineCrossEdgeBodyFingerprint = 0;
     m_headLocatorLocalBits = 0;
     m_headLocatorLocalMask = 0;
     m_headBundleNodeByB.clear();
@@ -1574,8 +1560,7 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
 }
 
 template <typename T>
-ErrorCode Index<T>::LoadHeadHybridGraph(
-    bool p_requireRoutingStats) const
+ErrorCode Index<T>::LoadHeadHybridGraph() const
 {
     bool enabled = false;
     const std::string enabledValue =
@@ -1597,8 +1582,6 @@ ErrorCode Index<T>::LoadHeadHybridGraph(
     if (!enabled) {
         m_hybridHeadGraph.Clear();
         m_hybridDistance = HybridDistanceConfig();
-        m_headHybridEdgeSize = 0;
-        m_headHybridEdgeTotal = 0;
         m_headHybridGraphLoaded.store(
             true, std::memory_order_release);
         return ErrorCode::Success;
@@ -1619,6 +1602,16 @@ ErrorCode Index<T>::LoadHeadHybridGraph(
             "Hybrid distance requires STATIC metadata postings.\n");
         return ErrorCode::Fail;
     }
+    if (m_headBundleNodes.size() != 1 ||
+        m_loadedHeadBundleIndexes.size() != 1 ||
+        m_headBundleLocalToGlobalHIDs.size() != 1 ||
+        m_options.m_buildCrossEdges) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires exactly one global head node and "
+            "CrossEdges=false; attribute bundle subsets are unsupported.\n");
+        return ErrorCode::Fail;
+    }
 
     for (const auto& node : m_headBundleNodes) {
         if (EnsureHeadBundleNodeLoaded(node.nodeId) !=
@@ -1629,9 +1622,23 @@ ErrorCode Index<T>::LoadHeadHybridGraph(
     if (EnsureHeadBundleDenseMaps() != ErrorCode::Success) {
         return ErrorCode::Fail;
     }
+    auto* baseHead = dynamic_cast<BKT::Index<T>*>(
+        m_loadedHeadBundleIndexes.front().get());
+    if (baseHead == nullptr ||
+        baseHead->GetMutableGraph()
+                .m_iNeighborhoodSize !=
+            kRequiredHybridBaseGraphDegree) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid reload requires the canonical degree-%d "
+            "BKT base graph.\n",
+            kRequiredHybridBaseGraphDegree);
+        return ErrorCode::Fail;
+    }
 
     float vectorWeight = 1.0f;
     int degree = 16;
+    int candidateCount = 128;
     Helper::Convert::ConvertStringTo<float>(
         GetParameter(
             "HybridVectorWeight", "BuildSSDIndex").c_str(),
@@ -1640,9 +1647,21 @@ ErrorCode Index<T>::LoadHeadHybridGraph(
         GetParameter(
             "HybridGraphDegree", "BuildSSDIndex").c_str(),
         degree);
+    Helper::Convert::ConvertStringTo<int>(
+        GetParameter(
+            "HybridCandidateCount",
+            "BuildSSDIndex").c_str(),
+        candidateCount);
     std::string configError;
     HybridDistanceConfig distance;
-    if (degree <= 0 ||
+    if (degree != kRequiredHybridGraphDegree) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "HybridGraphDegree must be %d, got %d.\n",
+            kRequiredHybridGraphDegree, degree);
+        return ErrorCode::Fail;
+    }
+    if (candidateCount <= 0 ||
         !HybridDistanceConfig::Parse(
             GetParameter(
                 "HybridCategoricalCols", "BuildSSDIndex"),
@@ -1671,44 +1690,18 @@ ErrorCode Index<T>::LoadHeadHybridGraph(
         expectedHeadCounts.push_back(
             static_cast<SizeType>(localToGlobal.size()));
     }
-    std::string graphFile = GetParameter(
-        "HybridHeadGraphFile", "BuildSSDIndex");
-    if (graphFile.empty() || graphFile == "Undefined!") {
-        graphFile = "head_hybrid_edges.bin";
-    }
-    std::string baseDir = m_headBundleBaseDir;
-    if (baseDir.empty()) {
-        baseDir = m_options.m_indexDirectory;
-    }
-    std::string artifactError;
-    if (!ValidateHybridArtifactPaths(
-            m_options, baseDir, artifactError)) {
+    if (expectedHeadCounts.size() != 1 ||
+        expectedHeadCounts[0] <= 0 ||
+        LoadHeadCrossEdges() != ErrorCode::Success ||
+        !m_headInlineEdgesHybrid ||
+        m_headInlineCrossEdgeSize != degree ||
+        m_headInlineCrossEdgeTotal == 0 ||
+        m_headInlineCrossEdgeBodyFingerprint == 0) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Invalid hybrid artifact paths: %s.\n",
-            artifactError.c_str());
-        return ErrorCode::Fail;
-    }
-    std::string path = baseDir;
-    if (!path.empty() && path.back() != FolderSep) {
-        path += FolderSep;
-    }
-    path += m_options.m_headIndexFolder;
-    if (!path.empty() && path.back() != FolderSep) {
-        path += FolderSep;
-    }
-    path += graphFile;
-
-    HybridHeadGraph graph;
-    std::string loadError;
-    if (!graph.Load(
-            path, expectedHeadCounts,
-            m_options.m_numTagsPerVec, degree,
-            loadError)) {
-        SPTAGLIB_LOG(
-            Helper::LogLevel::LL_Error,
-            "Cannot load enabled hybrid head graph: %s.\n",
-            loadError.c_str());
+            "Hybrid distance requires a degree-%d hybrid "
+            "head_cross_edges.bin runtime suffix.\n",
+            degree);
         return ErrorCode::Fail;
     }
     std::uint64_t expectedGeneration = 0;
@@ -1716,92 +1709,117 @@ ErrorCode Index<T>::LoadHeadHybridGraph(
             GetParameter(
                 "HybridGenerationFingerprint",
                 "BuildSSDIndex"),
-            expectedGeneration) ||
-        graph.m_generationFingerprint !=
-            expectedGeneration) {
+            expectedGeneration)) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Hybrid head graph generation mismatch "
-            "(config=%llu graph=%llu).\n",
+            "Hybrid head cross edges have no valid build generation.\n");
+        return ErrorCode::Fail;
+    }
+    if (m_hybridRoutingStats.Empty() ||
+        expectedGeneration !=
+            m_hybridRoutingStats
+                .m_generationFingerprint ||
+        expectedGeneration !=
+            m_headInlineCrossEdgeGeneration ||
+        m_hybridRoutingStats.m_numTagColumns !=
+            m_options.m_numTagsPerVec ||
+        m_hybridRoutingStats.HeadCount() !=
+            expectedHeadCounts[0]) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid cross-edge/posting metadata mismatch "
+            "(config=%llu posting=%llu heads=%d/%d tags=%d/%d).\n",
             static_cast<unsigned long long>(
                 expectedGeneration),
             static_cast<unsigned long long>(
-                graph.m_generationFingerprint));
+                m_hybridRoutingStats
+                    .m_generationFingerprint),
+            static_cast<int>(
+                expectedHeadCounts[0]),
+            static_cast<int>(
+                m_hybridRoutingStats.HeadCount()),
+            m_options.m_numTagsPerVec,
+            m_hybridRoutingStats.m_numTagColumns);
         return ErrorCode::Fail;
     }
-    if (p_requireRoutingStats &&
-        (m_hybridRoutingStats.Empty() ||
-         graph.m_generationFingerprint !=
-             m_hybridRoutingStats
-                 .m_generationFingerprint)) {
+    HybridGenerationFingerprint contentFingerprint(
+        distance, m_options.m_numTagsPerVec,
+        degree, candidateCount);
+    HybridHeadGraph graph;
+    graph.m_numTagColumns =
+        m_hybridRoutingStats.m_numTagColumns;
+    graph.m_degree = degree;
+    graph.m_generationFingerprint =
+        expectedGeneration;
+    graph.m_contentFingerprint =
+        m_headInlineCrossEdgeContent;
+    graph.m_edgeBodyFingerprint =
+        m_headInlineCrossEdgeBodyFingerprint;
+    graph.m_nodes.resize(1);
+    graph.m_nodes[0].m_nodeID = 0;
+    graph.m_nodes[0].m_headCount =
+        expectedHeadCounts[0];
+    graph.m_nodes[0].m_attributes.resize(
+        static_cast<size_t>(expectedHeadCounts[0]) *
+        static_cast<size_t>(
+            m_options.m_numTagsPerVec));
+    const auto& localToGlobal =
+        m_headBundleLocalToGlobalHIDs.front();
+    for (SizeType local = 0;
+         local < expectedHeadCounts[0]; ++local) {
+        const SizeType globalHead =
+            localToGlobal[static_cast<size_t>(local)];
+        if (globalHead < 0 ||
+            globalHead >= m_vectorTranslateMap.R()) {
+            return ErrorCode::Fail;
+        }
+        const auto* attributes =
+            m_hybridRoutingStats.HeadAttributes(
+                globalHead);
+        if (attributes == nullptr) {
+            return ErrorCode::Fail;
+        }
+        std::copy_n(
+            attributes,
+            m_options.m_numTagsPerVec,
+            graph.m_nodes[0].m_attributes.data() +
+                static_cast<size_t>(local) *
+                    static_cast<size_t>(
+                        m_options.m_numTagsPerVec));
+        contentFingerprint.AddHead(
+            static_cast<SizeType>(
+                *(m_vectorTranslateMap[globalHead])),
+            attributes);
+    }
+    contentFingerprint.AddEdgeBody(
+        m_headInlineCrossEdgeBodyFingerprint);
+    if (contentFingerprint.Value() !=
+        m_headInlineCrossEdgeContent) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Hybrid graph/posting generation fingerprint mismatch "
-            "(graph=%llu posting=%llu).\n",
+            "Hybrid distance configuration/content mismatch "
+            "(runtime=%llu cross=%llu).\n",
             static_cast<unsigned long long>(
-                graph.m_generationFingerprint),
+                contentFingerprint.Value()),
             static_cast<unsigned long long>(
-                m_hybridRoutingStats
-                    .m_generationFingerprint));
+                m_headInlineCrossEdgeContent));
         return ErrorCode::Fail;
+    }
+    for (auto& node : graph.m_nodes) {
+        std::vector<SizeType>().swap(
+            node.m_neighbors);
     }
     m_hybridHeadGraph = std::move(graph);
     m_hybridDistance = std::move(distance);
-    m_headHybridEdgeSize =
-        static_cast<DimensionType>(
-            m_hybridHeadGraph.m_degree);
-    m_headHybridEdgeTotal =
-        m_hybridHeadGraph.TotalEdges();
-
-    SizeType maxLocalCount = 0;
-    int maxNodeID = -1;
-    for (size_t nodeID = 0;
-         nodeID < m_hybridHeadGraph.m_nodes.size();
-         ++nodeID) {
-        maxLocalCount = (std::max)(
-            maxLocalCount,
-            m_hybridHeadGraph.m_nodes[nodeID].m_headCount);
-        maxNodeID = (std::max)(
-            maxNodeID, static_cast<int>(nodeID));
-    }
-    const auto requiredBits =
-        [](std::uint64_t p_value) {
-            DimensionType bits = 0;
-            while (p_value != 0) {
-                ++bits;
-                p_value >>= 1;
-            }
-            return bits;
-        };
-    if (maxLocalCount <= 0 || maxNodeID < 0) {
-        return ErrorCode::Fail;
-    }
-    const DimensionType localBits = (std::max)(
-        static_cast<DimensionType>(1),
-        requiredBits(
-            static_cast<std::uint64_t>(
-                maxLocalCount - 1)));
-    const DimensionType nodeBits = requiredBits(
-        static_cast<std::uint64_t>(maxNodeID));
-    if (localBits + nodeBits >
-        static_cast<DimensionType>(
-            (std::numeric_limits<SizeType>::digits))) {
-        return ErrorCode::Fail;
-    }
-    m_headLocatorLocalBits = localBits;
-    m_headLocatorLocalMask = static_cast<SizeType>(
-        (static_cast<std::uint64_t>(1) << localBits) - 1);
     m_headHybridGraphLoaded.store(
         true, std::memory_order_release);
     SPTAGLIB_LOG(
         Helper::LogLevel::LL_Info,
-        "Loaded hybrid head graph: nodes=%zu heads=%d "
+        "Loaded hybrid head cross edges: heads=%d "
         "degree=%d edges=%zu tagCols=%d.\n",
-        m_hybridHeadGraph.m_nodes.size(),
-        static_cast<int>(m_hybridHeadGraph.TotalHeads()),
-        m_hybridHeadGraph.m_degree,
-        m_headHybridEdgeTotal,
-        m_hybridHeadGraph.m_numTagColumns);
+        static_cast<int>(expectedHeadCounts[0]),
+        degree, m_headInlineCrossEdgeTotal,
+        m_options.m_numTagsPerVec);
     return ErrorCode::Success;
 }
 
@@ -1814,10 +1832,11 @@ ErrorCode Index<T>::LoadHybridRoutingStats()
     }
     if (m_options.m_storage != Storage::STATIC ||
         m_extraSearcher == nullptr ||
-        !m_extraSearcher->HasHybridPostings()) {
+        !m_extraSearcher->HasHybridPurePostings()) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Enabled hybrid routing requires loaded STATIC hybrid postings.\n");
+            "Enabled hybrid routing requires a loaded STATIC hybrid pure "
+            "prefix in the primary posting.\n");
         return ErrorCode::Fail;
     }
     const bool validCostConfig =
@@ -1853,25 +1872,44 @@ ErrorCode Index<T>::LoadHybridRoutingStats()
     if (!path.empty() && path.back() != FolderSep) {
         path += FolderSep;
     }
-    path += m_options.m_hybridPostingFile + ".stats";
+    path += m_options.m_ssdIndex +
+        ".hybrid.stats";
     std::string error;
-    if (!m_hybridRoutingStats.Load(path, error)) {
+    std::uint64_t configuredGeneration = 0;
+    const int expectedHeadCount =
+        m_extraSearcher->GetPostingCount();
+    if (!ParseHybridGeneration(
+            GetParameter(
+                "HybridGenerationFingerprint",
+                "BuildSSDIndex"),
+            configuredGeneration) ||
+        expectedHeadCount <= 0) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Enabled hybrid routing has no valid generation or posting count.\n");
+        return ErrorCode::Fail;
+    }
+    if (!m_hybridRoutingStats.Load(
+            path,
+            m_options.m_numTagsPerVec,
+            expectedHeadCount,
+            configuredGeneration,
+            error)) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
             "Cannot load enabled hybrid routing statistics: %s.\n",
             error.c_str());
         return ErrorCode::Fail;
     }
-    if (m_headHybridGraphLoaded.load(
-            std::memory_order_acquire) &&
-        m_hybridHeadGraph.m_generationFingerprint !=
-            m_hybridRoutingStats.m_generationFingerprint) {
+    if (configuredGeneration !=
+            m_hybridRoutingStats
+                .m_generationFingerprint) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Hybrid graph/posting generation fingerprint mismatch "
-            "(graph=%llu posting=%llu).\n",
+            "Hybrid cross-edge/primary-posting generation mismatch "
+            "(config=%llu posting=%llu).\n",
             static_cast<unsigned long long>(
-                m_hybridHeadGraph.m_generationFingerprint),
+                configuredGeneration),
             static_cast<unsigned long long>(
                 m_hybridRoutingStats.m_generationFingerprint));
         m_hybridRoutingStats = HybridRoutingStats();
@@ -1903,7 +1941,7 @@ ErrorCode Index<T>::LoadHybridRoutingStats()
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
             "Hybrid routing statistics do not match loaded posting layouts "
-            "(records primary %.6f/%.6f hybrid %.6f/%.6f).\n",
+            "(records full %.6f/%.6f pure %.6f/%.6f).\n",
             originalRecords,
             m_hybridRoutingStats.m_original.m_layout
                 .m_averageRecords,
@@ -1925,12 +1963,12 @@ ErrorCode Index<T>::LoadHybridRoutingStats()
                 m_extraSearcher->GetPostingAvgBytes(
                     p_hybrid);
         };
-    refreshLayout(m_hybridRoutingStats.m_original, false);
-    refreshLayout(m_hybridRoutingStats.m_hybrid, true);
-    SPTAGLIB_LOG(
+        refreshLayout(m_hybridRoutingStats.m_original, false);
+        refreshLayout(m_hybridRoutingStats.m_hybrid, true);
+        SPTAGLIB_LOG(
         Helper::LogLevel::LL_Info,
-        "Loaded hybrid route stats: primary %.2f rec/%.2f pages, "
-        "hybrid %.2f rec/%.2f pages, masks=%zu.\n",
+        "Loaded hybrid route stats: full pure+tail %.2f rec/%.2f pages, "
+        "pure %.2f rec/%.2f pages, masks=%zu.\n",
         m_hybridRoutingStats.m_original.m_layout
             .m_averageRecords,
         m_hybridRoutingStats.m_original.m_layout
@@ -1955,26 +1993,36 @@ ErrorCode Index<T>::EnsureHeadHybridGraph()
             enabledValue.c_str(), enabled);
     }
     if (!enabled) return ErrorCode::Success;
-    std::string artifactError;
-    if (!ValidateHybridArtifactPaths(
-            m_options,
-            m_options.m_indexDirectory,
-            artifactError)) {
-        SPTAGLIB_LOG(
-            Helper::LogLevel::LL_Error,
-            "Invalid hybrid artifact paths: %s.\n",
-            artifactError.c_str());
-        return ErrorCode::Fail;
-    }
     if (m_options.m_storage != Storage::STATIC ||
+        !Helper::StrUtils::StrEqualIgnoreCase(
+            m_options.m_selectType.c_str(), "BKT") ||
         m_pendingVectorTags.empty() ||
         m_pendingNumTagsPerVec <= 0 ||
+        m_headBundleNodes.size() != 1 ||
+        m_loadedHeadBundleIndexes.size() != 1 ||
+        m_pendingNodeHeadSelections.size() != 1 ||
+        m_options.m_buildCrossEdges ||
+        m_options.m_ssdIndexFileNum != 1 ||
+        m_options.m_batches != 1 ||
+        m_options.m_tailReplicaCount <= 0 ||
+        m_options.m_unfilterTailBufferLength >= 0 ||
+        m_options.m_enableOrderedPageStart ||
+        m_options.m_enableDeltaEncoding ||
+        m_options.m_enablePostingListRearrange ||
+        m_options.m_enableDataCompression ||
+        (!m_options.m_postingQuantizer.empty() &&
+         !Helper::StrUtils::StrEqualIgnoreCase(
+             m_options.m_postingQuantizer.c_str(),
+             "None")) ||
+        m_options.m_unfilterPureDistanceScanPercent != 100 ||
         m_pendingNodeHeadSelections.size() !=
             m_loadedHeadBundleIndexes.size()) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Hybrid head build requires raw tags and loaded "
-            "bundle head selections.\n");
+            "Hybrid head build requires the original BKT head selector, raw "
+            "tags, one global head node, one raw STM1 file, an unbounded "
+            "deduplicated vector tail, no ordered-page layout, and no "
+            "conventional cross-bundle edges.\n");
         return ErrorCode::Fail;
     }
     for (const auto& node : m_headBundleNodes) {
@@ -1982,6 +2030,19 @@ ErrorCode Index<T>::EnsureHeadHybridGraph()
             ErrorCode::Success) {
             return ErrorCode::Fail;
         }
+    }
+    auto* baseHead = dynamic_cast<BKT::Index<T>*>(
+        m_loadedHeadBundleIndexes.front().get());
+    if (baseHead == nullptr ||
+        baseHead->GetMutableGraph()
+                .m_iNeighborhoodSize !=
+            kRequiredHybridBaseGraphDegree) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid head build requires the canonical degree-%d "
+            "BKT base graph.\n",
+            kRequiredHybridBaseGraphDegree);
+        return ErrorCode::Fail;
     }
 
     float vectorWeight = 1.0f;
@@ -2001,7 +2062,14 @@ ErrorCode Index<T>::EnsureHeadHybridGraph()
         candidateCount);
     HybridDistanceConfig distance;
     std::string error;
-    if (degree <= 0 || candidateCount <= 0 ||
+    if (degree != kRequiredHybridGraphDegree) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "HybridGraphDegree must be %d, got %d.\n",
+            kRequiredHybridGraphDegree, degree);
+        return ErrorCode::Fail;
+    }
+    if (candidateCount <= 0 ||
         !HybridDistanceConfig::Parse(
             GetParameter(
                 "HybridCategoricalCols", "BuildSSDIndex"),
@@ -2049,11 +2117,6 @@ ErrorCode Index<T>::EnsureHeadHybridGraph()
     m_extraSearcher
         ->SetHybridGenerationFingerprint(
             graph.m_generationFingerprint);
-    std::string graphFile = GetParameter(
-        "HybridHeadGraphFile", "BuildSSDIndex");
-    if (graphFile.empty() || graphFile == "Undefined!") {
-        graphFile = "head_hybrid_edges.bin";
-    }
     std::string path = m_options.m_indexDirectory;
     if (!path.empty() && path.back() != FolderSep) {
         path += FolderSep;
@@ -2062,28 +2125,64 @@ ErrorCode Index<T>::EnsureHeadHybridGraph()
     if (!path.empty() && path.back() != FolderSep) {
         path += FolderSep;
     }
-    path += graphFile;
-    if (!graph.Save(path, error)) {
+    path += Helper::kHeadCrossEdgesFileName;
+    if (!graph.SaveCrossEdges(
+            path, m_pendingNodeHeadSelections,
+            candidateCount, error)) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
             "%s.\n", error.c_str());
         return ErrorCode::Fail;
     }
+    std::string dirtyPath = m_options.m_indexDirectory;
+    if (!dirtyPath.empty() &&
+        dirtyPath.back() != FolderSep) {
+        dirtyPath += FolderSep;
+    }
+    dirtyPath += m_options.m_headIndexFolder;
+    if (!dirtyPath.empty() &&
+        dirtyPath.back() != FolderSep) {
+        dirtyPath += FolderSep;
+    }
+    dirtyPath += Helper::kHeadCrossEdgesDirtyFileName;
+    std::remove(dirtyPath.c_str());
 
-    m_headHybridGraphLoaded.store(
+    for (auto& node : graph.m_nodes) {
+        std::vector<SizeType>().swap(
+            node.m_neighbors);
+    }
+    m_hybridHeadGraph = std::move(graph);
+    m_hybridDistance = std::move(distance);
+    m_headCrossEdgesDirty.store(
         false, std::memory_order_release);
-    m_hybridHeadGraph.Clear();
-    m_headHybridEdgeSize = 0;
-    m_headHybridEdgeTotal = 0;
-    if (LoadHeadHybridGraph(false) != ErrorCode::Success) {
+    m_headCrossEdgesLoaded.store(
+        false, std::memory_order_release);
+    m_headInlineCrossEdgeSize = 0;
+    m_headInlineCrossEdgeTotal = 0;
+    m_headInlineEdgesHybrid = false;
+    m_headInlineCrossEdgeGeneration = 0;
+    m_headInlineCrossEdgeContent = 0;
+    m_headInlineCrossEdgeBodyFingerprint = 0;
+    if (LoadHeadCrossEdges() != ErrorCode::Success ||
+        !m_headInlineEdgesHybrid ||
+        m_headInlineCrossEdgeSize != degree ||
+        m_headInlineCrossEdgeTotal == 0 ||
+        m_headInlineCrossEdgeGeneration !=
+            m_hybridHeadGraph.m_generationFingerprint ||
+        m_headInlineCrossEdgeContent !=
+            m_hybridHeadGraph.m_contentFingerprint ||
+        m_headInlineCrossEdgeBodyFingerprint !=
+            m_hybridHeadGraph.m_edgeBodyFingerprint) {
         return ErrorCode::Fail;
     }
+    m_headHybridGraphLoaded.store(
+        true, std::memory_order_release);
     SPTAGLIB_LOG(
         Helper::LogLevel::LL_Info,
-        "Built hybrid head graph: degree=%d candidates=%d "
+        "Built hybrid head cross edges: degree=%d candidates=%d "
         "edges=%zu file=%s.\n",
         degree, candidateCount,
-        m_headHybridEdgeTotal, path.c_str());
+        m_headInlineCrossEdgeTotal, path.c_str());
     return ErrorCode::Success;
 }
 
@@ -2122,9 +2221,6 @@ ErrorCode Index<T>::ResizeInlineHeadCrossEdges(
 
 template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
 {
-    if (LoadHeadHybridGraph() != ErrorCode::Success) {
-        return ErrorCode::Fail;
-    }
     if (m_headCrossEdgesDirty.load(std::memory_order_acquire)) {
         return ErrorCode::Success;
     }
@@ -2185,23 +2281,74 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     const auto invalidate = [this]() {
         m_headInlineCrossEdgeSize = 0;
         m_headInlineCrossEdgeTotal = 0;
-        if (m_headHybridEdgeSize == 0) {
-            m_headLocatorLocalBits = 0;
-            m_headLocatorLocalMask = 0;
-        }
+        m_headInlineEdgesHybrid = false;
+        m_headInlineCrossEdgeGeneration = 0;
+        m_headInlineCrossEdgeContent = 0;
+        m_headInlineCrossEdgeBodyFingerprint = 0;
+        m_headLocatorLocalBits = 0;
+        m_headLocatorLocalMask = 0;
         (void)ResizeInlineHeadCrossEdges(0);
         m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     };
 
     Helper::HeadCrossEdgesHeader header{};
     if (std::fread(&header, sizeof(header), 1, fp) != 1 ||
-        header.magic != Helper::kHeadCrossEdgesMagic ||
-        header.version != Helper::kHeadCrossEdgesVersion) {
+        header.magic != Helper::kHeadCrossEdgesMagic) {
         std::fclose(fp);
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                      "head_cross_edges.bin format mismatch at %s — ignoring.\n", path.c_str());
         invalidate();
         return ErrorCode::Fail;
+    }
+    const bool hybridEdges =
+        header.reserved ==
+        Helper::kHybridHeadCrossEdgesMarker;
+    const bool versionValid = hybridEdges
+        ? header.version ==
+              Helper::kHybridHeadCrossEdgesVersion
+        : header.version ==
+              Helper::kHeadCrossEdgesVersion;
+    if (!versionValid ||
+        (header.reserved != 0 && !hybridEdges) ||
+        (hybridEdges &&
+         (!m_options.m_enableHybridDistance ||
+          m_headBundleNodes.size() != 1 ||
+          header.maxEdgesPerHead !=
+              kRequiredHybridGraphDegree))) {
+        std::fclose(fp);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Warning,
+            "head_cross_edges.bin marker/topology mismatch at %s "
+            "(marker=%d nodes=%zu M=%d).\n",
+            path.c_str(), header.reserved,
+            m_headBundleNodes.size(),
+            header.maxEdgesPerHead);
+        invalidate();
+        return ErrorCode::Fail;
+    }
+    Helper::HybridHeadCrossEdgesExtension hybridExtension{};
+    if (hybridEdges) {
+        std::uint64_t configuredGeneration = 0;
+        if (std::fread(
+                &hybridExtension,
+                sizeof(hybridExtension), 1, fp) != 1 ||
+            hybridExtension.generationFingerprint == 0 ||
+            hybridExtension.contentFingerprint == 0 ||
+            !ParseHybridGeneration(
+                GetParameter(
+                    "HybridGenerationFingerprint",
+                    "BuildSSDIndex"),
+                configuredGeneration) ||
+            configuredGeneration !=
+                hybridExtension.generationFingerprint) {
+            std::fclose(fp);
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Warning,
+                "Hybrid head_cross_edges.bin generation mismatch at %s.\n",
+                path.c_str());
+            invalidate();
+            return ErrorCode::Fail;
+        }
     }
 
     const SizeType headCount = (m_vectorTranslateMap.R() > 0)
@@ -2324,6 +2471,8 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     size_t nonEmpty = 0;
     size_t rawEdges = 0;
     size_t keptEdges = 0;
+    Helper::HeadCrossEdgesBodyFingerprint
+        loadedBodyFingerprint;
     std::vector<std::uint8_t> sourceSeen(static_cast<size_t>(headCount), 0);
     std::vector<Helper::HeadCrossEdgeEntry> entries(
         static_cast<size_t>(header.maxEdgesPerHead));
@@ -2340,6 +2489,15 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
                 static_cast<size_t>(edgeCount),
                 fp) != static_cast<size_t>(edgeCount)) {
             ok = false; break;
+        }
+        if (hybridEdges) {
+            loadedBodyFingerprint.AddRecord(
+                globalVID, edgeCount);
+            for (std::int32_t edge = 0;
+                 edge < edgeCount; ++edge) {
+                loadedBodyFingerprint.AddEntry(
+                    entries[static_cast<size_t>(edge)]);
+            }
         }
         rawEdges += static_cast<size_t>(edgeCount);
         SizeType srcB = MaxSize;
@@ -2384,8 +2542,10 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
                 neighbor == m_globalHeadVIDToLocalHID.end() ? MaxSize : neighbor->second;
             if (nbrB == MaxSize || nbrB < 0 || nbrB >= headCount ||
                 m_headBundleNodeByB[static_cast<size_t>(nbrB)] < 0 ||
-                m_headBundleNodeByB[static_cast<size_t>(nbrB)] ==
-                    m_headBundleNodeByB[static_cast<size_t>(srcB)]) {
+                nbrB == srcB ||
+                (!hybridEdges &&
+                 m_headBundleNodeByB[static_cast<size_t>(nbrB)] ==
+                     m_headBundleNodeByB[static_cast<size_t>(srcB)])) {
                 ok = false;
                 break;
             }
@@ -2418,6 +2578,9 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
             keptEdges += count;
         }
     }
+    if (ok && std::fgetc(fp) != EOF) {
+        ok = false;
+    }
     std::fclose(fp);
     if (ok && std::find(sourceSeen.begin(), sourceSeen.end(), 0) != sourceSeen.end()) {
         ok = false;
@@ -2433,13 +2596,28 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     m_headInlineCrossEdgeSize =
         static_cast<DimensionType>(header.maxEdgesPerHead);
     m_headInlineCrossEdgeTotal = keptEdges;
+    m_headInlineEdgesHybrid = hybridEdges;
+    m_headInlineCrossEdgeGeneration =
+        hybridEdges
+            ? hybridExtension.generationFingerprint
+            : 0;
+    m_headInlineCrossEdgeContent =
+        hybridEdges
+            ? hybridExtension.contentFingerprint
+            : 0;
+    m_headInlineCrossEdgeBodyFingerprint =
+        hybridEdges
+            ? loadedBodyFingerprint.Value()
+            : 0;
     m_headLocatorLocalBits = localBits;
     m_headLocatorLocalMask = static_cast<SizeType>(localMask64);
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                  "Loaded head_cross_edges.bin inlined: records=%d nonEmpty=%zu rawEdges=%zu keptEdges=%zu "
-                 "M=%d K=%d locatorBits=%d (one local+cross row, encoded target locators).\n",
+                 "M=%d K=%d locatorBits=%d hybrid=%d "
+                 "(one local+runtime-suffix row, encoded target locators).\n",
                  header.totalHeads, nonEmpty, rawEdges, keptEdges,
-                 header.maxEdgesPerHead, header.searchTopK, localBits);
+                 header.maxEdgesPerHead, header.searchTopK, localBits,
+                 hybridEdges ? 1 : 0);
     m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     return ErrorCode::Success;
 }
@@ -2558,7 +2736,8 @@ bool Index<T>::SearchStaticTailCrossGraph(
     COMMON::QueryResultSet<T> results(p_target, p_candidateCount);
     int scanned = 0;
     ErrorCode status = SearchHeadBundleCrossEdgesNative(
-        &results, p_ownerNode, p_candidateCount, scanned);
+        &results, p_ownerNode, p_candidateCount, scanned,
+        false, nullptr, 0, nullptr);
     if (status != ErrorCode::Success) {
         std::vector<int> candidateNodes;
         candidateNodes.reserve(m_headBundleNodes.size());
@@ -2594,18 +2773,22 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
     bool p_useHybrid,
     const std::uint32_t* p_queryTags,
     int p_numQueryTags,
-    const Cache::DNFPredicate* p_queryDNF,
-    const std::vector<int>* p_allowedNodes) const
+    const Cache::DNFPredicate* p_queryDNF) const
 {
     p_scannedOut = 0;
     if (p_queryResults == nullptr || p_graphResultNum <= 0 ||
         p_entryNode < 0 ||
         p_entryNode >= static_cast<int>(m_headBundleNodes.size()) ||
-        (!p_useHybrid &&
-         LoadHeadCrossEdges() != ErrorCode::Success) ||
+        LoadHeadCrossEdges() != ErrorCode::Success ||
+        (p_useHybrid &&
+         LoadHeadHybridGraph() != ErrorCode::Success) ||
         (p_useHybrid
-             ? (m_headHybridEdgeSize <= 0)
+             ? (!m_headInlineEdgesHybrid ||
+                m_headInlineCrossEdgeSize !=
+                    kRequiredHybridGraphDegree ||
+                m_headInlineCrossEdgeTotal == 0)
              : (m_headCrossEdgesDirty.load(std::memory_order_acquire) ||
+                m_headInlineEdgesHybrid ||
                 m_headInlineCrossEdgeSize <= 0 ||
                 m_headInlineCrossEdgeTotal == 0)) ||
         EnsureHeadBundleDenseMaps() != ErrorCode::Success)
@@ -2613,33 +2796,12 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
         return ErrorCode::Fail;
     }
 
-    typename BKT::Index<T>::RuntimeEdgeSearchContext context;
+    typename BKT::Index<T>::CrossGraphSearchContext context;
     context.m_nodes.resize(m_headBundleNodes.size());
     context.m_entryNode = p_entryNode;
     context.m_locatorLocalBits = m_headLocatorLocalBits;
     context.m_locatorLocalMask = m_headLocatorLocalMask;
-    context.m_hybridEdgeCount = m_headHybridEdgeSize;
-    const bool crossEdgesAvailable =
-        !m_headCrossEdgesDirty.load(
-            std::memory_order_acquire) &&
-        m_headInlineCrossEdgeSize > 0 &&
-        m_headInlineCrossEdgeTotal > 0;
-    context.m_crossEdgeCount =
-        crossEdgesAvailable
-            ? m_headInlineCrossEdgeSize
-            : 0;
-    context.m_useHybridEdges = p_useHybrid;
-    if (p_allowedNodes != nullptr) {
-        context.m_allowedNodes.assign(
-            m_headBundleNodes.size(), 0);
-        for (int nodeID : *p_allowedNodes) {
-            if (nodeID >= 0 &&
-                nodeID < static_cast<int>(
-                    context.m_allowedNodes.size())) {
-                context.m_allowedNodes[static_cast<size_t>(nodeID)] = 1;
-            }
-        }
-    }
+    context.m_useHybridDistance = p_useHybrid;
     if (p_useHybrid) {
         std::vector<std::pair<int, std::uint32_t>>
             flatCategoricalValues;
@@ -2730,12 +2892,9 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
         }
         context.m_nodes[nodeId].m_index = nodeIndex;
         context.m_nodes[nodeId].m_localToGlobal = &localToGlobal;
-        if (p_useHybrid) {
-            if (nodeId >= m_hybridHeadGraph.m_nodes.size()) {
-                return ErrorCode::Fail;
-            }
-            context.m_nodes[nodeId].m_hybridEdges =
-                &m_hybridHeadGraph.m_nodes[nodeId].m_neighbors;
+        if (p_useHybrid &&
+            nodeId >= m_hybridHeadGraph.m_nodes.size()) {
+            return ErrorCode::Fail;
         }
         ++loadedNodes;
     }
@@ -2748,8 +2907,8 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
     }
 
     p_queryResults->Reset();
-    typename BKT::Index<T>::RuntimeEdgeSearchStats stats;
-    const ErrorCode status = entryIndex->SearchIndexWithRuntimeEdges(
+    typename BKT::Index<T>::CrossGraphSearchStats stats;
+    const ErrorCode status = entryIndex->SearchIndexWithCrossEdges(
         *p_queryResults,
         context,
         std::max(1, m_options.m_maxCheck),
@@ -2771,7 +2930,7 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
             loadedNodes,
             stats.m_seeded,
             stats.m_expanded,
-            stats.m_hybridEdges,
+            p_useHybrid ? 1 : 0,
             stats.m_checked,
             stats.m_crossEdges);
     }
@@ -2794,90 +2953,6 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
             std::max(1, m_options.m_maxCheck));
     }
     return ErrorCode::Success;
-}
-
-template <typename T>
-ErrorCode Index<T>::SearchHeadBundlesHybridNative(
-    COMMON::QueryResultSet<T>* p_queryResults,
-    const std::vector<int>& p_candidateNodes,
-    int p_graphResultNum,
-    int& p_scannedOut,
-    const std::uint32_t* p_queryTags,
-    int p_numQueryTags,
-    const Cache::DNFPredicate* p_queryDNF) const
-{
-    p_scannedOut = 0;
-    if (p_queryResults == nullptr ||
-        p_graphResultNum <= 0 ||
-        p_candidateNodes.empty()) {
-        return ErrorCode::Fail;
-    }
-    p_queryResults->Reset();
-    std::vector<bool> searched(
-        m_headBundleNodes.size(), false);
-    bool searchedAny = false;
-    double seedMs = 0.0;
-    double graphMs = 0.0;
-    for (int nodeID : p_candidateNodes) {
-        if (nodeID < 0 ||
-            nodeID >= static_cast<int>(
-                m_headBundleNodes.size()) ||
-            searched[static_cast<size_t>(nodeID)]) {
-            continue;
-        }
-        searched[static_cast<size_t>(nodeID)] =
-            true;
-        const auto& localToGlobal =
-            m_headBundleLocalToGlobalHIDs[
-                static_cast<size_t>(nodeID)];
-        const int nodeResultNum = (std::min)(
-            p_graphResultNum,
-            static_cast<int>(
-                localToGlobal.size()));
-        if (nodeResultNum <= 0) continue;
-
-        COMMON::QueryResultSet<T> nodeResults(
-            p_queryResults->GetTarget(),
-            nodeResultNum);
-        const std::vector<int> onlyThisNode = {
-            nodeID};
-        int nodeScanned = 0;
-        const ErrorCode status =
-            SearchHeadBundleCrossEdgesNative(
-                &nodeResults,
-                nodeID,
-                nodeResultNum,
-                nodeScanned,
-                true,
-                p_queryTags,
-                p_numQueryTags,
-                p_queryDNF,
-                &onlyThisNode);
-        if (status != ErrorCode::Success) {
-            return status;
-        }
-        searchedAny = true;
-        p_scannedOut += nodeScanned;
-        seedMs += g_bktSeedMs;
-        graphMs += g_pqGraphMs;
-        for (int rank = 0;
-             rank < nodeResultNum; ++rank) {
-            const BasicResult* result =
-                nodeResults.GetResult(rank);
-            if (result == nullptr ||
-                result->VID < 0) {
-                break;
-            }
-            p_queryResults->AddPoint(
-                result->VID, result->Dist);
-        }
-    }
-    p_queryResults->SortResult();
-    g_bktSeedMs = seedMs;
-    g_pqGraphMs = graphMs;
-    return searchedAny
-        ? ErrorCode::Success
-        : ErrorCode::Fail;
 }
 
 template <typename T>
@@ -3027,6 +3102,14 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
             "Hybrid distance requires IndexAlgoType=BKT.\n");
+        return ErrorCode::FailedParseValue;
+    }
+    if (m_options.m_enableHybridDistance &&
+        !m_options.m_excludehead) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires ExcludeHead=true "
+            "to preserve persisted head VIDs.\n");
         return ErrorCode::FailedParseValue;
     }
 
@@ -3239,11 +3322,13 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
                      "Head cross edges are unavailable; using no-cross bundle traversal.\n");
         m_headInlineCrossEdgeSize = 0;
         m_headInlineCrossEdgeTotal = 0;
+        m_headInlineEdgesHybrid = false;
+        m_headInlineCrossEdgeGeneration = 0;
+        m_headInlineCrossEdgeContent = 0;
+        m_headInlineCrossEdgeBodyFingerprint = 0;
         (void)ResizeInlineHeadCrossEdges(0);
-        if (m_headHybridEdgeSize == 0) {
-            m_headLocatorLocalBits = 0;
-            m_headLocatorLocalMask = 0;
-        }
+        m_headLocatorLocalBits = 0;
+        m_headLocatorLocalMask = 0;
         m_headCrossEdgesDirty.store(true, std::memory_order_release);
         m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     }
@@ -3989,7 +4074,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     if (m_options.m_enableHybridDistance &&
         hasExactFilter &&
         m_extraSearcher != nullptr &&
-        m_extraSearcher->HasHybridPostings() &&
+        m_extraSearcher->HasHybridPurePostings() &&
         !m_hybridRoutingStats.Empty()) {
         std::vector<std::pair<int, std::uint32_t>>
             flatCategoricalValues;
@@ -4231,42 +4316,19 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 if (useHybridRoute)
                 {
                     if (LoadHeadHybridGraph() !=
-                        ErrorCode::Success) {
+                            ErrorCode::Success ||
+                        candidateNodes.size() != 1) {
                         return ErrorCode::Fail;
                     }
-                    const bool useHybridCrossEdges =
-                        candidateNodes.size() > 1 &&
-                        m_options.m_filterKeepCross &&
-                        LoadHeadCrossEdges() ==
-                            ErrorCode::Success &&
-                        !m_headCrossEdgesDirty.load(
-                            std::memory_order_acquire) &&
-                        m_headInlineCrossEdgeSize > 0 &&
-                        m_headInlineCrossEdgeTotal > 0;
-                    if (candidateNodes.size() > 1 &&
-                        !useHybridCrossEdges) {
-                        ret =
-                            SearchHeadBundlesHybridNative(
-                                p_queryResults,
-                                candidateNodes,
-                                graphResultNum,
-                                scanned,
-                                queryTags,
-                                numQueryTags,
-                                queryDNF);
-                    } else {
-                        ret =
-                            SearchHeadBundleCrossEdgesNative(
-                            p_queryResults,
-                            candidateNodes.front(),
-                            graphResultNum,
-                            scanned,
-                            true,
-                            queryTags,
-                            numQueryTags,
-                            queryDNF,
-                            &candidateNodes);
-                    }
+                    ret = SearchHeadBundleCrossEdgesNative(
+                        p_queryResults,
+                        candidateNodes.front(),
+                        graphResultNum,
+                        scanned,
+                        true,
+                        queryTags,
+                        numQueryTags,
+                        queryDNF);
                     if (ret != ErrorCode::Success) {
                         SPTAGLIB_LOG(
                             Helper::LogLevel::LL_Error,
@@ -4280,7 +4342,11 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                         p_queryResults,
                         candidateNodes.front(),
                         graphResultNum,
-                        scanned);
+                        scanned,
+                        false,
+                        nullptr,
+                        0,
+                        nullptr);
                     if (ret != ErrorCode::Success)
                     {
                         p_queryResults->Reset();
@@ -4437,17 +4503,20 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
 
         // Propagate posting-level PS pre-filter (applied in ExtraDynamicSearcher before MultiGet)
-        workSpace->m_useHybridPostings =
+        workSpace->m_useHybridPure =
             useHybridRoute;
         workSpace->m_scanFullPostingForFilter =
             m_options.m_enableHybridDistance &&
             hasExactFilter && !useHybridRoute;
-        // Hybrid routing compares against the complete original pure+tail
-        // layout. Its pure-prefix signature cannot safely reject a list whose
-        // matching records exist only in the tail.
+        // Pure-prefix signatures are safe only for the column-aware DNF hybrid
+        // route. The full route may match only in the tail, while legacy flat
+        // tags are column-agnostic and cannot safely use a column-specific mask.
         workSpace->m_postingFilter =
             m_options.m_enableHybridDistance &&
-                    hasExactFilter
+                    hasExactFilter &&
+                    (!useHybridRoute ||
+                     queryDNF == nullptr ||
+                     queryDNF->Empty())
                 ? nullptr
                 : postingFilter;
         // Propagate inline tag filter (for per-vector exact tag check in posting scan)
@@ -4980,7 +5049,11 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
                 &headResults,
                 candidateNodes.front(),
                 headSearchNum,
-                scanned);
+                scanned,
+                false,
+                nullptr,
+                0,
+                nullptr);
             if (headSearchStatus != ErrorCode::Success) {
                 headResults.Reset();
                 headSearchStatus = SearchHeadBundlesNative(
@@ -5948,6 +6021,14 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
             "Hybrid distance requires IndexAlgoType=BKT.\n");
+        return ErrorCode::FailedParseValue;
+    }
+    if (m_options.m_enableHybridDistance &&
+        !m_options.m_excludehead) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires ExcludeHead=true "
+            "to preserve persisted head VIDs.\n");
         return ErrorCode::FailedParseValue;
     }
     if (!(m_options.m_indexDirectory.empty()) && !(direxists(m_options.m_indexDirectory.c_str())))
@@ -7035,11 +7116,10 @@ ErrorCode Index<T>::MarkCrossEdgesDirty(const std::string& p_baseDir)
     m_headCrossEdgesDirty.store(true, std::memory_order_release);
     m_headInlineCrossEdgeSize = 0;
     m_headInlineCrossEdgeTotal = 0;
+    m_headInlineEdgesHybrid = false;
     (void)ResizeInlineHeadCrossEdges(0);
-    if (m_headHybridEdgeSize == 0) {
-        m_headLocatorLocalBits = 0;
-        m_headLocatorLocalMask = 0;
-    }
+    m_headLocatorLocalBits = 0;
+    m_headLocatorLocalMask = 0;
 
     const std::string baseDir = p_baseDir.empty()
         ? (m_headBundleBaseDir.empty() ? m_options.m_indexDirectory : m_headBundleBaseDir)

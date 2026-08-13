@@ -144,13 +144,25 @@ bool ReadHeader(std::istream& input, std::uint32_t valueBytes, Header& header)
     if (!ReadExact(input, header.magic)) return false;
     if (static_cast<std::uint32_t>(header.magic) == kStaticMetadataMagic) {
         header.format = LayoutFormat::STM1;
-        return ReadExact(input, header.version) &&
+        if (!(ReadExact(input, header.version) &&
             ReadExact(input, header.listCount) &&
             ReadExact(input, header.totalDocumentCount) &&
             ReadExact(input, header.dataDimension) &&
             ReadExact(input, header.recordBytes) &&
             ReadExact(input, header.numTagsPerVec) &&
-            ReadExact(input, header.tailPageBudget) &&
+            ReadExact(input, header.tailPageBudget))) {
+            return false;
+        }
+        if (header.version == 2) {
+            std::uint32_t generationLo = 0;
+            std::uint32_t generationHi = 0;
+            if (!ReadExact(input, generationLo) ||
+                !ReadExact(input, generationHi)) {
+                return false;
+            }
+        }
+        return (header.version == 1 ||
+                header.version == 2) &&
             ReadExact(input, header.listPageOffset);
     }
 
@@ -317,10 +329,17 @@ bool Audit(const Options& options, Header& header, Totals& totals,
         return false;
     }
 
+    const std::uint64_t metadataHeaderInts =
+        !metadataFormat
+        ? 4
+        : (header.version >= 2 ? 11 : 9);
+    const std::uint64_t metadataListInts =
+        metadataFormat ? 3 : 2;
     const std::uint64_t metadataBytes =
-        sizeof(std::int32_t) * (metadataFormat ? 9 : 4) +
+        sizeof(std::int32_t) * metadataHeaderInts +
         static_cast<std::uint64_t>(header.listCount) *
-            (sizeof(std::int32_t) * (metadataFormat ? 3 : 2) + sizeof(std::uint16_t) * 2);
+            (sizeof(std::int32_t) * metadataListInts +
+             sizeof(std::uint16_t) * 2);
     const std::uint64_t postingDataOffset =
         static_cast<std::uint64_t>(header.listPageOffset) * kPageSize;
     if (postingDataOffset < metadataBytes || postingDataOffset > totals.fileBytes) {
@@ -347,7 +366,6 @@ bool Audit(const Options& options, Header& header, Totals& totals,
             std::cerr << "Invalid STATIC list metadata at list " << list << "\n";
             return false;
         }
-
         const std::uint64_t elements = static_cast<std::uint64_t>(listElements);
         const std::uint64_t offset = pageOffset;
         const std::uint64_t currentListBytes =
@@ -523,7 +541,7 @@ bool WriteReport(const Options& options, const Header& header, const Totals& tot
             << "\"Per-list page sums count scan ranges, not unique physical pages in the file.\","
             << "\"The raw counterfactual uses list_ele_count and assumes each list starts at offset zero; it does not model a rebuilt raw bin-packing layout.\","
             << "\"source_best_fit reproduces SelectPostingOffset's largest-fitting-remainder page packing for the current uncompressed list sizes.\","
-            << "\"Use total list elements, not pure elements, for the current unfiltered scan path.\""
+            << "\"STM1 v1/v2 stores one contiguous pure prefix followed by its vector-distance tail; full scans use total list elements.\""
             << "],\n"
             << "  \"page_histograms\":{\n"
             << "    \"current_runtime\":";

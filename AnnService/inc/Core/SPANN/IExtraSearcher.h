@@ -17,6 +17,7 @@
 #include <string>
 #include <chrono>
 #include <atomic>
+#include <algorithm>
 #include <cstdint>
 #include <set>
 
@@ -217,7 +218,7 @@ namespace SPTAG {
                 m_deduper.Init(p_maxCheck, p_hashExp);
                 Clear(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
                 m_relaxedMono = false;
-                m_useHybridPostings = false;
+                m_useHybridPure = false;
                 m_scanFullPostingForFilter = false;
             }
 
@@ -285,7 +286,7 @@ namespace SPTAG {
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
-                m_useHybridPostings = false;
+                m_useHybridPure = false;
                 m_scanFullPostingForFilter = false;
                 if (m_asyncContextID >= 0) {
                     for (auto& request : m_diskRequests) {
@@ -397,7 +398,7 @@ namespace SPTAG {
 
             bool m_loadPosting = false;
 
-            bool m_useHybridPostings = false;
+            bool m_useHybridPure = false;
 
             bool m_scanFullPostingForFilter = false;
 
@@ -629,7 +630,8 @@ namespace SPTAG {
             // Dual-pool: return true if the head at ordinal headOrd is unfilter-only (role==1).
             virtual bool IsUnfilterOnlyHead(int headOrd) const { return false; }
             virtual bool HasHeadRoles() const { return false; }
-            virtual bool HasHybridPostings() const { return false; }
+            virtual bool HasHybridPurePostings() const { return false; }
+            virtual int GetPostingCount() const { return -1; }
             virtual double GetPostingAvgRecords(bool /*p_useHybrid*/ = false) const { return -1.0; }
             virtual double GetPostingAvgPages(bool /*p_useHybrid*/ = false) const { return -1.0; }
             virtual double GetPostingAvgBytes(bool /*p_useHybrid*/ = false) const { return -1.0; }

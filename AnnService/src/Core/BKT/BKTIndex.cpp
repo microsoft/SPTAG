@@ -303,8 +303,8 @@ template <bool EnableCrossEdges,
           bool (*checkFilter)(const std::shared_ptr<MetadataSet> &, SizeType, std::function<bool(const ByteArray &)>)>
 void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space,
                       std::function<bool(const ByteArray &)> filterFunc,
-                      const RuntimeEdgeSearchContext* p_crossContext,
-                      RuntimeEdgeSearchStats* p_crossStats) const
+                      const CrossGraphSearchContext* p_crossContext,
+                      CrossGraphSearchStats* p_crossStats) const
 {
     std::shared_lock<std::shared_timed_mutex> treeLock;
     std::vector<std::shared_lock<std::shared_timed_mutex>> crossTreeLocks;
@@ -354,7 +354,7 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
             float p_vectorDistance) {
             if constexpr (EnableCrossEdges)
             {
-                if (p_crossContext->m_useHybridEdges &&
+                if (p_crossContext->m_useHybridDistance &&
                     p_crossContext->m_queryDistance)
                 {
                     float best =
@@ -411,7 +411,7 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
 
     if constexpr (EnableCrossEdges)
     {
-        if (p_crossContext->m_useHybridEdges)
+        if (p_crossContext->m_useHybridDistance)
         {
             std::vector<NodeDistPair> seeds;
             seeds.reserve(static_cast<size_t>(p_space.m_NGQueue.size()));
@@ -505,12 +505,6 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                 p_crossContext->m_nodes[static_cast<size_t>(p_nodeId)];
             return nodeContext.m_index != nullptr &&
                 nodeContext.m_localToGlobal != nullptr &&
-                (p_crossContext->m_allowedNodes.empty() ||
-                 (static_cast<size_t>(p_nodeId) <
-                      p_crossContext->m_allowedNodes.size() &&
-                  p_crossContext
-                          ->m_allowedNodes[static_cast<size_t>(p_nodeId)] !=
-                      0)) &&
                 p_localId >= 0 &&
                 p_localId < nodeContext.m_index->GetNumSamples() &&
                 static_cast<size_t>(p_localId) <
@@ -535,12 +529,6 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                 p_crossContext->m_nodes[static_cast<size_t>(p_nodeId)];
             return nodeContext.m_index != nullptr &&
                 nodeContext.m_localToGlobal != nullptr &&
-                (p_crossContext->m_allowedNodes.empty() ||
-                 (static_cast<size_t>(p_nodeId) <
-                      p_crossContext->m_allowedNodes.size() &&
-                  p_crossContext
-                          ->m_allowedNodes[static_cast<size_t>(p_nodeId)] !=
-                      0)) &&
                 p_localId >= 0 &&
                 p_localId < nodeContext.m_index->GetNumSamples() &&
                 static_cast<size_t>(p_localId) <
@@ -592,14 +580,10 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
         const DimensionType localEdgeCount =
             currentIndex->m_pGraph.m_iNeighborhoodSize;
         const DimensionType runtimeCrossEdgeCount =
-            EnableCrossEdges &&
-                    p_crossContext->m_crossEdgeCount < 0
+            EnableCrossEdges
                 ? currentIndex->m_pGraph
                       .GetRuntimeEdgeSuffixSize()
-                : (EnableCrossEdges
-                       ? p_crossContext
-                             ->m_crossEdgeCount
-                       : 0);
+                : 0;
         const DimensionType crossEdgeBegin = localEdgeCount;
         const DimensionType edgeCount = crossEdgeBegin +
             runtimeCrossEdgeCount;
@@ -621,7 +605,7 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
         const bool hybridCollapsed =
             checkNode < -1 &&
             EnableCrossEdges &&
-            p_crossContext->m_useHybridEdges;
+            p_crossContext->m_useHybridDistance;
         if (gnode.distance <= p_query.worstDist() ||
             hybridCollapsed)
         {
@@ -653,7 +637,7 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                         if constexpr (EnableCrossEdges)
                         {
                             if (p_crossContext
-                                    ->m_useHybridEdges)
+                                    ->m_useHybridDistance)
                             {
                                 const float vectorDistance =
                                     currentIndex
@@ -832,7 +816,7 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                         GetFeatureDim());
                 const float routeDistance =
                     EnableCrossEdges &&
-                        p_crossContext->m_useHybridEdges &&
+                        p_crossContext->m_useHybridDistance &&
                         p_crossContext->m_queryDistance
                     ? routeDistanceForLocal(
                           targetNode,
@@ -851,39 +835,7 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                 }
             }
         };
-        const auto expandHybridEdges =
-            [&](SizeType p_sourceLocal)
-        {
-            if constexpr (EnableCrossEdges)
-            {
-                if (!p_crossContext->m_useHybridEdges) return;
-                const auto& nodeContext =
-                    p_crossContext->m_nodes[
-                        static_cast<size_t>(currentNode)];
-                if (nodeContext.m_hybridEdges == nullptr) return;
-                const SizeType* hybrid =
-                    nodeContext.m_hybridEdges->data() +
-                    static_cast<size_t>(p_sourceLocal) *
-                        static_cast<size_t>(
-                            p_crossContext->m_hybridEdgeCount);
-                if (p_crossStats != nullptr)
-                {
-                    for (DimensionType edge = 0;
-                         edge < p_crossContext->m_hybridEdgeCount;
-                         ++edge)
-                    {
-                        if (hybrid[edge] < 0) break;
-                        ++p_crossStats->m_hybridEdges;
-                    }
-                }
-                expandEdges(
-                    hybrid, 0,
-                    p_crossContext->m_hybridEdgeCount,
-                    false);
-            }
-        };
         expandEdges(node, 0, localEdgeCount, false);
-        expandHybridEdges(currentLocal);
         expandEdges(
             node, crossEdgeBegin, edgeCount, true);
         if (hybridCollapsed)
@@ -910,14 +862,13 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                 {
                     continue;
                 }
-                expandHybridEdges(sibling);
                 expandEdges(
                     currentIndex->m_pGraph[sibling],
                     crossEdgeBegin, edgeCount, true);
             }
         }
         if (!(EnableCrossEdges &&
-              p_crossContext->m_useHybridEdges) &&
+              p_crossContext->m_useHybridDistance) &&
             p_space.m_NGQueue.Top().distance >
                 p_space.m_SPTQueue.Top().distance)
         {
@@ -1329,33 +1280,6 @@ ErrorCode Index<T>::SearchIndexWithCrossEdges(
     int p_maxCheck,
     CrossGraphSearchStats* p_stats) const
 {
-    RuntimeEdgeSearchContext runtimeContext;
-    static_cast<CrossGraphSearchContext&>(
-        runtimeContext) = p_context;
-    runtimeContext.m_crossEdgeCount = -1;
-    RuntimeEdgeSearchStats runtimeStats;
-    const ErrorCode status =
-        SearchIndexWithRuntimeEdges(
-            p_query, runtimeContext,
-            p_maxCheck,
-            p_stats != nullptr
-                ? &runtimeStats
-                : nullptr);
-    if (p_stats != nullptr) {
-        *p_stats =
-            static_cast<const CrossGraphSearchStats&>(
-                runtimeStats);
-    }
-    return status;
-}
-
-template <typename T>
-ErrorCode Index<T>::SearchIndexWithRuntimeEdges(
-    QueryResult& p_query,
-    const RuntimeEdgeSearchContext& p_context,
-    int p_maxCheck,
-    RuntimeEdgeSearchStats* p_stats) const
-{
     if (!m_bReady)
         return ErrorCode::EmptyIndex;
     if (p_context.m_entryNode < 0 ||
@@ -1366,19 +1290,8 @@ ErrorCode Index<T>::SearchIndexWithRuntimeEdges(
         return ErrorCode::Fail;
     }
 
-    if (p_context.m_hybridEdgeCount < 0 ||
-        p_context.m_crossEdgeCount < -1 ||
-        (p_context.m_useHybridEdges &&
-         (p_context.m_hybridEdgeCount <= 0 ||
-          p_context.m_crossEdgeCount < 0 ||
-          !p_context.m_queryDistance)))
-    {
-        return ErrorCode::Fail;
-    }
-    if (!p_context.m_allowedNodes.empty() &&
-        (p_context.m_allowedNodes.size() != p_context.m_nodes.size() ||
-         p_context.m_allowedNodes[
-            static_cast<size_t>(p_context.m_entryNode)] == 0))
+    if (p_context.m_useHybridDistance &&
+        !p_context.m_queryDistance)
     {
         return ErrorCode::Fail;
     }
@@ -1398,41 +1311,28 @@ ErrorCode Index<T>::SearchIndexWithRuntimeEdges(
     {
         if (nodeContext.m_index == nullptr)
         {
-            if (nodeContext.m_localToGlobal != nullptr ||
-                nodeContext.m_hybridEdges != nullptr)
+            if (nodeContext.m_localToGlobal != nullptr)
                 return ErrorCode::Fail;
             continue;
         }
-        const bool invalidHybridEdges =
-            p_context.m_useHybridEdges &&
-            (nodeContext.m_hybridEdges == nullptr ||
-             nodeContext.m_hybridEdges->size() %
-                     static_cast<size_t>(
-                         p_context.m_hybridEdgeCount) !=
-                 0 ||
-             nodeContext.m_hybridEdges->size() /
-                     static_cast<size_t>(
-                         p_context.m_hybridEdgeCount) !=
-                 static_cast<size_t>(
-                     nodeContext.m_index->GetNumSamples()));
         if (!nodeContext.m_index->m_bReady ||
             nodeContext.m_localToGlobal == nullptr ||
             nodeContext.m_localToGlobal->size() !=
                 static_cast<size_t>(
                     nodeContext.m_index->GetNumSamples()) ||
-            nodeContext.m_index->GetFeatureDim() != GetFeatureDim() ||
-            (p_context.m_crossEdgeCount >= 0 &&
+            nodeContext.m_index->GetFeatureDim() !=
+                GetFeatureDim() ||
+            (p_context.m_useHybridDistance &&
              nodeContext.m_index->m_pGraph
-                    .GetRuntimeEdgeSuffixSize() !=
-                p_context.m_crossEdgeCount) ||
-            invalidHybridEdges)
+                     .GetRuntimeEdgeSuffixSize() <=
+                 0))
         {
             return ErrorCode::Fail;
         }
     }
 
     if (p_stats != nullptr)
-        *p_stats = RuntimeEdgeSearchStats();
+        *p_stats = CrossGraphSearchStats();
 
     auto workSpace =
         RentWorkSpace(p_query.GetResultNum(), nullptr, p_maxCheck);

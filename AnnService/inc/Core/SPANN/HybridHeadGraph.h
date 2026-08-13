@@ -8,6 +8,7 @@
 #include "inc/Core/SPANN/HybridDistance.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/AtomicFile.h"
+#include "inc/Helper/HeadCrossEdges.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -24,26 +25,6 @@ namespace SPTAG
 {
 namespace SPANN
 {
-
-constexpr std::uint32_t kHybridHeadGraphMagic = 0x47425948U; // HYBG
-constexpr std::uint32_t kHybridHeadGraphVersion = 2;
-
-struct HybridHeadGraphHeader
-{
-    std::uint32_t m_magic = kHybridHeadGraphMagic;
-    std::uint32_t m_version = kHybridHeadGraphVersion;
-    std::int32_t m_nodeCount = 0;
-    std::int32_t m_numTagColumns = 0;
-    std::int32_t m_degree = 0;
-    std::int32_t m_totalHeads = 0;
-    std::uint64_t m_generationFingerprint = 0;
-};
-
-struct HybridHeadGraphNodeHeader
-{
-    std::int32_t m_nodeID = -1;
-    std::int32_t m_headCount = 0;
-};
 
 struct HybridHeadGraphNode
 {
@@ -83,6 +64,8 @@ public:
     int m_numTagColumns = 0;
     int m_degree = 0;
     std::uint64_t m_generationFingerprint = 0;
+    std::uint64_t m_contentFingerprint = 0;
+    std::uint64_t m_edgeBodyFingerprint = 0;
     std::vector<HybridHeadGraphNode> m_nodes;
 
     void Clear()
@@ -90,189 +73,126 @@ public:
         m_numTagColumns = 0;
         m_degree = 0;
         m_generationFingerprint = 0;
+        m_contentFingerprint = 0;
+        m_edgeBodyFingerprint = 0;
         m_nodes.clear();
     }
 
-    SizeType TotalHeads() const
-    {
-        SizeType count = 0;
-        for (const auto& node : m_nodes) count += node.m_headCount;
-        return count;
-    }
-
-    size_t TotalEdges() const
-    {
-        size_t count = 0;
-        for (const auto& node : m_nodes) {
-            count += static_cast<size_t>(std::count_if(
-                node.m_neighbors.begin(), node.m_neighbors.end(),
-                [](SizeType p_neighbor) { return p_neighbor >= 0; }));
-        }
-        return count;
-    }
-
-    bool Save(const std::string& p_path, std::string& p_error) const
+    bool SaveCrossEdges(
+        const std::string& p_path,
+        const std::vector<std::vector<SizeType>>& p_headVectorIDs,
+        int p_searchTopK,
+        std::string& p_error) const
     {
         p_error.clear();
-        if (m_numTagColumns <= 0 || m_degree <= 0 ||
+        if (m_nodes.size() != 1 ||
+            p_headVectorIDs.size() != 1 ||
+            m_nodes[0].m_headCount <= 0 ||
+            p_headVectorIDs[0].size() !=
+                static_cast<size_t>(m_nodes[0].m_headCount) ||
+            m_degree <= 0 || p_searchTopK <= 0 ||
             m_generationFingerprint == 0 ||
-            m_nodes.size() >
-                static_cast<size_t>((std::numeric_limits<std::int32_t>::max)()) ||
-            TotalHeads() >
-                (std::numeric_limits<std::int32_t>::max)()) {
-            p_error = "invalid hybrid head graph dimensions";
+            m_contentFingerprint == 0 ||
+            m_edgeBodyFingerprint == 0 ||
+            m_nodes[0].m_neighbors.size() !=
+                static_cast<size_t>(m_nodes[0].m_headCount) *
+                    static_cast<size_t>(m_degree)) {
+            p_error = "invalid hybrid cross-edge graph";
             return false;
         }
+        std::uint64_t bodyFingerprint = 0;
+        if (!ComputeEdgeBodyFingerprint(
+                p_headVectorIDs,
+                bodyFingerprint, p_error)) {
+            return false;
+        }
+        if (bodyFingerprint != m_edgeBodyFingerprint) {
+            p_error =
+                "hybrid cross-edge body changed after fingerprinting";
+            return false;
+        }
+
         const std::string temporary = p_path + ".tmp";
         FILE* file = std::fopen(temporary.c_str(), "wb");
         if (file == nullptr) {
             p_error = "cannot create " + temporary;
             return false;
         }
-        HybridHeadGraphHeader header;
-        header.m_nodeCount = static_cast<std::int32_t>(m_nodes.size());
-        header.m_numTagColumns = m_numTagColumns;
-        header.m_degree = m_degree;
-        header.m_totalHeads = static_cast<std::int32_t>(TotalHeads());
-        header.m_generationFingerprint =
-            m_generationFingerprint;
-        bool ok = std::fwrite(&header, sizeof(header), 1, file) == 1;
-        for (const auto& node : m_nodes) {
-            const size_t attributeCount =
-                static_cast<size_t>(node.m_headCount) *
-                static_cast<size_t>(m_numTagColumns);
-            const size_t neighborCount =
-                static_cast<size_t>(node.m_headCount) *
-                static_cast<size_t>(m_degree);
-            if (node.m_headCount < 0 ||
-                node.m_headCount >
-                    (std::numeric_limits<std::int32_t>::max)() ||
-                node.m_attributes.size() != attributeCount ||
-                node.m_neighbors.size() != neighborCount) {
+
+        Helper::HeadCrossEdgesHeader header{};
+        header.magic = Helper::kHeadCrossEdgesMagic;
+        header.version =
+            Helper::kHybridHeadCrossEdgesVersion;
+        header.totalHeads =
+            static_cast<std::int32_t>(m_nodes[0].m_headCount);
+        header.maxEdgesPerHead = m_degree;
+        header.searchTopK = p_searchTopK;
+        header.reserved = Helper::kHybridHeadCrossEdgesMarker;
+        const Helper::HybridHeadCrossEdgesExtension extension = {
+            m_generationFingerprint,
+            m_contentFingerprint};
+        bool ok =
+            std::fwrite(&header, sizeof(header), 1, file) == 1 &&
+            std::fwrite(
+                &extension, sizeof(extension), 1, file) == 1;
+        for (SizeType source = 0;
+             ok && source < m_nodes[0].m_headCount; ++source) {
+            const SizeType sourceVID =
+                p_headVectorIDs[0][static_cast<size_t>(source)];
+            if (sourceVID < 0 ||
+                sourceVID >
+                    (std::numeric_limits<std::int32_t>::max)()) {
                 ok = false;
                 break;
             }
-            HybridHeadGraphNodeHeader nodeHeader;
-            nodeHeader.m_nodeID = node.m_nodeID;
-            nodeHeader.m_headCount =
-                static_cast<std::int32_t>(node.m_headCount);
-            ok = std::fwrite(&nodeHeader, sizeof(nodeHeader), 1, file) == 1 &&
-                (attributeCount == 0 ||
-                 std::fwrite(node.m_attributes.data(), sizeof(std::uint32_t),
-                             attributeCount, file) == attributeCount) &&
-                (neighborCount == 0 ||
-                 std::fwrite(node.m_neighbors.data(), sizeof(SizeType),
-                             neighborCount, file) == neighborCount);
-            if (!ok) break;
+            const SizeType* neighbors =
+                m_nodes[0].Neighbors(source, m_degree);
+            std::int32_t edgeCount = 0;
+            while (edgeCount < m_degree &&
+                   neighbors[edgeCount] >= 0) {
+                ++edgeCount;
+            }
+            const std::int32_t encodedSource =
+                static_cast<std::int32_t>(sourceVID);
+            ok =
+                std::fwrite(
+                    &encodedSource, sizeof(encodedSource), 1, file) == 1 &&
+                std::fwrite(
+                    &edgeCount, sizeof(edgeCount), 1, file) == 1;
+            for (std::int32_t edge = 0;
+                 ok && edge < edgeCount; ++edge) {
+                const SizeType target = neighbors[edge];
+                if (target < 0 ||
+                    target >= m_nodes[0].m_headCount) {
+                    ok = false;
+                    break;
+                }
+                const SizeType targetVID =
+                    p_headVectorIDs[0][static_cast<size_t>(target)];
+                if (targetVID < 0 ||
+                    targetVID >
+                        (std::numeric_limits<std::int32_t>::max)()) {
+                    ok = false;
+                    break;
+                }
+                const Helper::HeadCrossEdgeEntry entry = {
+                    static_cast<std::int32_t>(targetVID), 0.0f};
+                ok = std::fwrite(
+                         &entry, sizeof(entry), 1, file) == 1;
+            }
         }
         if (std::fclose(file) != 0) ok = false;
         if (!ok) {
             std::remove(temporary.c_str());
-            p_error = "failed to write complete hybrid head graph " + p_path;
+            p_error = "failed to write hybrid cross edges " + p_path;
             return false;
         }
-        if (!Helper::AtomicReplaceFile(
-                temporary, p_path)) {
+        if (!Helper::AtomicReplaceFile(temporary, p_path)) {
             std::remove(temporary.c_str());
-            p_error = "cannot publish hybrid head graph " + p_path;
+            p_error = "cannot publish hybrid cross edges " + p_path;
             return false;
         }
         return true;
-    }
-
-    bool Load(const std::string& p_path,
-              const std::vector<SizeType>& p_expectedHeadCounts,
-              int p_expectedTagColumns,
-              int p_expectedDegree,
-              std::string& p_error)
-    {
-        Clear();
-        p_error.clear();
-        FILE* file = std::fopen(p_path.c_str(), "rb");
-        if (file == nullptr) {
-            p_error = "cannot open " + p_path;
-            return false;
-        }
-        HybridHeadGraphHeader header;
-        bool ok = std::fread(&header, sizeof(header), 1, file) == 1 &&
-            header.m_magic == kHybridHeadGraphMagic &&
-            header.m_version == kHybridHeadGraphVersion &&
-            header.m_nodeCount ==
-                static_cast<std::int32_t>(p_expectedHeadCounts.size()) &&
-            header.m_numTagColumns == p_expectedTagColumns &&
-            header.m_degree == p_expectedDegree &&
-            header.m_nodeCount >= 0 &&
-            header.m_numTagColumns > 0 &&
-            header.m_degree > 0 &&
-            header.m_totalHeads >= 0 &&
-            header.m_generationFingerprint != 0;
-        if (ok) {
-            m_numTagColumns = header.m_numTagColumns;
-            m_degree = header.m_degree;
-            m_generationFingerprint =
-                header.m_generationFingerprint;
-            m_nodes.resize(static_cast<size_t>(header.m_nodeCount));
-            SizeType totalHeads = 0;
-            for (int nodeIndex = 0; nodeIndex < header.m_nodeCount; ++nodeIndex) {
-                HybridHeadGraphNodeHeader nodeHeader;
-                if (std::fread(&nodeHeader, sizeof(nodeHeader), 1, file) != 1 ||
-                    nodeHeader.m_nodeID != nodeIndex ||
-                    nodeHeader.m_headCount < 0 ||
-                    static_cast<SizeType>(nodeHeader.m_headCount) !=
-                        p_expectedHeadCounts[static_cast<size_t>(nodeIndex)]) {
-                    ok = false;
-                    break;
-                }
-                auto& node = m_nodes[static_cast<size_t>(nodeIndex)];
-                node.m_nodeID = nodeHeader.m_nodeID;
-                node.m_headCount = nodeHeader.m_headCount;
-                const size_t attributeCount =
-                    static_cast<size_t>(node.m_headCount) *
-                    static_cast<size_t>(m_numTagColumns);
-                const size_t neighborCount =
-                    static_cast<size_t>(node.m_headCount) *
-                    static_cast<size_t>(m_degree);
-                node.m_attributes.resize(attributeCount);
-                node.m_neighbors.resize(neighborCount);
-                if ((attributeCount > 0 &&
-                     std::fread(node.m_attributes.data(),
-                                sizeof(std::uint32_t), attributeCount, file) !=
-                         attributeCount) ||
-                    (neighborCount > 0 &&
-                     std::fread(node.m_neighbors.data(), sizeof(SizeType),
-                                neighborCount, file) != neighborCount)) {
-                    ok = false;
-                    break;
-                }
-                for (SizeType head = 0; head < node.m_headCount && ok; ++head) {
-                    bool terminated = false;
-                    const SizeType* neighbors =
-                        node.Neighbors(head, m_degree);
-                    for (int edge = 0; edge < m_degree; ++edge) {
-                        const SizeType neighbor = neighbors[edge];
-                        if (neighbor < 0) {
-                            terminated = true;
-                            continue;
-                        }
-                        if (terminated || neighbor >= node.m_headCount ||
-                            neighbor == head) {
-                            ok = false;
-                            break;
-                        }
-                    }
-                }
-                totalHeads += node.m_headCount;
-            }
-            if (totalHeads != header.m_totalHeads) ok = false;
-            if (ok && std::fgetc(file) != EOF) ok = false;
-        }
-        std::fclose(file);
-        if (!ok) {
-            Clear();
-            p_error = "hybrid head graph format or topology mismatch at " +
-                p_path;
-        }
-        return ok;
     }
 
     template <typename ValueType>
@@ -309,7 +229,7 @@ public:
             if (index == nullptr || index->m_pQuantizer != nullptr ||
                 index->GetNumSamples() !=
                     static_cast<SizeType>(headVectorIDs.size())) {
-                p_error = "hybrid graph requires matching unquantized bundle heads";
+                p_error = "hybrid graph requires matching unquantized head sets";
                 Clear();
                 return false;
             }
@@ -353,12 +273,113 @@ public:
                 return false;
             }
         }
-        m_generationFingerprint =
-            fingerprint.Value();
+        if (!ComputeEdgeBodyFingerprint(
+                p_headVectorIDs,
+                m_edgeBodyFingerprint, p_error)) {
+            Clear();
+            return false;
+        }
+        fingerprint.AddEdgeBody(
+            m_edgeBodyFingerprint);
+        m_contentFingerprint = fingerprint.Value();
+        m_generationFingerprint = m_contentFingerprint;
         return true;
     }
 
 private:
+    bool ComputeEdgeBodyFingerprint(
+        const std::vector<std::vector<SizeType>>&
+            p_headVectorIDs,
+        std::uint64_t& p_fingerprint,
+        std::string& p_error) const
+    {
+        if (p_headVectorIDs.size() != m_nodes.size()) {
+            p_error =
+                "hybrid head IDs do not match graph nodes";
+            return false;
+        }
+        Helper::HeadCrossEdgesBodyFingerprint fingerprint;
+        for (size_t nodeIndex = 0;
+             nodeIndex < m_nodes.size();
+             ++nodeIndex) {
+            const auto& node = m_nodes[nodeIndex];
+            const auto& headIDs =
+                p_headVectorIDs[nodeIndex];
+            if (node.m_headCount !=
+                    static_cast<SizeType>(headIDs.size()) ||
+                node.m_neighbors.size() !=
+                    static_cast<size_t>(node.m_headCount) *
+                        static_cast<size_t>(m_degree)) {
+                p_error =
+                    "hybrid head graph dimensions are invalid";
+                return false;
+            }
+            for (SizeType source = 0;
+                 source < node.m_headCount;
+                 ++source) {
+                const SizeType sourceVID =
+                    headIDs[static_cast<size_t>(source)];
+                if (sourceVID < 0 ||
+                    sourceVID >
+                        (std::numeric_limits<
+                            std::int32_t>::max)()) {
+                    p_error =
+                        "hybrid source head ID exceeds "
+                        "cross-edge format";
+                    return false;
+                }
+                const SizeType* neighbors =
+                    node.Neighbors(source, m_degree);
+                if (neighbors == nullptr) {
+                    p_error =
+                        "hybrid head graph row is unavailable";
+                    return false;
+                }
+                std::int32_t edgeCount = 0;
+                while (edgeCount < m_degree &&
+                       neighbors[edgeCount] >= 0) {
+                    ++edgeCount;
+                }
+                fingerprint.AddRecord(
+                    static_cast<std::int32_t>(
+                        sourceVID),
+                    edgeCount);
+                for (std::int32_t edge = 0;
+                     edge < edgeCount; ++edge) {
+                    const SizeType target =
+                        neighbors[edge];
+                    if (target < 0 ||
+                        target >= node.m_headCount) {
+                        p_error =
+                            "hybrid target head is outside "
+                            "the graph";
+                        return false;
+                    }
+                    const SizeType targetVID =
+                        headIDs[
+                            static_cast<size_t>(
+                                target)];
+                    if (targetVID < 0 ||
+                        targetVID >
+                            (std::numeric_limits<
+                                std::int32_t>::max)()) {
+                        p_error =
+                            "hybrid target head ID exceeds "
+                            "cross-edge format";
+                        return false;
+                    }
+                    const Helper::HeadCrossEdgeEntry entry = {
+                        static_cast<std::int32_t>(
+                            targetVID),
+                        0.0f};
+                    fingerprint.AddEntry(entry);
+                }
+            }
+        }
+        p_fingerprint = fingerprint.Value();
+        return true;
+    }
+
     template <typename ValueType>
     bool BuildNode(VectorIndex* p_index,
                    const HybridDistanceConfig& p_distance,

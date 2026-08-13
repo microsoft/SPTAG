@@ -100,15 +100,15 @@ namespace SPTAG
             mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
             mutable std::mutex m_globalHeadVIDToLocalHIDMutex;
             mutable std::mutex m_headBundleLoadLock;
-            // Runtime-only hybrid and cross edges share the bundle RNG row:
-            // [pure vector RNG | hybrid local RNG | encoded cross-bundle].
-            // The on-disk head_cross_edges.bin format remains unchanged; load resolves
-            // each target into an encoded (bundle, local-id) locator. Native BKT/KDT
-            // searches keep using the ordinary bundle-local RNG prefix.
-            mutable DimensionType m_headHybridEdgeSize = 0;
-            mutable size_t m_headHybridEdgeTotal = 0;
+            // Runtime cross-edge suffix appended directly after each bundle RNG
+            // row. In hybrid mode the same head_cross_edges.bin interface stores
+            // degree-16 hybrid edges for the single global BKT head graph.
             mutable DimensionType m_headInlineCrossEdgeSize = 0;
             mutable size_t m_headInlineCrossEdgeTotal = 0;
+            mutable bool m_headInlineEdgesHybrid = false;
+            mutable std::uint64_t m_headInlineCrossEdgeGeneration = 0;
+            mutable std::uint64_t m_headInlineCrossEdgeContent = 0;
+            mutable std::uint64_t m_headInlineCrossEdgeBodyFingerprint = 0;
             mutable DimensionType m_headLocatorLocalBits = 0;
             mutable SizeType m_headLocatorLocalMask = 0;
             mutable std::vector<std::int16_t> m_headBundleNodeByB;        // -1 if unresolved
@@ -197,8 +197,7 @@ namespace SPTAG
             inline bool HasHeadBundleNodes() const { return !m_headBundleNodes.empty(); }
             inline DimensionType GetInlineHeadCrossEdgeSize() const { return m_headInlineCrossEdgeSize; }
             inline size_t GetInlineHeadCrossEdgeTotal() const { return m_headInlineCrossEdgeTotal; }
-            inline DimensionType GetHeadHybridEdgeSize() const { return m_headHybridEdgeSize; }
-            inline size_t GetHeadHybridEdgeTotal() const { return m_headHybridEdgeTotal; }
+            inline bool InlineHeadEdgesAreHybrid() const { return m_headInlineEdgesHybrid; }
             inline DimensionType GetInlineHeadLocatorLocalBits() const { return m_headLocatorLocalBits; }
 
             // v5: Σ bundle.headCount — canonical "total head count" after cross-edges unified
@@ -339,8 +338,7 @@ namespace SPTAG
             ErrorCode EnsureHeadBundleDenseMaps() const;
             ErrorCode ResizeInlineHeadCrossEdges(
                 DimensionType p_crossEdgeCount) const;
-            ErrorCode LoadHeadHybridGraph(
-                bool p_requireRoutingStats = true) const;
+            ErrorCode LoadHeadHybridGraph() const;
             ErrorCode LoadHybridRoutingStats();
             ErrorCode LoadHeadCrossEdges() const;
             ErrorCode EnsureHeadHybridGraph();
@@ -355,16 +353,7 @@ namespace SPTAG
                 int p_entryNode,
                 int p_graphResultNum,
                 int& p_scannedOut,
-                bool p_useHybrid = false,
-                const std::uint32_t* p_queryTags = nullptr,
-                int p_numQueryTags = 0,
-                const Cache::DNFPredicate* p_queryDNF = nullptr,
-                const std::vector<int>* p_allowedNodes = nullptr) const;
-            ErrorCode SearchHeadBundlesHybridNative(
-                COMMON::QueryResultSet<T>* p_queryResults,
-                const std::vector<int>& p_candidateNodes,
-                int p_graphResultNum,
-                int& p_scannedOut,
+                bool p_useHybrid,
                 const std::uint32_t* p_queryTags,
                 int p_numQueryTags,
                 const Cache::DNFPredicate* p_queryDNF) const;

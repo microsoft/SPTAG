@@ -476,6 +476,12 @@ public:
         ++m_headCount;
     }
 
+    void AddEdgeBody(std::uint64_t p_fingerprint)
+    {
+        AddConfig(0x45444745424f4459ULL);
+        AddConfig(p_fingerprint);
+    }
+
     std::uint64_t Value() const
     {
         std::uint64_t value = Mix(

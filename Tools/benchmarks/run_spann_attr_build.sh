@@ -83,10 +83,6 @@ CROSS_EDGE_BUILD_THREADS=$(ini_section BuildSSDIndex NumberOfThreads)
 ORDERED_PAGE_START=$(ini EnableOrderedPageStart); [ -z "$ORDERED_PAGE_START" ] && ORDERED_PAGE_START=false
 HYBRID_ENABLED=$(ini_section BuildSSDIndex EnableHybridDistance)
 [ -z "$HYBRID_ENABLED" ] && HYBRID_ENABLED=false
-HYBRID_POSTING_FILE=$(ini_section BuildSSDIndex HybridPostingFile)
-[ -z "$HYBRID_POSTING_FILE" ] && HYBRID_POSTING_FILE=SPTAGHybridList.bin
-HYBRID_GRAPH_FILE=$(ini_section BuildSSDIndex HybridHeadGraphFile)
-[ -z "$HYBRID_GRAPH_FILE" ] && HYBRID_GRAPH_FILE=head_hybrid_edges.bin
 
 # (2) SelectHead resume checkpoint knobs ([MultiTenant], single source of truth).
 #   PersistSelectHead : 1 = after SelectHead, write head_select_state.bin and keep
@@ -157,14 +153,23 @@ validate_runtime_config() {
     if is_true "$HYBRID_ENABLED"; then
         python3 - "$CFG" "$runtime_ini" \
           "$OUT/tenant_0/SPTAGFullList.bin" \
-          "$OUT/tenant_0/$HYBRID_POSTING_FILE" \
-          "$OUT/tenant_0/$HYBRID_POSTING_FILE.stats" \
-          "$OUT/tenant_0/HeadIndex/$HYBRID_GRAPH_FILE" <<'PY'
+          "$OUT/tenant_0/SPTAGFullList.bin.hybrid.stats" \
+          "$OUT/tenant_0/HeadIndex/head_cross_edges.bin" \
+          "$OUT/tenant_0/SPTAGHybridList.bin" \
+          "$OUT/tenant_0/HeadIndex/head_hybrid_edges.bin" <<'PY'
 import struct
 import sys
 from pathlib import Path
 
-config_path, runtime_path, primary_path, hybrid_path, stats_path, graph_path = map(Path, sys.argv[1:])
+(
+    config_path,
+    runtime_path,
+    primary_path,
+    stats_path,
+    cross_path,
+    legacy_posting_path,
+    legacy_graph_path,
+) = map(Path, sys.argv[1:])
 
 def parse_ini(path):
     section = ""
@@ -187,15 +192,19 @@ if config.get(("buildssdindex", "enablehybriddistance"), "false").lower() not in
 }:
     raise SystemExit(0)
 
-expected_file = config.get(("buildssdindex", "hybridpostingfile"), "SPTAGHybridList.bin")
-expected_graph = config.get(("buildssdindex", "hybridheadgraphfile"), "head_hybrid_edges.bin")
-if expected_file != hybrid_path.name or expected_graph != graph_path.name:
-    raise SystemExit("[launcher] hybrid artifact path derivation mismatch")
-for path in (hybrid_path, stats_path, graph_path):
+if config.get(("selecthead", "selectheadtype"), "").lower() != "bkt":
+    raise SystemExit("[launcher] hybrid distance requires canonical BKT head selection")
+for obsolete_key in ("hybridheadgraphfile", "hybridpostingfile"):
+    if ("buildssdindex", obsolete_key) in config:
+        raise SystemExit(f"[launcher] obsolete hybrid option: {obsolete_key}")
+for path in (primary_path, stats_path, cross_path):
     if not path.is_file() or path.stat().st_size == 0:
-          raise SystemExit(f"[launcher] missing hybrid artifact: {path}")
-if hybrid_path.resolve() == primary_path.resolve():
-    raise SystemExit("[launcher] hybrid posting aliases the primary posting")
+        raise SystemExit(f"[launcher] missing hybrid artifact: {path}")
+if ("buildssdindex", "hybridpostingfile") in runtime:
+    raise SystemExit("[launcher] runtime unexpectedly persists HybridPostingFile")
+for obsolete_path in (legacy_posting_path, legacy_graph_path):
+    if obsolete_path.exists():
+        raise SystemExit(f"[launcher] unexpected obsolete hybrid artifact: {obsolete_path}")
 
 generation = runtime.get(("buildssdindex", "hybridgenerationfingerprint"))
 if generation is None or int(generation) == 0:
@@ -203,32 +212,77 @@ if generation is None or int(generation) == 0:
 
 with primary_path.open("rb") as f:
     primary = struct.unpack("<11i", f.read(44))
-with hybrid_path.open("rb") as f:
-    hybrid = struct.unpack("<11i", f.read(44))
-if primary[0] != 0x314D5453 or hybrid[0] != 0x314D5453:
-    raise SystemExit("[launcher] primary/hybrid postings are not STM1 snapshots")
-if primary[1] != 2 or hybrid[1] != 2:
-    raise SystemExit("[launcher] hybrid generation header is absent")
-if primary[2] != hybrid[2] or primary[3:7] != hybrid[3:7]:
-    raise SystemExit("[launcher] primary/hybrid STM1 headers disagree")
+    layouts = [struct.unpack("<iHiHi", f.read(16)) for _ in range(primary[2])]
+if primary[0] != 0x314D5453:
+    raise SystemExit("[launcher] primary posting is not an STM1 snapshot")
+if primary[1] != 2:
+    raise SystemExit("[launcher] hybrid posting is not generation-bound STM1 v2")
 primary_generation = (primary[9] & 0xffffffff) << 32 | (primary[8] & 0xffffffff)
-hybrid_generation = (hybrid[9] & 0xffffffff) << 32 | (hybrid[8] & 0xffffffff)
-if not (primary_generation == hybrid_generation == int(generation)):
+if primary_generation != int(generation):
     raise SystemExit(
-          "[launcher] generation mismatch: "
-          f"runtime={generation} primary={primary_generation} hybrid={hybrid_generation}"
+        "[launcher] generation mismatch: "
+        f"runtime={generation} primary={primary_generation}"
+    )
+pure_records = 0
+total_records = 0
+for _, _, total, _, pure in layouts:
+    if pure < 0 or total < pure:
+        raise SystemExit(
+            "[launcher] invalid hybrid/tail layout: "
+            f"pure={pure} total={total}"
+        )
+    pure_records += pure
+    total_records += total
+tail_records = total_records - pure_records
+if pure_records == 0 or tail_records == 0:
+    raise SystemExit(
+        "[launcher] expected non-empty pure and deduplicated-tail segments, "
+        f"got pure={pure_records} tail={tail_records}"
     )
 with stats_path.open("rb") as f:
-    stats = struct.unpack("<IIiiQ", f.read(24))
-if stats[0] != 0x53525948 or stats[1] != 2 or stats[4] != primary_generation:
+    stats = struct.unpack("<IIiiiiQ", f.read(32))
+if (
+    stats[0] != 0x53525948
+    or stats[1] != 3
+    or stats[5] != primary[2]
+    or stats[6] != primary_generation
+):
     raise SystemExit("[launcher] hybrid routing stats generation mismatch")
-with graph_path.open("rb") as f:
-    graph = struct.unpack("<IIiiiiQ", f.read(32))
-if graph[0] != 0x47425948 or graph[1] != 2 or graph[6] != primary_generation:
-    raise SystemExit("[launcher] hybrid head graph generation mismatch")
+with cross_path.open("rb") as f:
+    cross = struct.unpack("<Iiiiii", f.read(24))
+    if cross[0] != 0x48434548 or cross[1] != 2:
+        raise SystemExit("[launcher] hybrid cross-edge format mismatch")
+    if cross[2] != primary[2] or cross[3] != 16 or cross[5] != 0x48594252:
+        raise SystemExit(
+            "[launcher] hybrid cross-edge topology mismatch: "
+            f"heads={cross[2]} degree={cross[3]} marker={cross[5]:#x}"
+        )
+    cross_generation, cross_content = struct.unpack(
+        "<QQ", f.read(16)
+    )
+    if cross_generation != primary_generation or cross_content == 0:
+        raise SystemExit(
+            "[launcher] hybrid cross-edge generation/content mismatch: "
+            f"cross={cross_generation} primary={primary_generation} "
+            f"content={cross_content}"
+        )
+    edge_total = 0
+    for _ in range(cross[2]):
+        source, edge_count = struct.unpack("<ii", f.read(8))
+        if source < 0 or edge_count < 0 or edge_count > cross[3]:
+            raise SystemExit("[launcher] invalid hybrid cross-edge record")
+        payload = f.read(edge_count * 8)
+        if len(payload) != edge_count * 8:
+            raise SystemExit("[launcher] truncated hybrid cross-edge record")
+        edge_total += edge_count
+    if f.read(1) or edge_total == 0:
+        raise SystemExit("[launcher] invalid hybrid cross-edge payload")
 print(
-    "[launcher] verified hybrid graph/posting/stats generation="
-    f"{primary_generation} and non-aliasing"
+    "[launcher] verified BKT base graph + degree-16 hybrid runtime suffix "
+    "and one contiguous posting: "
+    f"generation={primary_generation} pure={pure_records} "
+    f"tail={tail_records} physical={total_records} edges={edge_total} "
+    f"content={cross_content}"
 )
 PY
     fi
