@@ -218,6 +218,7 @@ namespace SPTAG {
                 Clear(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
                 m_relaxedMono = false;
                 m_useHybridPostings = false;
+                m_scanFullPostingForFilter = false;
             }
 
             void Initialize(va_list& arg) {
@@ -285,9 +286,24 @@ namespace SPTAG {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
                 m_useHybridPostings = false;
+                m_scanFullPostingForFilter = false;
+                if (m_asyncContextID >= 0) {
+                    for (auto& request : m_diskRequests) {
+                        request.m_status = m_asyncContextID;
+                    }
+                }
+            }
+
+            void SetAsyncContextID(int p_contextID)
+            {
+                m_asyncContextID = p_contextID;
+                for (auto& request : m_diskRequests) {
+                    request.m_status = p_contextID;
+                }
             }
 
             std::vector<int> m_postingIDs;
+            int m_asyncContextID = -1;
 
             struct PostingReadRange
             {
@@ -382,6 +398,8 @@ namespace SPTAG {
             bool m_loadPosting = false;
 
             bool m_useHybridPostings = false;
+
+            bool m_scanFullPostingForFilter = false;
 
             bool m_relaxedMono = false;
 
@@ -492,6 +510,10 @@ namespace SPTAG {
                                        int /*p_numTagsPerVec*/)
             {
             }
+            virtual void SetHybridGenerationFingerprint(
+                std::uint64_t /*p_generationFingerprint*/)
+            {
+            }
             virtual void SetNodeVectorAssignments(
                 const std::vector<std::vector<SizeType>>& /*p_assignments*/)
             {
@@ -584,6 +606,12 @@ namespace SPTAG {
             virtual std::shared_ptr<Helper::KeyValueIO> GetKVStore() { return nullptr; }
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
+            virtual bool CheckValidPosting(
+                SizeType postingID,
+                const ExtraWorkSpace* p_exWorkSpace)
+            {
+                return CheckValidPosting(postingID);
+            }
             virtual ErrorCode CheckPosting(SizeType postingiD, std::vector<std::uint8_t> *visited = nullptr,
                                            ExtraWorkSpace *p_exWorkSpace = nullptr) = 0;
             virtual SizeType SearchVector(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
@@ -605,6 +633,7 @@ namespace SPTAG {
             virtual double GetPostingAvgRecords(bool /*p_useHybrid*/ = false) const { return -1.0; }
             virtual double GetPostingAvgPages(bool /*p_useHybrid*/ = false) const { return -1.0; }
             virtual double GetPostingAvgBytes(bool /*p_useHybrid*/ = false) const { return -1.0; }
+            virtual int GetPostingBufferBytes(bool /*p_useHybrid*/ = false) const { return -1; }
         };
     } // SPANN
 } // SPTAG

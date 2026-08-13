@@ -7,8 +7,10 @@
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
+#include "inc/Core/SPANN/HybridArtifactPaths.h"
 #include "inc/Core/SPANN/HeadCrossEdgeBuilder.h"
 #include "inc/Core/SPANN/PrimaryHeadCSR.h"
+#include "inc/Helper/AtomicFile.h"
 #include "inc/Helper/HeadCrossEdges.h"
 #include <algorithm>
 #include <chrono>
@@ -52,6 +54,50 @@ constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
 constexpr std::int32_t kHeadBundleManifestVersion = 2;
 
 constexpr std::int32_t kHeadNodeRoutingIndexVersion = 1;
+
+bool ParseHybridGeneration(
+    const std::string& p_value,
+    std::uint64_t& p_generation)
+{
+    p_generation = 0;
+    return
+        Helper::Convert::ConvertStringTo<
+            std::uint64_t>(
+            p_value.c_str(), p_generation) &&
+        p_generation != 0;
+}
+
+std::uint64_t NewHybridBuildGeneration(
+    std::uint64_t p_contentFingerprint)
+{
+    static std::atomic<std::uint64_t> sequence{0};
+    auto mix = [](std::uint64_t value) {
+        value += 0x9e3779b97f4a7c15ULL;
+        value =
+            (value ^ (value >> 30)) *
+            0xbf58476d1ce4e5b9ULL;
+        value =
+            (value ^ (value >> 27)) *
+            0x94d049bb133111ebULL;
+        return value ^ (value >> 31);
+    };
+    const std::uint64_t clock =
+        static_cast<std::uint64_t>(
+            std::chrono::high_resolution_clock::now()
+                .time_since_epoch()
+                .count());
+    std::random_device random;
+    std::uint64_t entropy =
+        (static_cast<std::uint64_t>(random()) << 32) ^
+        static_cast<std::uint64_t>(random());
+    std::uint64_t generation = mix(
+        p_contentFingerprint ^ mix(clock) ^
+        mix(++sequence) ^ entropy);
+    return generation == 0
+        ? 0x9e3779b97f4a7c15ULL
+        : generation;
+}
+
 struct HeadNodeRoutingIndexFileHeader {
     std::int32_t version;
     std::int32_t pivotLevel;
@@ -271,7 +317,8 @@ bool CopyFileAtomically(const std::string& sourcePath, const std::string& target
         std::remove(temporaryPath.c_str());
         return false;
     }
-    if (std::rename(temporaryPath.c_str(), targetPath.c_str()) != 0) {
+    if (!Helper::AtomicReplaceFile(
+            temporaryPath, targetPath)) {
         std::remove(temporaryPath.c_str());
         return false;
     }
@@ -558,6 +605,42 @@ template <typename T> ErrorCode Index<T>::SaveLoadedHeadBundles(const std::strin
         if (probe && !CopyMetadataOnlyHeadStore(
                          sourceMetaOnly, targetHeadDir + FolderSep + "head_metaonly.bin",
                          m_vectorTranslateMap.R())) {
+            return ErrorCode::FailedCreateFile;
+        }
+    }
+    bool hybridEnabled = false;
+    const std::string hybridEnabledValue =
+        GetParameter("EnableHybridDistance", "BuildSSDIndex");
+    if (!hybridEnabledValue.empty()) {
+        Helper::Convert::ConvertStringTo<bool>(
+            hybridEnabledValue.c_str(), hybridEnabled);
+    }
+    if (hybridEnabled) {
+        std::string artifactError;
+        if (!ValidateHybridArtifactPaths(
+                m_options, sourceBaseDir,
+                artifactError) ||
+            !ValidateHybridArtifactPaths(
+                m_options, baseDir,
+                artifactError)) {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Invalid hybrid artifact paths: %s.\n",
+                artifactError.c_str());
+            return ErrorCode::Fail;
+        }
+        std::string graphFile = GetParameter(
+            "HybridHeadGraphFile", "BuildSSDIndex");
+        if (graphFile.empty() || graphFile == "Undefined!") {
+            graphFile = "head_hybrid_edges.bin";
+        }
+        if (!CopyFileAtomically(
+                sourceHeadDir + FolderSep + graphFile,
+                targetHeadDir + FolderSep + graphFile)) {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Failed to checkpoint hybrid head graph %s.\n",
+                graphFile.c_str());
             return ErrorCode::FailedCreateFile;
         }
     }
@@ -1179,6 +1262,11 @@ template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std:
         std::lock_guard<std::mutex> mapLock(m_globalHeadVIDToLocalHIDMutex);
         m_globalHeadVIDToLocalHID.clear();
     }
+    m_headHybridEdgeSize = 0;
+    m_headHybridEdgeTotal = 0;
+    m_hybridHeadGraph.Clear();
+    m_hybridDistance = HybridDistanceConfig();
+    m_headHybridGraphLoaded.store(false, std::memory_order_release);
     m_headInlineCrossEdgeSize = 0;
     m_headInlineCrossEdgeTotal = 0;
     m_headLocatorLocalBits = 0;
@@ -1485,8 +1573,558 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
     return ErrorCode::Success;
 }
 
+template <typename T>
+ErrorCode Index<T>::LoadHeadHybridGraph(
+    bool p_requireRoutingStats) const
+{
+    bool enabled = false;
+    const std::string enabledValue =
+        GetParameter("EnableHybridDistance", "BuildSSDIndex");
+    if (!enabledValue.empty()) {
+        Helper::Convert::ConvertStringTo<bool>(
+            enabledValue.c_str(), enabled);
+    }
+    if (m_headHybridGraphLoaded.load(
+            std::memory_order_acquire)) {
+        return ErrorCode::Success;
+    }
+    std::lock_guard<std::mutex> lock(
+        m_headHybridGraphMutex);
+    if (m_headHybridGraphLoaded.load(
+            std::memory_order_relaxed)) {
+        return ErrorCode::Success;
+    }
+    if (!enabled) {
+        m_hybridHeadGraph.Clear();
+        m_hybridDistance = HybridDistanceConfig();
+        m_headHybridEdgeSize = 0;
+        m_headHybridEdgeTotal = 0;
+        m_headHybridGraphLoaded.store(
+            true, std::memory_order_release);
+        return ErrorCode::Success;
+    }
+    if (m_options.m_indexAlgoType !=
+        IndexAlgoType::BKT) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires BKT head bundles; configured algorithm is %s.\n",
+            Helper::Convert::ConvertToString(
+                m_options.m_indexAlgoType).c_str());
+        return ErrorCode::Fail;
+    }
+    if (m_options.m_storage != Storage::STATIC ||
+        m_options.m_numTagsPerVec <= 0) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires STATIC metadata postings.\n");
+        return ErrorCode::Fail;
+    }
+
+    for (const auto& node : m_headBundleNodes) {
+        if (EnsureHeadBundleNodeLoaded(node.nodeId) !=
+            ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+    }
+    if (EnsureHeadBundleDenseMaps() != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
+
+    float vectorWeight = 1.0f;
+    int degree = 16;
+    Helper::Convert::ConvertStringTo<float>(
+        GetParameter(
+            "HybridVectorWeight", "BuildSSDIndex").c_str(),
+        vectorWeight);
+    Helper::Convert::ConvertStringTo<int>(
+        GetParameter(
+            "HybridGraphDegree", "BuildSSDIndex").c_str(),
+        degree);
+    std::string configError;
+    HybridDistanceConfig distance;
+    if (degree <= 0 ||
+        !HybridDistanceConfig::Parse(
+            GetParameter(
+                "HybridCategoricalCols", "BuildSSDIndex"),
+            GetParameter(
+                "HybridCategoricalWeights", "BuildSSDIndex"),
+            GetParameter(
+                "HybridNumericCols", "BuildSSDIndex"),
+            GetParameter(
+                "HybridNumericWeights", "BuildSSDIndex"),
+            m_options.m_numTagsPerVec,
+            vectorWeight,
+            distance,
+            configError)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Invalid hybrid distance config: %s.\n",
+            configError.c_str());
+        return ErrorCode::Fail;
+    }
+
+    std::vector<SizeType> expectedHeadCounts;
+    expectedHeadCounts.reserve(
+        m_headBundleLocalToGlobalHIDs.size());
+    for (const auto& localToGlobal :
+         m_headBundleLocalToGlobalHIDs) {
+        expectedHeadCounts.push_back(
+            static_cast<SizeType>(localToGlobal.size()));
+    }
+    std::string graphFile = GetParameter(
+        "HybridHeadGraphFile", "BuildSSDIndex");
+    if (graphFile.empty() || graphFile == "Undefined!") {
+        graphFile = "head_hybrid_edges.bin";
+    }
+    std::string baseDir = m_headBundleBaseDir;
+    if (baseDir.empty()) {
+        baseDir = m_options.m_indexDirectory;
+    }
+    std::string artifactError;
+    if (!ValidateHybridArtifactPaths(
+            m_options, baseDir, artifactError)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Invalid hybrid artifact paths: %s.\n",
+            artifactError.c_str());
+        return ErrorCode::Fail;
+    }
+    std::string path = baseDir;
+    if (!path.empty() && path.back() != FolderSep) {
+        path += FolderSep;
+    }
+    path += m_options.m_headIndexFolder;
+    if (!path.empty() && path.back() != FolderSep) {
+        path += FolderSep;
+    }
+    path += graphFile;
+
+    HybridHeadGraph graph;
+    std::string loadError;
+    if (!graph.Load(
+            path, expectedHeadCounts,
+            m_options.m_numTagsPerVec, degree,
+            loadError)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load enabled hybrid head graph: %s.\n",
+            loadError.c_str());
+        return ErrorCode::Fail;
+    }
+    std::uint64_t expectedGeneration = 0;
+    if (!ParseHybridGeneration(
+            GetParameter(
+                "HybridGenerationFingerprint",
+                "BuildSSDIndex"),
+            expectedGeneration) ||
+        graph.m_generationFingerprint !=
+            expectedGeneration) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid head graph generation mismatch "
+            "(config=%llu graph=%llu).\n",
+            static_cast<unsigned long long>(
+                expectedGeneration),
+            static_cast<unsigned long long>(
+                graph.m_generationFingerprint));
+        return ErrorCode::Fail;
+    }
+    if (p_requireRoutingStats &&
+        (m_hybridRoutingStats.Empty() ||
+         graph.m_generationFingerprint !=
+             m_hybridRoutingStats
+                 .m_generationFingerprint)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid graph/posting generation fingerprint mismatch "
+            "(graph=%llu posting=%llu).\n",
+            static_cast<unsigned long long>(
+                graph.m_generationFingerprint),
+            static_cast<unsigned long long>(
+                m_hybridRoutingStats
+                    .m_generationFingerprint));
+        return ErrorCode::Fail;
+    }
+    m_hybridHeadGraph = std::move(graph);
+    m_hybridDistance = std::move(distance);
+    m_headHybridEdgeSize =
+        static_cast<DimensionType>(
+            m_hybridHeadGraph.m_degree);
+    m_headHybridEdgeTotal =
+        m_hybridHeadGraph.TotalEdges();
+
+    SizeType maxLocalCount = 0;
+    int maxNodeID = -1;
+    for (size_t nodeID = 0;
+         nodeID < m_hybridHeadGraph.m_nodes.size();
+         ++nodeID) {
+        maxLocalCount = (std::max)(
+            maxLocalCount,
+            m_hybridHeadGraph.m_nodes[nodeID].m_headCount);
+        maxNodeID = (std::max)(
+            maxNodeID, static_cast<int>(nodeID));
+    }
+    const auto requiredBits =
+        [](std::uint64_t p_value) {
+            DimensionType bits = 0;
+            while (p_value != 0) {
+                ++bits;
+                p_value >>= 1;
+            }
+            return bits;
+        };
+    if (maxLocalCount <= 0 || maxNodeID < 0) {
+        return ErrorCode::Fail;
+    }
+    const DimensionType localBits = (std::max)(
+        static_cast<DimensionType>(1),
+        requiredBits(
+            static_cast<std::uint64_t>(
+                maxLocalCount - 1)));
+    const DimensionType nodeBits = requiredBits(
+        static_cast<std::uint64_t>(maxNodeID));
+    if (localBits + nodeBits >
+        static_cast<DimensionType>(
+            (std::numeric_limits<SizeType>::digits))) {
+        return ErrorCode::Fail;
+    }
+    m_headLocatorLocalBits = localBits;
+    m_headLocatorLocalMask = static_cast<SizeType>(
+        (static_cast<std::uint64_t>(1) << localBits) - 1);
+    m_headHybridGraphLoaded.store(
+        true, std::memory_order_release);
+    SPTAGLIB_LOG(
+        Helper::LogLevel::LL_Info,
+        "Loaded hybrid head graph: nodes=%zu heads=%d "
+        "degree=%d edges=%zu tagCols=%d.\n",
+        m_hybridHeadGraph.m_nodes.size(),
+        static_cast<int>(m_hybridHeadGraph.TotalHeads()),
+        m_hybridHeadGraph.m_degree,
+        m_headHybridEdgeTotal,
+        m_hybridHeadGraph.m_numTagColumns);
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::LoadHybridRoutingStats()
+{
+    m_hybridRoutingStats = HybridRoutingStats();
+    if (!m_options.m_enableHybridDistance) {
+        return ErrorCode::Success;
+    }
+    if (m_options.m_storage != Storage::STATIC ||
+        m_extraSearcher == nullptr ||
+        !m_extraSearcher->HasHybridPostings()) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Enabled hybrid routing requires loaded STATIC hybrid postings.\n");
+        return ErrorCode::Fail;
+    }
+    const bool validCostConfig =
+        std::isfinite(
+            m_options.m_hybridCostResultSafety) &&
+        m_options.m_hybridCostResultSafety >= 1.0f &&
+        std::isfinite(
+            m_options.m_hybridCostIOFixedUS) &&
+        m_options.m_hybridCostIOFixedUS >= 0.0f &&
+        std::isfinite(
+            m_options.m_hybridCostPageUS) &&
+        m_options.m_hybridCostPageUS >= 0.0f &&
+        std::isfinite(
+            m_options.m_hybridCostBytesPerUS) &&
+        m_options.m_hybridCostBytesPerUS > 0.0f &&
+        std::isfinite(
+            m_options.m_hybridCostVectorUS) &&
+        m_options.m_hybridCostVectorUS >= 0.0f &&
+        std::isfinite(
+            m_options.m_hybridCostHeadOriginalUS) &&
+        m_options.m_hybridCostHeadOriginalUS >= 0.0f &&
+        std::isfinite(
+            m_options.m_hybridCostHeadHybridUS) &&
+        m_options.m_hybridCostHeadHybridUS >= 0.0f &&
+        m_options.m_hybridCostMaxPostings > 0;
+    if (!validCostConfig) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Enabled hybrid routing has an invalid cost configuration.\n");
+        return ErrorCode::Fail;
+    }
+    std::string path = m_options.m_indexDirectory;
+    if (!path.empty() && path.back() != FolderSep) {
+        path += FolderSep;
+    }
+    path += m_options.m_hybridPostingFile + ".stats";
+    std::string error;
+    if (!m_hybridRoutingStats.Load(path, error)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load enabled hybrid routing statistics: %s.\n",
+            error.c_str());
+        return ErrorCode::Fail;
+    }
+    if (m_headHybridGraphLoaded.load(
+            std::memory_order_acquire) &&
+        m_hybridHeadGraph.m_generationFingerprint !=
+            m_hybridRoutingStats.m_generationFingerprint) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid graph/posting generation fingerprint mismatch "
+            "(graph=%llu posting=%llu).\n",
+            static_cast<unsigned long long>(
+                m_hybridHeadGraph.m_generationFingerprint),
+            static_cast<unsigned long long>(
+                m_hybridRoutingStats.m_generationFingerprint));
+        m_hybridRoutingStats = HybridRoutingStats();
+        return ErrorCode::Fail;
+    }
+
+    const double originalRecords =
+        m_extraSearcher->GetPostingAvgRecords(false);
+    const double hybridRecords =
+        m_extraSearcher->GetPostingAvgRecords(true);
+    const auto closeEnough = [](double p_left, double p_right) {
+        return std::isfinite(p_left) &&
+            std::isfinite(p_right) &&
+            std::abs(p_left - p_right) <=
+                1e-6 * (std::max)(
+                    1.0,
+                    (std::max)(
+                        std::abs(p_left),
+                        std::abs(p_right)));
+    };
+    if (!closeEnough(
+            originalRecords,
+            m_hybridRoutingStats.m_original.m_layout
+                .m_averageRecords) ||
+        !closeEnough(
+            hybridRecords,
+            m_hybridRoutingStats.m_hybrid.m_layout
+                .m_averageRecords)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid routing statistics do not match loaded posting layouts "
+            "(records primary %.6f/%.6f hybrid %.6f/%.6f).\n",
+            originalRecords,
+            m_hybridRoutingStats.m_original.m_layout
+                .m_averageRecords,
+            hybridRecords,
+            m_hybridRoutingStats.m_hybrid.m_layout
+                .m_averageRecords);
+        m_hybridRoutingStats = HybridRoutingStats();
+        return ErrorCode::Fail;
+    }
+    auto refreshLayout =
+        [&](HybridRouteLayout& p_layout, bool p_hybrid) {
+            p_layout.m_layout.m_averageRecords =
+                m_extraSearcher->GetPostingAvgRecords(
+                    p_hybrid);
+            p_layout.m_layout.m_averagePages =
+                m_extraSearcher->GetPostingAvgPages(
+                    p_hybrid);
+            p_layout.m_layout.m_averageBytes =
+                m_extraSearcher->GetPostingAvgBytes(
+                    p_hybrid);
+        };
+    refreshLayout(m_hybridRoutingStats.m_original, false);
+    refreshLayout(m_hybridRoutingStats.m_hybrid, true);
+    SPTAGLIB_LOG(
+        Helper::LogLevel::LL_Info,
+        "Loaded hybrid route stats: primary %.2f rec/%.2f pages, "
+        "hybrid %.2f rec/%.2f pages, masks=%zu.\n",
+        m_hybridRoutingStats.m_original.m_layout
+            .m_averageRecords,
+        m_hybridRoutingStats.m_original.m_layout
+            .m_averagePages,
+        m_hybridRoutingStats.m_hybrid.m_layout
+            .m_averageRecords,
+        m_hybridRoutingStats.m_hybrid.m_layout
+            .m_averagePages,
+        m_hybridRoutingStats.m_original
+            .m_enrichmentByMask.size());
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::EnsureHeadHybridGraph()
+{
+    bool enabled = false;
+    const std::string enabledValue =
+        GetParameter("EnableHybridDistance", "BuildSSDIndex");
+    if (!enabledValue.empty()) {
+        Helper::Convert::ConvertStringTo<bool>(
+            enabledValue.c_str(), enabled);
+    }
+    if (!enabled) return ErrorCode::Success;
+    std::string artifactError;
+    if (!ValidateHybridArtifactPaths(
+            m_options,
+            m_options.m_indexDirectory,
+            artifactError)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Invalid hybrid artifact paths: %s.\n",
+            artifactError.c_str());
+        return ErrorCode::Fail;
+    }
+    if (m_options.m_storage != Storage::STATIC ||
+        m_pendingVectorTags.empty() ||
+        m_pendingNumTagsPerVec <= 0 ||
+        m_pendingNodeHeadSelections.size() !=
+            m_loadedHeadBundleIndexes.size()) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid head build requires raw tags and loaded "
+            "bundle head selections.\n");
+        return ErrorCode::Fail;
+    }
+    for (const auto& node : m_headBundleNodes) {
+        if (EnsureHeadBundleNodeLoaded(node.nodeId) !=
+            ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+    }
+
+    float vectorWeight = 1.0f;
+    int degree = 16;
+    int candidateCount = 128;
+    Helper::Convert::ConvertStringTo<float>(
+        GetParameter(
+            "HybridVectorWeight", "BuildSSDIndex").c_str(),
+        vectorWeight);
+    Helper::Convert::ConvertStringTo<int>(
+        GetParameter(
+            "HybridGraphDegree", "BuildSSDIndex").c_str(),
+        degree);
+    Helper::Convert::ConvertStringTo<int>(
+        GetParameter(
+            "HybridCandidateCount", "BuildSSDIndex").c_str(),
+        candidateCount);
+    HybridDistanceConfig distance;
+    std::string error;
+    if (degree <= 0 || candidateCount <= 0 ||
+        !HybridDistanceConfig::Parse(
+            GetParameter(
+                "HybridCategoricalCols", "BuildSSDIndex"),
+            GetParameter(
+                "HybridCategoricalWeights", "BuildSSDIndex"),
+            GetParameter(
+                "HybridNumericCols", "BuildSSDIndex"),
+            GetParameter(
+                "HybridNumericWeights", "BuildSSDIndex"),
+            m_pendingNumTagsPerVec, vectorWeight,
+            distance, error)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Invalid hybrid distance build config: %s.\n",
+            error.c_str());
+        return ErrorCode::Fail;
+    }
+
+    HybridHeadGraph graph;
+    if (!graph.Build<T>(
+            m_loadedHeadBundleIndexes,
+            m_pendingNodeHeadSelections,
+            m_pendingVectorTags,
+            m_pendingNumTagsPerVec,
+            distance, degree, candidateCount, error)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid head graph construction failed: %s.\n",
+            error.c_str());
+        return ErrorCode::Fail;
+    }
+    graph.m_generationFingerprint =
+        NewHybridBuildGeneration(
+            graph.m_generationFingerprint);
+    const std::string generation =
+        std::to_string(
+            graph.m_generationFingerprint);
+    if (SetParameter(
+            "HybridGenerationFingerprint",
+            generation.c_str(),
+            "BuildSSDIndex") !=
+        ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
+    m_extraSearcher
+        ->SetHybridGenerationFingerprint(
+            graph.m_generationFingerprint);
+    std::string graphFile = GetParameter(
+        "HybridHeadGraphFile", "BuildSSDIndex");
+    if (graphFile.empty() || graphFile == "Undefined!") {
+        graphFile = "head_hybrid_edges.bin";
+    }
+    std::string path = m_options.m_indexDirectory;
+    if (!path.empty() && path.back() != FolderSep) {
+        path += FolderSep;
+    }
+    path += m_options.m_headIndexFolder;
+    if (!path.empty() && path.back() != FolderSep) {
+        path += FolderSep;
+    }
+    path += graphFile;
+    if (!graph.Save(path, error)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "%s.\n", error.c_str());
+        return ErrorCode::Fail;
+    }
+
+    m_headHybridGraphLoaded.store(
+        false, std::memory_order_release);
+    m_hybridHeadGraph.Clear();
+    m_headHybridEdgeSize = 0;
+    m_headHybridEdgeTotal = 0;
+    if (LoadHeadHybridGraph(false) != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
+    SPTAGLIB_LOG(
+        Helper::LogLevel::LL_Info,
+        "Built hybrid head graph: degree=%d candidates=%d "
+        "edges=%zu file=%s.\n",
+        degree, candidateCount,
+        m_headHybridEdgeTotal, path.c_str());
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::ResizeInlineHeadCrossEdges(
+    DimensionType p_crossEdgeCount) const
+{
+    if (p_crossEdgeCount < 0) {
+        return ErrorCode::Fail;
+    }
+    const auto mutableGraph = [](VectorIndex* p_index)
+        -> COMMON::RelativeNeighborhoodGraph* {
+        if (auto* bkt = dynamic_cast<BKT::Index<T>*>(p_index)) {
+            return &bkt->GetMutableGraph();
+        }
+        if (auto* kdt = dynamic_cast<KDT::Index<T>*>(p_index)) {
+            return &kdt->GetMutableGraph();
+        }
+        return nullptr;
+    };
+    for (size_t nodeID = 0;
+         nodeID < m_loadedHeadBundleIndexes.size(); ++nodeID) {
+        auto* graph =
+            mutableGraph(m_loadedHeadBundleIndexes[nodeID].get());
+        if (graph == nullptr ||
+            nodeID >= m_headBundleLocalToGlobalHIDs.size() ||
+            graph->R() != static_cast<SizeType>(
+                m_headBundleLocalToGlobalHIDs[nodeID].size()) ||
+            graph->SetRuntimeEdgeSuffixSize(p_crossEdgeCount) !=
+                ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+    }
+    return ErrorCode::Success;
+}
+
 template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
 {
+    if (LoadHeadHybridGraph() != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
     if (m_headCrossEdgesDirty.load(std::memory_order_acquire)) {
         return ErrorCode::Success;
     }
@@ -1547,8 +2185,11 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     const auto invalidate = [this]() {
         m_headInlineCrossEdgeSize = 0;
         m_headInlineCrossEdgeTotal = 0;
-        m_headLocatorLocalBits = 0;
-        m_headLocatorLocalMask = 0;
+        if (m_headHybridEdgeSize == 0) {
+            m_headLocatorLocalBits = 0;
+            m_headLocatorLocalMask = 0;
+        }
+        (void)ResizeInlineHeadCrossEdges(0);
         m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     };
 
@@ -1610,11 +2251,20 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     };
     SizeType maxLocalCount = 0;
     int maxNodeId = -1;
+    if (ResizeInlineHeadCrossEdges(
+            static_cast<DimensionType>(header.maxEdgesPerHead)) !=
+        ErrorCode::Success) {
+        std::fclose(fp);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Warning,
+            "Cannot allocate inline cross-edge rows.\n");
+        invalidate();
+        return ErrorCode::Fail;
+    }
     for (size_t nodeId = 0; nodeId < m_loadedHeadBundleIndexes.size(); ++nodeId) {
         auto* graph = mutableGraph(m_loadedHeadBundleIndexes[nodeId].get());
         if (graph == nullptr ||
-            graph->R() != static_cast<SizeType>(m_headBundleLocalToGlobalHIDs[nodeId].size()) ||
-            graph->SetRuntimeEdgeSuffixSize(header.maxEdgesPerHead) != ErrorCode::Success) {
+            graph->R() != static_cast<SizeType>(m_headBundleLocalToGlobalHIDs[nodeId].size())) {
             std::fclose(fp);
             SPTAGLIB_LOG(
                 Helper::LogLevel::LL_Warning,
@@ -1719,7 +2369,8 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
             ok = false;
             break;
         }
-        SizeType* suffix = sourceGraph->RuntimeEdgeSuffix(sourceLocal);
+        SizeType* suffix =
+            sourceGraph->RuntimeEdgeSuffix(sourceLocal);
         size_t count = 0;
         for (std::int32_t edge = 0; edge < edgeCount; ++edge) {
             const auto& e = entries[static_cast<size_t>(edge)];
@@ -1939,26 +2590,126 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
     COMMON::QueryResultSet<T>* p_queryResults,
     int p_entryNode,
     int p_graphResultNum,
-    int& p_scannedOut) const
+    int& p_scannedOut,
+    bool p_useHybrid,
+    const std::uint32_t* p_queryTags,
+    int p_numQueryTags,
+    const Cache::DNFPredicate* p_queryDNF,
+    const std::vector<int>* p_allowedNodes) const
 {
     p_scannedOut = 0;
     if (p_queryResults == nullptr || p_graphResultNum <= 0 ||
         p_entryNode < 0 ||
         p_entryNode >= static_cast<int>(m_headBundleNodes.size()) ||
-        m_headCrossEdgesDirty.load(std::memory_order_acquire) ||
-        LoadHeadCrossEdges() != ErrorCode::Success ||
-        m_headInlineCrossEdgeSize <= 0 ||
-        m_headInlineCrossEdgeTotal == 0 ||
+        (!p_useHybrid &&
+         LoadHeadCrossEdges() != ErrorCode::Success) ||
+        (p_useHybrid
+             ? (m_headHybridEdgeSize <= 0)
+             : (m_headCrossEdgesDirty.load(std::memory_order_acquire) ||
+                m_headInlineCrossEdgeSize <= 0 ||
+                m_headInlineCrossEdgeTotal == 0)) ||
         EnsureHeadBundleDenseMaps() != ErrorCode::Success)
     {
         return ErrorCode::Fail;
     }
 
-    typename BKT::Index<T>::CrossGraphSearchContext context;
+    typename BKT::Index<T>::RuntimeEdgeSearchContext context;
     context.m_nodes.resize(m_headBundleNodes.size());
     context.m_entryNode = p_entryNode;
     context.m_locatorLocalBits = m_headLocatorLocalBits;
     context.m_locatorLocalMask = m_headLocatorLocalMask;
+    context.m_hybridEdgeCount = m_headHybridEdgeSize;
+    const bool crossEdgesAvailable =
+        !m_headCrossEdgesDirty.load(
+            std::memory_order_acquire) &&
+        m_headInlineCrossEdgeSize > 0 &&
+        m_headInlineCrossEdgeTotal > 0;
+    context.m_crossEdgeCount =
+        crossEdgesAvailable
+            ? m_headInlineCrossEdgeSize
+            : 0;
+    context.m_useHybridEdges = p_useHybrid;
+    if (p_allowedNodes != nullptr) {
+        context.m_allowedNodes.assign(
+            m_headBundleNodes.size(), 0);
+        for (int nodeID : *p_allowedNodes) {
+            if (nodeID >= 0 &&
+                nodeID < static_cast<int>(
+                    context.m_allowedNodes.size())) {
+                context.m_allowedNodes[static_cast<size_t>(nodeID)] = 1;
+            }
+        }
+    }
+    if (p_useHybrid) {
+        std::vector<std::pair<int, std::uint32_t>>
+            flatCategoricalValues;
+        HybridQueryDistanceTransform vectorDistanceTransform;
+        if (m_options.m_distCalcMethod ==
+            DistCalcMethod::Cosine) {
+            vectorDistanceTransform =
+                HybridQueryDistanceTransform::ForCosine(
+                    static_cast<const T*>(
+                        p_queryResults
+                            ->GetQuantizedTarget()),
+                    GetFeatureDim());
+        }
+        const auto* threadContext =
+            VectorIndex::GetThreadLocalSearchContext();
+        const std::vector<std::uint32_t>* levelOffsets =
+            threadContext != nullptr &&
+                    !threadContext->m_tagLevelOffsets.empty()
+                ? &threadContext->m_tagLevelOffsets
+                : nullptr;
+        flatCategoricalValues.reserve(
+            static_cast<size_t>((std::max)(0, p_numQueryTags)));
+        for (int index = 0; index < p_numQueryTags; ++index) {
+            int column = TagLevelFromId(p_queryTags[index]);
+            if (levelOffsets != nullptr) {
+                column = 0;
+                for (size_t level = 0;
+                     level < levelOffsets->size(); ++level) {
+                    if (p_queryTags[index] >=
+                        (*levelOffsets)[level]) {
+                        column = static_cast<int>(level);
+                    }
+                    else {
+                        break;
+                    }
+                }
+            }
+            flatCategoricalValues.emplace_back(
+                column, p_queryTags[index]);
+        }
+        context.m_queryDistance =
+            [this, p_queryDNF,
+             vectorDistanceTransform,
+             flatCategoricalValues = std::move(
+                 flatCategoricalValues)](
+                int p_nodeID,
+                SizeType p_localHead,
+                float p_vectorDistance) {
+                if (p_nodeID < 0 ||
+                    p_nodeID >= static_cast<int>(
+                        m_hybridHeadGraph.m_nodes.size())) {
+                    return MaxDist;
+                }
+                const auto& node =
+                    m_hybridHeadGraph.m_nodes[
+                        static_cast<size_t>(p_nodeID)];
+                const auto* attributes = node.Attributes(
+                    p_localHead,
+                    m_hybridHeadGraph.m_numTagColumns);
+                if (attributes == nullptr) return MaxDist;
+                return m_hybridDistance.Combine(
+                    vectorDistanceTransform.Apply(
+                        p_vectorDistance),
+                    m_hybridDistance.PredicateDistance(
+                        attributes,
+                        m_hybridHeadGraph.m_numTagColumns,
+                        p_queryDNF,
+                        flatCategoricalValues));
+            };
+    }
 
     int loadedNodes = 0;
     for (size_t nodeId = 0; nodeId < m_headBundleNodes.size(); ++nodeId)
@@ -1979,6 +2730,13 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
         }
         context.m_nodes[nodeId].m_index = nodeIndex;
         context.m_nodes[nodeId].m_localToGlobal = &localToGlobal;
+        if (p_useHybrid) {
+            if (nodeId >= m_hybridHeadGraph.m_nodes.size()) {
+                return ErrorCode::Fail;
+            }
+            context.m_nodes[nodeId].m_hybridEdges =
+                &m_hybridHeadGraph.m_nodes[nodeId].m_neighbors;
+        }
         ++loadedNodes;
     }
 
@@ -1990,8 +2748,8 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
     }
 
     p_queryResults->Reset();
-    typename BKT::Index<T>::CrossGraphSearchStats stats;
-    const ErrorCode status = entryIndex->SearchIndexWithCrossEdges(
+    typename BKT::Index<T>::RuntimeEdgeSearchStats stats;
+    const ErrorCode status = entryIndex->SearchIndexWithRuntimeEdges(
         *p_queryResults,
         context,
         std::max(1, m_options.m_maxCheck),
@@ -2008,12 +2766,12 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
     {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Info,
-            "HeadBundleGraph: nodes=%d totalSeeded=%d checks=%d crossHops=%d "
+            "HeadBundleGraph: nodes=%d totalSeeded=%d checks=%d hybrid=%d "
             "nodesVisited=%d crossEdgesSeen=%d\n",
             loadedNodes,
             stats.m_seeded,
             stats.m_expanded,
-            stats.m_crossEdges,
+            stats.m_hybridEdges,
             stats.m_checked,
             stats.m_crossEdges);
     }
@@ -2036,6 +2794,90 @@ ErrorCode Index<T>::SearchHeadBundleCrossEdgesNative(
             std::max(1, m_options.m_maxCheck));
     }
     return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::SearchHeadBundlesHybridNative(
+    COMMON::QueryResultSet<T>* p_queryResults,
+    const std::vector<int>& p_candidateNodes,
+    int p_graphResultNum,
+    int& p_scannedOut,
+    const std::uint32_t* p_queryTags,
+    int p_numQueryTags,
+    const Cache::DNFPredicate* p_queryDNF) const
+{
+    p_scannedOut = 0;
+    if (p_queryResults == nullptr ||
+        p_graphResultNum <= 0 ||
+        p_candidateNodes.empty()) {
+        return ErrorCode::Fail;
+    }
+    p_queryResults->Reset();
+    std::vector<bool> searched(
+        m_headBundleNodes.size(), false);
+    bool searchedAny = false;
+    double seedMs = 0.0;
+    double graphMs = 0.0;
+    for (int nodeID : p_candidateNodes) {
+        if (nodeID < 0 ||
+            nodeID >= static_cast<int>(
+                m_headBundleNodes.size()) ||
+            searched[static_cast<size_t>(nodeID)]) {
+            continue;
+        }
+        searched[static_cast<size_t>(nodeID)] =
+            true;
+        const auto& localToGlobal =
+            m_headBundleLocalToGlobalHIDs[
+                static_cast<size_t>(nodeID)];
+        const int nodeResultNum = (std::min)(
+            p_graphResultNum,
+            static_cast<int>(
+                localToGlobal.size()));
+        if (nodeResultNum <= 0) continue;
+
+        COMMON::QueryResultSet<T> nodeResults(
+            p_queryResults->GetTarget(),
+            nodeResultNum);
+        const std::vector<int> onlyThisNode = {
+            nodeID};
+        int nodeScanned = 0;
+        const ErrorCode status =
+            SearchHeadBundleCrossEdgesNative(
+                &nodeResults,
+                nodeID,
+                nodeResultNum,
+                nodeScanned,
+                true,
+                p_queryTags,
+                p_numQueryTags,
+                p_queryDNF,
+                &onlyThisNode);
+        if (status != ErrorCode::Success) {
+            return status;
+        }
+        searchedAny = true;
+        p_scannedOut += nodeScanned;
+        seedMs += g_bktSeedMs;
+        graphMs += g_pqGraphMs;
+        for (int rank = 0;
+             rank < nodeResultNum; ++rank) {
+            const BasicResult* result =
+                nodeResults.GetResult(rank);
+            if (result == nullptr ||
+                result->VID < 0) {
+                break;
+            }
+            p_queryResults->AddPoint(
+                result->VID, result->Dist);
+        }
+    }
+    p_queryResults->SortResult();
+    g_bktSeedMs = seedMs;
+    g_pqGraphMs = graphMs;
+    return searchedAny
+        ? ErrorCode::Success
+        : ErrorCode::Fail;
 }
 
 template <typename T>
@@ -2179,6 +3021,15 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
         SetParameter(entry.first.c_str(), entry.second.c_str(), "SearchSSDIndex");
     }
 
+    if (m_options.m_enableHybridDistance &&
+        m_options.m_indexAlgoType !=
+            IndexAlgoType::BKT) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires IndexAlgoType=BKT.\n");
+        return ErrorCode::FailedParseValue;
+    }
+
     const std::string metadataRootSidecar = JoinPath(
         JoinPath(m_options.m_indexDirectory, m_options.m_headIndexFolder),
         "head_metaonly.bin");
@@ -2205,6 +3056,14 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
 
 template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray> &p_indexBlobs)
 {
+    if (m_options.m_enableHybridDistance) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid routing does not support blob/memory index loading; "
+            "load the persisted directory so graph, posting, and stats "
+            "sidecars can be validated together.\n");
+        return ErrorCode::Fail;
+    }
     /** Need to modify **/
     m_index->SetQuantizer(m_pQuantizer);
     if (!m_options.m_persistentBufferPath.empty() && !direxists(m_options.m_persistentBufferPath.c_str()))
@@ -2235,6 +3094,8 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
     }
 
     if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index))
+        return ErrorCode::Fail;
+    if (LoadHybridRoutingStats() != ErrorCode::Success)
         return ErrorCode::Fail;
 
     m_vectorTranslateMap.Initialize(m_index->GetNumSamples(), 1, m_index->m_iDataBlockSize, m_index->m_iDataCapacity,
@@ -2339,6 +3200,8 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading storage\n");
     if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index))
         return ErrorCode::Fail;
+    if (LoadHybridRoutingStats() != ErrorCode::Success)
+        return ErrorCode::Fail;
 
     if ((m_options.m_storage != Storage::STATIC) && m_options.m_preReassign)
     {
@@ -2364,13 +3227,23 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
         return ErrorCode::Fail;
     }
     if (!m_headBundleNodes.empty() &&
+        LoadHeadHybridGraph() != ErrorCode::Success) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Enabled hybrid head graph is unavailable.\n");
+        return ErrorCode::Fail;
+    }
+    if (!m_headBundleNodes.empty() &&
         LoadHeadCrossEdges() != ErrorCode::Success) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                      "Head cross edges are unavailable; using no-cross bundle traversal.\n");
         m_headInlineCrossEdgeSize = 0;
         m_headInlineCrossEdgeTotal = 0;
-        m_headLocatorLocalBits = 0;
-        m_headLocatorLocalMask = 0;
+        (void)ResizeInlineHeadCrossEdges(0);
+        if (m_headHybridEdgeSize == 0) {
+            m_headLocatorLocalBits = 0;
+            m_headLocatorLocalMask = 0;
+        }
         m_headCrossEdgesDirty.store(true, std::memory_order_release);
         m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     }
@@ -2690,9 +3563,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     const float filterSelectivity = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->m_filterSelectivity
         : 1.0f;
+    const float routeSelectivity = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->m_routeSelectivity
+        : 1.0f;
     const std::function<bool(int)>& postingFilter = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->m_postingFilter
         : kEmptyPostingFilter;
+    const bool hasExactFilter =
+        (queryDNF != nullptr && !queryDNF->Empty()) ||
+        (queryTags != nullptr && numQueryTags > 0);
     static const std::vector<int> kEmptySearchHeadBundleNodes;
     const std::vector<int>& searchHeadBundleNodes = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->m_searchHeadBundleNodes
@@ -2724,7 +3603,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         if (directPostingCount > m_options.m_searchInternalResultNum) {
             const bool isStaticStorage = m_options.m_storage == Storage::STATIC;
             const int maxPages = isStaticStorage
-                ? (std::max)(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx
+                ? m_extraSearcher->GetPostingBufferBytes(false)
                 : ((std::max)(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
                     + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
             // ExtraStaticSearcher indexes m_diskRequests by posting ordinal, so
@@ -2749,11 +3628,16 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         if (!directHeadLocalIDs.empty() && m_index != nullptr)
         {
             const bool hasTagFilter = queryTags != nullptr && numQueryTags > 0;
+            const auto headHierWidths =
+                m_index->GetHeadNodeHierWidths();
             SPTAG::Cache::HierarchicalPostingMask queryHierMask;
             if (hasTagFilter) {
                 queryHierMask.Clear();
                 for (int i = 0; i < numQueryTags; ++i) {
-                    queryHierMask.Insert(TagLevelFromId(queryTags[i]), queryTags[i]);
+                    queryHierMask.Insert(
+                        TagLevelFromId(queryTags[i]),
+                        queryTags[i],
+                        headHierWidths);
                 }
             }
 
@@ -2771,7 +3655,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 if (!hasTagFilter) return true;
                 static const std::vector<uint8_t> kNoRouteMask;
                 return m_index->HasHeadNodeMeta() &&
-                    m_index->HeadNodeMatchesQuery(localHid, queryHierMask, kNoRouteMask);
+                    m_index->HeadNodeMatchesQuery(
+                        localHid, queryHierMask,
+                        kNoRouteMask,
+                        headHierWidths);
             };
 
             for (SizeType localHid : directHeadLocalIDs) {
@@ -2828,17 +3715,25 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             m_index != nullptr)
         {
             // Build hierarchical query mask for head-only vectors
+            const auto headHierWidths =
+                m_index->GetHeadNodeHierWidths();
             SPTAG::Cache::HierarchicalPostingMask queryHierMask;
             queryHierMask.Clear();
             for (int i = 0; i < numQueryTags; ++i) {
-                queryHierMask.Insert(TagLevelFromId(queryTags[i]), queryTags[i]);
+                queryHierMask.Insert(
+                    TagLevelFromId(queryTags[i]),
+                    queryTags[i],
+                    headHierWidths);
             }
 
             const SizeType sampleCount = m_index->GetHeadNodeMetaSampleCount();
             for (SizeType sampleId = 0; sampleId < sampleCount; ++sampleId) {
                 // Pass empty routedNodeMask to skip node check (we're scanning all heads)
                 static const std::vector<uint8_t> kNoRouteMask;
-                if (!m_index->HeadNodeMatchesQuery(sampleId, queryHierMask, kNoRouteMask)) {
+                if (!m_index->HeadNodeMatchesQuery(
+                        sampleId, queryHierMask,
+                        kNoRouteMask,
+                        headHierWidths)) {
                     continue;
                 }
 
@@ -3087,6 +3982,167 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             postingTarget);
     }
 
+    bool useHybridRoute = false;
+    HybridRouteEstimate originalRouteEstimate;
+    HybridRouteEstimate hybridRouteEstimate;
+    std::uint64_t hybridRouteMask = 0;
+    if (m_options.m_enableHybridDistance &&
+        hasExactFilter &&
+        m_extraSearcher != nullptr &&
+        m_extraSearcher->HasHybridPostings() &&
+        !m_hybridRoutingStats.Empty()) {
+        std::vector<std::pair<int, std::uint32_t>>
+            flatCategoricalValues;
+        flatCategoricalValues.reserve(
+            static_cast<size_t>(
+                (std::max)(0, numQueryTags)));
+        const std::vector<std::uint32_t>* levelOffsets =
+            threadLocalSearchContext != nullptr &&
+                    !threadLocalSearchContext
+                         ->m_tagLevelOffsets.empty()
+                ? &threadLocalSearchContext
+                       ->m_tagLevelOffsets
+                : nullptr;
+        for (int tag = 0; tag < numQueryTags; ++tag) {
+            int column = TagLevelFromId(queryTags[tag]);
+            if (levelOffsets != nullptr) {
+                column = 0;
+                for (size_t level = 0;
+                     level < levelOffsets->size();
+                     ++level) {
+                    if (queryTags[tag] >=
+                        (*levelOffsets)[level]) {
+                        column =
+                            static_cast<int>(level);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            flatCategoricalValues.emplace_back(
+                column, queryTags[tag]);
+        }
+        hybridRouteMask =
+            m_hybridRoutingStats.ConfiguredMask(
+                queryDNF, flatCategoricalValues);
+
+        HybridPostingLayoutStats originalLayout =
+            m_hybridRoutingStats.m_original.m_layout;
+        HybridPostingLayoutStats hybridLayout =
+            m_hybridRoutingStats.m_hybrid.m_layout;
+        originalLayout.m_enrichment =
+            m_hybridRoutingStats.Enrichment(
+                false, hybridRouteMask);
+        hybridLayout.m_enrichment =
+            m_hybridRoutingStats.Enrichment(
+                true, hybridRouteMask);
+        originalLayout.m_headFixedCostUS =
+            m_options.m_hybridCostHeadOriginalUS;
+        hybridLayout.m_headFixedCostUS =
+            m_options.m_hybridCostHeadHybridUS;
+
+        HybridRouteCostConfig routeCost;
+        routeCost.m_resultSafety =
+            m_options.m_hybridCostResultSafety;
+        routeCost.m_ioFixedUS =
+            m_options.m_hybridCostIOFixedUS;
+        routeCost.m_pageUS =
+            m_options.m_hybridCostPageUS;
+        routeCost.m_vectorUS =
+            m_options.m_hybridCostVectorUS;
+        routeCost.m_bytesPerUS =
+            m_options.m_hybridCostBytesPerUS;
+
+        SizeType postingCap =
+            (std::max)(
+                static_cast<SizeType>(1),
+                TotalHeadSampleCount());
+        if (!candidateNodes.empty()) {
+            postingCap = 0;
+            for (int nodeID : candidateNodes) {
+                postingCap +=
+                    m_headBundleNodes[
+                        static_cast<size_t>(nodeID)]
+                        .postingCount;
+            }
+            postingCap =
+                (std::max)(
+                    static_cast<SizeType>(1),
+                    postingCap);
+        }
+        postingCap = (std::min)(
+            postingCap,
+            static_cast<SizeType>(
+                m_options
+                    .m_hybridCostMaxPostings));
+        const int maxPostingCap =
+            postingCap >
+                    static_cast<SizeType>(
+                        (std::numeric_limits<int>::max)())
+                ? (std::numeric_limits<int>::max)()
+                : static_cast<int>(postingCap);
+        const double selectivity =
+            std::isfinite(routeSelectivity)
+                ? (std::max)(
+                      1e-9,
+                      (std::min)(
+                          1.0,
+                          static_cast<double>(
+                              routeSelectivity)))
+                : 1.0;
+        originalRouteEstimate =
+            EstimateHybridRouteCost(
+                p_query.GetResultNum(),
+                nprobeBase,
+                maxPostingCap,
+                selectivity,
+                originalLayout,
+                routeCost);
+        hybridRouteEstimate =
+            EstimateHybridRouteCost(
+                p_query.GetResultNum(),
+                nprobeBase,
+                maxPostingCap,
+                selectivity,
+                hybridLayout,
+                routeCost);
+        useHybridRoute =
+            hybridRouteEstimate.m_costUS <
+            originalRouteEstimate.m_costUS;
+        postingTarget = useHybridRoute
+            ? hybridRouteEstimate.m_postings
+            : originalRouteEstimate.m_postings;
+
+        if (m_options.m_logHybridRoute) {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Info,
+                "HybridRoute: sel=%.6g mask=0x%llx route=%s "
+                "original={N=%d,Y=%.3f,C=%.3fus,E=%.3f,R=%.2f,P=%.2f,U=%.3f} "
+                "hybrid={N=%d,Y=%.3f,C=%.3fus,E=%.3f,R=%.2f,P=%.2f,U=%.3f}\n",
+                selectivity,
+                static_cast<unsigned long long>(
+                    hybridRouteMask),
+                useHybridRoute ? "hybrid"
+                               : "original",
+                originalRouteEstimate.m_postings,
+                originalRouteEstimate
+                    .m_expectedMatchesPerPosting,
+                originalRouteEstimate.m_costUS,
+                originalLayout.m_enrichment,
+                originalLayout.m_averageRecords,
+                originalLayout.m_averagePages,
+                originalLayout.m_uniqueRatio,
+                hybridRouteEstimate.m_postings,
+                hybridRouteEstimate
+                    .m_expectedMatchesPerPosting,
+                hybridRouteEstimate.m_costUS,
+                hybridLayout.m_enrichment,
+                hybridLayout.m_averageRecords,
+                hybridLayout.m_averagePages,
+                hybridLayout.m_uniqueRatio);
+        }
+    }
+
     // Graph search must return at least postingTarget candidates
     // (PS will filter some out, so request more)
     int graphResultNum = postingTarget;
@@ -3152,7 +4208,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 }
             }
 
-            const bool unfiltered = queryTags == nullptr || numQueryTags == 0;
+            const bool unfiltered = !hasExactFilter;
             const bool useCrossEdges = canUseHeadBundle && unfiltered &&
                 candidateNodes.size() > 1 &&
                 !m_headCrossEdgesDirty.load(std::memory_order_acquire) &&
@@ -3164,13 +4220,61 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
             if (m_options.m_logPathStats) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                    "PathStats: nodes=%d cross=%d\n",
-                    static_cast<int>(candidateNodes.size()), useCrossEdges ? 1 : 0);
+                    "PathStats: nodes=%d cross=%d hybrid=%d\n",
+                    static_cast<int>(candidateNodes.size()),
+                    useCrossEdges ? 1 : 0,
+                    useHybridRoute ? 1 : 0);
             }
 
             if (canUseHeadBundle)
             {
-                if (useCrossEdges)
+                if (useHybridRoute)
+                {
+                    if (LoadHeadHybridGraph() !=
+                        ErrorCode::Success) {
+                        return ErrorCode::Fail;
+                    }
+                    const bool useHybridCrossEdges =
+                        candidateNodes.size() > 1 &&
+                        m_options.m_filterKeepCross &&
+                        LoadHeadCrossEdges() ==
+                            ErrorCode::Success &&
+                        !m_headCrossEdgesDirty.load(
+                            std::memory_order_acquire) &&
+                        m_headInlineCrossEdgeSize > 0 &&
+                        m_headInlineCrossEdgeTotal > 0;
+                    if (candidateNodes.size() > 1 &&
+                        !useHybridCrossEdges) {
+                        ret =
+                            SearchHeadBundlesHybridNative(
+                                p_queryResults,
+                                candidateNodes,
+                                graphResultNum,
+                                scanned,
+                                queryTags,
+                                numQueryTags,
+                                queryDNF);
+                    } else {
+                        ret =
+                            SearchHeadBundleCrossEdgesNative(
+                            p_queryResults,
+                            candidateNodes.front(),
+                            graphResultNum,
+                            scanned,
+                            true,
+                            queryTags,
+                            numQueryTags,
+                            queryDNF,
+                            &candidateNodes);
+                    }
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Hybrid head traversal failed for enabled hybrid route.\n");
+                        return ret;
+                    }
+                }
+                else if (useCrossEdges)
                 {
                     ret = SearchHeadBundleCrossEdgesNative(
                         p_queryResults,
@@ -3314,13 +4418,38 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // Clear() only grows (never shrinks), so this is a no-op when already
         // large enough.
         if (postingTarget > m_options.m_searchInternalResultNum) {
-            int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
-                           + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
-            workSpace->Clear(postingTarget, maxPages, true, m_options.m_enableDataCompression);
+            const bool isStaticStorage =
+                m_options.m_storage == Storage::STATIC;
+            int maxPages = isStaticStorage
+                ? m_extraSearcher
+                      ->GetPostingBufferBytes(
+                          useHybridRoute)
+                : ((std::max)(
+                       m_options.m_postingPageLimit,
+                       m_options.m_searchPostingPageLimit) +
+                   m_options.m_bufferLength +
+                   m_options.m_unfilterTailBufferLength)
+                      << PageSizeEx;
+            workSpace->Clear(
+                postingTarget, maxPages,
+                !isStaticStorage,
+                m_options.m_enableDataCompression);
         }
 
         // Propagate posting-level PS pre-filter (applied in ExtraDynamicSearcher before MultiGet)
-        workSpace->m_postingFilter = postingFilter;
+        workSpace->m_useHybridPostings =
+            useHybridRoute;
+        workSpace->m_scanFullPostingForFilter =
+            m_options.m_enableHybridDistance &&
+            hasExactFilter && !useHybridRoute;
+        // Hybrid routing compares against the complete original pure+tail
+        // layout. Its pure-prefix signature cannot safely reject a list whose
+        // matching records exist only in the tail.
+        workSpace->m_postingFilter =
+            m_options.m_enableHybridDistance &&
+                    hasExactFilter
+                ? nullptr
+                : postingFilter;
         // Propagate inline tag filter (for per-vector exact tag check in posting scan)
         workSpace->m_queryTags = queryTags;
         workSpace->m_numQueryTags = numQueryTags;
@@ -3330,12 +4459,19 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         workSpace->m_postingProbeStats.Reset();
 
         const bool hasTagFilter = queryTags != nullptr && numQueryTags > 0;
+        const auto headHierWidths =
+            m_index != nullptr
+                ? m_index->GetHeadNodeHierWidths()
+                : SPTAG::Cache::HierWidthTable();
         // Build hierarchical query mask once
         SPTAG::Cache::HierarchicalPostingMask queryHierMask;
         if (hasTagFilter) {
             queryHierMask.Clear();
             for (int i = 0; i < numQueryTags; ++i) {
-                queryHierMask.Insert(TagLevelFromId(queryTags[i]), queryTags[i]);
+                queryHierMask.Insert(
+                    TagLevelFromId(queryTags[i]),
+                    queryTags[i],
+                    headHierWidths);
             }
         }
         auto translateHeadVID = [&](SizeType localHid) -> SizeType {
@@ -3347,6 +4483,41 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 return static_cast<SizeType>(*(m_vectorTranslateMap[localHid]));
             return MaxSize;
         };
+        auto pureHeadDistance =
+            [&](SizeType globalHid) -> float {
+                if (!useHybridRoute || globalHid < 0 ||
+                    static_cast<size_t>(globalHid) >=
+                        m_headBundleNodeByB.size() ||
+                    static_cast<size_t>(globalHid) >=
+                        m_headBundleLocalByB.size()) {
+                    return MaxDist;
+                }
+                const int node =
+                    m_headBundleNodeByB[
+                        static_cast<size_t>(globalHid)];
+                const SizeType local =
+                    m_headBundleLocalByB[
+                        static_cast<size_t>(globalHid)];
+                if (node < 0 ||
+                    node >= static_cast<int>(
+                        m_loadedHeadBundleIndexes.size()) ||
+                    m_loadedHeadBundleIndexes[
+                        static_cast<size_t>(node)] ==
+                        nullptr ||
+                    local < 0 ||
+                    local >=
+                        m_loadedHeadBundleIndexes[
+                            static_cast<size_t>(node)]
+                            ->GetNumSamples()) {
+                    return MaxDist;
+                }
+                const auto& nodeIndex =
+                    m_loadedHeadBundleIndexes[
+                        static_cast<size_t>(node)];
+                return nodeIndex->ComputeDistance(
+                    p_queryResults->GetQuantizedTarget(),
+                    nodeIndex->GetSample(local));
+            };
         auto shouldKeepHeadResult = [&](SizeType localHid) -> bool {
             // Intentionally uses HeadNodeMatchesQuery (with IsHeadNodeHeadOnly
             // gate) so that only ghost head-only vectors can be returned as
@@ -3356,9 +4527,44 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             // only from posting scans (and the rare head-only ghost vectors).
             static const std::vector<uint8_t> kNoRouteMask;
             if (queryDNF != nullptr && !queryDNF->Empty()) {
-                // Head-only metadata stores categorical own-tags only. A numeric
-                // predicate has no exact head-only representation, so it must not
-                // admit a coarse graph candidate into top-K.
+                if (m_options.m_enableHybridDistance &&
+                    localHid >= 0 &&
+                    static_cast<size_t>(localHid) <
+                        m_headBundleNodeByB.size() &&
+                    static_cast<size_t>(localHid) <
+                        m_headBundleLocalByB.size()) {
+                    const int nodeID =
+                        m_headBundleNodeByB[
+                            static_cast<size_t>(
+                                localHid)];
+                    const SizeType local =
+                        m_headBundleLocalByB[
+                            static_cast<size_t>(
+                                localHid)];
+                    if (nodeID >= 0 &&
+                        nodeID < static_cast<int>(
+                            m_hybridHeadGraph
+                                .m_nodes.size())) {
+                        const auto* attributes =
+                            m_hybridHeadGraph
+                                .m_nodes[
+                                    static_cast<size_t>(
+                                        nodeID)]
+                                .Attributes(
+                                    local,
+                                    m_hybridHeadGraph
+                                        .m_numTagColumns);
+                        if (attributes != nullptr) {
+                            return queryDNF->Matches(
+                                attributes,
+                                m_hybridHeadGraph
+                                    .m_numTagColumns);
+                        }
+                    }
+                }
+                // Legacy head-only metadata stores categorical own-tags only.
+                // Without raw hybrid attributes a numeric predicate cannot
+                // safely admit a coarse graph candidate.
                 if (queryDNF->HasNumericLiteral()) return false;
                 if (m_index == nullptr || !m_index->HasHeadNodeMeta() ||
                     !m_index->IsHeadNodeHeadOnly(localHid)) {
@@ -3369,9 +4575,58 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                     queryDNF->Matches(ownTags->tag, SPTAG::Cache::HIER_LEVELS);
             }
             if (!hasTagFilter) return true;
+            if (m_options.m_enableHybridDistance &&
+                localHid >= 0 &&
+                static_cast<size_t>(localHid) <
+                    m_headBundleNodeByB.size() &&
+                static_cast<size_t>(localHid) <
+                    m_headBundleLocalByB.size()) {
+                const int nodeID =
+                    m_headBundleNodeByB[
+                        static_cast<size_t>(
+                            localHid)];
+                const SizeType local =
+                    m_headBundleLocalByB[
+                        static_cast<size_t>(
+                            localHid)];
+                if (nodeID >= 0 &&
+                    nodeID < static_cast<int>(
+                        m_hybridHeadGraph.m_nodes
+                            .size())) {
+                    const auto* attributes =
+                        m_hybridHeadGraph
+                            .m_nodes[
+                                static_cast<size_t>(
+                                    nodeID)]
+                            .Attributes(
+                                local,
+                                m_hybridHeadGraph
+                                    .m_numTagColumns);
+                    if (attributes != nullptr) {
+                        for (int query = 0;
+                             query < numQueryTags;
+                             ++query) {
+                            for (int column = 0;
+                                 column <
+                                     m_hybridHeadGraph
+                                         .m_numTagColumns;
+                                 ++column) {
+                                if (attributes[column] ==
+                                    queryTags[query]) {
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
             return m_index != nullptr &&
                    m_index->HasHeadNodeMeta() &&
-                   m_index->HeadNodeMatchesQuery(localHid, queryHierMask, kNoRouteMask);
+                   m_index->HeadNodeMatchesQuery(
+                       localHid, queryHierMask,
+                       kNoRouteMask,
+                       headHierWidths);
         };
 
         float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
@@ -3384,7 +4639,8 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist))
                 break;
             SizeType localHid = res->VID;
-            if (m_extraSearcher->CheckValidPosting(localHid))
+            if (m_extraSearcher->CheckValidPosting(
+                    localHid, workSpace.get()))
             {
                 // The primary-owner sidecar is independent of the retained physical
                 // posting membership. It must receive every graph head, including
@@ -3401,6 +4657,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 res->Dist = MaxDist;
             } else {
                 res->VID = globalVID;
+                if (useHybridRoute) {
+                    const float distance =
+                        pureHeadDistance(localHid);
+                    if (distance == MaxDist) {
+                        res->VID = -1;
+                    } else {
+                        res->Dist = distance;
+                    }
+                }
             }
         }
 
@@ -3436,6 +4701,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 res->Dist = MaxDist;
             } else {
                 res->VID = globalVID;
+                if (useHybridRoute) {
+                    const float distance =
+                        pureHeadDistance(localHid);
+                    if (distance == MaxDist) {
+                        res->VID = -1;
+                    } else {
+                        res->Dist = distance;
+                    }
+                }
             }
         }
 
@@ -4668,6 +5942,14 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
 
 template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader> &p_reader)
 {
+    if (m_options.m_enableHybridDistance &&
+        m_options.m_indexAlgoType !=
+            IndexAlgoType::BKT) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Hybrid distance requires IndexAlgoType=BKT.\n");
+        return ErrorCode::FailedParseValue;
+    }
     if (!(m_options.m_indexDirectory.empty()) && !(direxists(m_options.m_indexDirectory.c_str())))
     {
         mkdir(m_options.m_indexDirectory.c_str());
@@ -5079,6 +6361,10 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_options.m_datasetCapacity);
         }
 
+        if (EnsureHeadHybridGraph() != ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+
         const bool usePrebuiltCrossTail =
             m_options.m_storage == Storage::STATIC &&
             m_options.m_buildSsdIndex &&
@@ -5155,6 +6441,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
         if (m_extraSearcher != nullptr)
         {
+            if (LoadHybridRoutingStats() != ErrorCode::Success)
+                return ErrorCode::Fail;
             if ((m_options.m_storage != Storage::STATIC) && m_options.m_preReassign)
             {
                 if (m_extraSearcher->RefineIndex(m_index) != ErrorCode::Success)
@@ -5745,8 +7033,13 @@ ErrorCode Index<T>::MarkCrossEdgesDirty(const std::string& p_baseDir)
 {
     if (m_headBundleNodes.size() <= 1) return ErrorCode::Success;
     m_headCrossEdgesDirty.store(true, std::memory_order_release);
-    m_headLocatorLocalBits = 0;
-    m_headLocatorLocalMask = 0;
+    m_headInlineCrossEdgeSize = 0;
+    m_headInlineCrossEdgeTotal = 0;
+    (void)ResizeInlineHeadCrossEdges(0);
+    if (m_headHybridEdgeSize == 0) {
+        m_headLocatorLocalBits = 0;
+        m_headLocatorLocalMask = 0;
+    }
 
     const std::string baseDir = p_baseDir.empty()
         ? (m_headBundleBaseDir.empty() ? m_options.m_indexDirectory : m_headBundleBaseDir)

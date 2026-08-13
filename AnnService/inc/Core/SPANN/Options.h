@@ -93,6 +93,7 @@ namespace SPTAG {
             bool m_enableHybridDistance;
             std::string m_hybridPostingFile;
             std::string m_hybridHeadGraphFile;
+            std::string m_hybridGenerationFingerprint;
             float m_hybridVectorWeight;
             std::string m_hybridCategoricalCols;
             std::string m_hybridCategoricalWeights;
@@ -103,7 +104,9 @@ namespace SPTAG {
             float m_hybridCostResultSafety;
             float m_hybridCostIOFixedUS;
             float m_hybridCostPageUS;
+            float m_hybridCostBytesPerUS;
             float m_hybridCostVectorUS;
+            int m_hybridCostMaxPostings;
             float m_hybridCostHeadOriginalUS;
             float m_hybridCostHeadHybridUS;
             bool m_logHybridRoute;

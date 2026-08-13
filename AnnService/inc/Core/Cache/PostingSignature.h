@@ -283,12 +283,9 @@ static constexpr int HIER_PROJ_BITS = HIER_LEVEL_BITS;
 // 256, so the per-head posting-content mask packs tighter: e.g. YFCC widths
 // [256,64,64,128,64] -> 576 bits = 9 words = 72 B instead of 5*256 = 160 B.
 //
-// The table is a process-global set once per index:
-//   * at build  -> SetHierWidths() from the SPTAG_HIER_LEVEL_WIDTHS env list.
-//   * at load   -> SetHierWidths() from the widths persisted in the
-//                  head_node_meta.bin V5 header (so the byte layout matches).
-// Default (never set, or legacy V3/V4 indexes) is uniform HIER_LEVEL_BITS,
-// which reproduces the previous fixed 256-bit-per-level layout bit-for-bit.
+// Each head index owns the table used by its compact metadata records. The
+// process-global table remains only as a legacy default for standalone masks;
+// persisted/index-bound operations pass their index's table explicitly.
 // Widths are clamped to [64, HIER_LEVEL_BITS] and rounded up to a multiple of
 // 64, guaranteeing totalWords <= HIER_MAX_WORDS (no storage overflow).
 // ═══════════════════════════════════════════════════════════════════
@@ -297,16 +294,35 @@ struct HierWidthTable {
     int wordOff[HIER_LEVELS];
     int totalWords;
 
+    HierWidthTable() { SetUniform(); }
+
     void Recompute() {
         int off = 0;
         for (int l = 0; l < HIER_LEVELS; ++l) { wordOff[l] = off; off += bits[l] / 64; }
         totalWords = off;
     }
     void SetUniform() { for (int l = 0; l < HIER_LEVELS; ++l) bits[l] = HIER_LEVEL_BITS; Recompute(); }
+
+    void Set(const int* bitsPerLevel, int n) {
+        for (int l = 0; l < HIER_LEVELS; ++l) {
+            int b = (bitsPerLevel != nullptr && l < n)
+                ? bitsPerLevel[l]
+                : HIER_LEVEL_BITS;
+            if (b < 64) b = 64;
+            if (b > HIER_LEVEL_BITS) b = HIER_LEVEL_BITS;
+            b = ((b + 63) / 64) * 64;
+            bits[l] = b;
+        }
+        Recompute();
+    }
+
+    size_t MaskBytes() const {
+        return static_cast<size_t>(totalWords) * sizeof(uint64_t);
+    }
 };
 
 inline HierWidthTable& MutableHierWidths() {
-    static HierWidthTable t = [] { HierWidthTable x; x.SetUniform(); return x; }();
+    static HierWidthTable t;
     return t;
 }
 inline const HierWidthTable& HierWidths() { return MutableHierWidths(); }
@@ -315,15 +331,7 @@ inline const HierWidthTable& HierWidths() { return MutableHierWidths(); }
 // remaining levels default to HIER_LEVEL_BITS. Each width is clamped to
 // [64, HIER_LEVEL_BITS] and rounded up to a multiple of 64.
 inline void SetHierWidths(const int* bitsPerLevel, int n) {
-    auto& t = MutableHierWidths();
-    for (int l = 0; l < HIER_LEVELS; ++l) {
-        int b = (l < n) ? bitsPerLevel[l] : HIER_LEVEL_BITS;
-        if (b < 64) b = 64;
-        if (b > HIER_LEVEL_BITS) b = HIER_LEVEL_BITS;
-        b = ((b + 63) / 64) * 64;
-        t.bits[l] = b;
-    }
-    t.Recompute();
+    MutableHierWidths().Set(bitsPerLevel, n);
 }
 inline void SetHierWidthsUniform() { MutableHierWidths().SetUniform(); }
 
@@ -331,6 +339,7 @@ inline void SetHierWidthsUniform() { MutableHierWidths().SetUniform(); }
 // current width table. The per-head meta record uses this (NOT sizeof) so the
 // stored mask shrinks for narrow schemas.
 inline size_t HierPostingMaskBytes() { return static_cast<size_t>(HierWidths().totalWords) * sizeof(uint64_t); }
+inline size_t HierPostingMaskBytes(const HierWidthTable& widths) { return widths.MaskBytes(); }
 
 struct HierarchicalPostingMask {
     // Flat storage of up to HIER_MAX_WORDS words. Only the first
@@ -347,31 +356,43 @@ struct HierarchicalPostingMask {
     // level: categorical tag column index (0=org/country, 1=dept/year, ...).
     // tag is the raw tag id. Columns >= HIER_LEVELS are ignored (fail-open at
     // query time via MayContain returning true), preserving correctness.
-    void Insert(int level, uint32_t tag) {
+    void Insert(int level, uint32_t tag, const HierWidthTable& widths) {
         if (level < 0 || level >= HIER_LEVELS) return;
-        const auto& t = HierWidths();
-        uint32_t pos = tag % static_cast<uint32_t>(t.bits[level]);
-        mask[t.wordOff[level] + (pos >> 6)] |= (1ULL << (pos & 63));
+        uint32_t pos = tag % static_cast<uint32_t>(widths.bits[level]);
+        mask[widths.wordOff[level] + (pos >> 6)] |= (1ULL << (pos & 63));
+    }
+
+    void Insert(int level, uint32_t tag) {
+        Insert(level, tag, HierWidths());
     }
 
     // OR-across-levels semantic: returns true if ANY level has a non-zero AND.
     // Because levels partition the used words (wordOff), a flat AND over the
     // used words [0, totalWords) is identical to the per-level OR-of-ANDs.
-    bool MayIntersect(const HierarchicalPostingMask& q) const {
-        const int tw = HierWidths().totalWords;
-        for (int w = 0; w < tw; ++w)
+    bool MayIntersect(const HierarchicalPostingMask& q,
+                      const HierWidthTable& widths) const {
+        for (int w = 0; w < widths.totalWords; ++w)
             if ((mask[w] & q.mask[w]) != 0) return true;
         return false;
+    }
+
+    bool MayIntersect(const HierarchicalPostingMask& q) const {
+        return MayIntersect(q, HierWidths());
     }
 
     // Single (level, tag) membership test. No false negatives. A column beyond
     // the supported level count fails open (returns true) so such predicates are
     // never wrongly pruned here -- they are still enforced by the exact post-filter.
-    bool MayContain(int level, uint32_t tag) const {
+    bool MayContain(int level, uint32_t tag,
+                    const HierWidthTable& widths) const {
         if (level < 0 || level >= HIER_LEVELS) return true;
-        const auto& t = HierWidths();
-        uint32_t pos = tag % static_cast<uint32_t>(t.bits[level]);
-        return (mask[t.wordOff[level] + (pos >> 6)] & (1ULL << (pos & 63))) != 0;
+        uint32_t pos = tag % static_cast<uint32_t>(widths.bits[level]);
+        return (mask[widths.wordOff[level] + (pos >> 6)] &
+                (1ULL << (pos & 63))) != 0;
+    }
+
+    bool MayContain(int level, uint32_t tag) const {
+        return MayContain(level, tag, HierWidths());
     }
 };
 
@@ -407,12 +428,17 @@ struct HierarchicalOwnTags {
     // true iff ANY level's own value is admitted by the query mask at that
     // level. q.MayContain(l, v) reproduces the exact bit-collision behaviour of
     // the old bitmap AND (pos = v % HIER_LEVEL_BITS), so pruning is unchanged.
-    bool MayIntersect(const HierarchicalPostingMask& q) const {
+    bool MayIntersect(const HierarchicalPostingMask& q,
+                      const HierWidthTable& widths) const {
         for (int l = 0; l < HIER_LEVELS; ++l) {
             if (tag[l] == OWN_TAG_EMPTY) continue;
-            if (q.MayContain(l, tag[l])) return true;
+            if (q.MayContain(l, tag[l], widths)) return true;
         }
         return false;
+    }
+
+    bool MayIntersect(const HierarchicalPostingMask& q) const {
+        return MayIntersect(q, HierWidths());
     }
 };
 
@@ -617,15 +643,24 @@ struct DNFPredicate {
         return false;
     }
 
-    bool MayMatchHier(const HierarchicalPostingMask& h) const {
+    bool MayMatchHier(const HierarchicalPostingMask& h,
+                      const HierWidthTable& widths) const {
         for (const auto& c : clauses) {
             if (c.lits.empty()) continue;
             bool all = true;
             for (const auto& l : c.lits)
-                if (l.kind == 0 && !h.MayContain((int)l.col, l.val)) { all = false; break; }
+                if (l.kind == 0 &&
+                    !h.MayContain((int)l.col, l.val, widths)) {
+                    all = false;
+                    break;
+                }
             if (all) return true;
         }
         return false;
+    }
+
+    bool MayMatchHier(const HierarchicalPostingMask& h) const {
+        return MayMatchHier(h, HierWidths());
     }
 
     // Combined categorical + quantized-numeric posting pre-filter. A clause
@@ -639,13 +674,18 @@ struct DNFPredicate {
     // literals are treated as always-may-match (fail open).
     bool MayMatchHierQuant(const HierarchicalPostingMask& h,
                            const uint64_t* quant, int numQuantCols,
-                           const NumQuantParam* qp, int numBaseCols) const {
+                           const NumQuantParam* qp, int numBaseCols,
+                           const HierWidthTable& widths) const {
         for (const auto& c : clauses) {
             if (c.lits.empty()) continue;
             bool all = true;
             for (const auto& l : c.lits) {
                 if (l.kind == 0) {
-                    if (!h.MayContain((int)l.col, l.val)) { all = false; break; }
+                    if (!h.MayContain(
+                            (int)l.col, l.val, widths)) {
+                        all = false;
+                        break;
+                    }
                 } else if (quant != nullptr && qp != nullptr) {
                     int lane = (int)l.col - numBaseCols;
                     if (lane < 0 || lane >= numQuantCols) continue;  // unknown col: fail open
@@ -657,6 +697,14 @@ struct DNFPredicate {
             if (all) return true;
         }
         return false;
+    }
+
+    bool MayMatchHierQuant(const HierarchicalPostingMask& h,
+                           const uint64_t* quant, int numQuantCols,
+                           const NumQuantParam* qp, int numBaseCols) const {
+        return MayMatchHierQuant(
+            h, quant, numQuantCols, qp, numBaseCols,
+            HierWidths());
     }
 };
 

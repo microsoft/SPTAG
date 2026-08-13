@@ -13,6 +13,9 @@
 
 #include <filesystem>
 #include <cstring>
+#include <limits>
+#include <mutex>
+#include <unordered_map>
 
 typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
 
@@ -23,10 +26,59 @@ namespace {
 
 thread_local VectorIndex::PostingScanStats g_threadLocalPostingScanStats{};
 thread_local VectorIndex::ThreadLocalSearchContext g_threadLocalSearchContext{};
+std::mutex g_headNodeHierWidthsMutex;
+std::unordered_map<const VectorIndex*, Cache::HierWidthTable>
+    g_headNodeHierWidths;
+
+void StoreHeadNodeHierWidths(
+    const VectorIndex* p_index,
+    const Cache::HierWidthTable& p_widths)
+{
+    std::lock_guard<std::mutex> lock(
+        g_headNodeHierWidthsMutex);
+    g_headNodeHierWidths[p_index] =
+        p_widths;
+}
+
+Cache::HierWidthTable LoadHeadNodeHierWidths(
+    const VectorIndex* p_index)
+{
+    std::lock_guard<std::mutex> lock(
+        g_headNodeHierWidthsMutex);
+    const auto found =
+        g_headNodeHierWidths.find(p_index);
+    return found !=
+            g_headNodeHierWidths.end()
+        ? found->second
+        : Cache::HierWidthTable();
+}
+
+void EraseHeadNodeHierWidths(
+    const VectorIndex* p_index)
+{
+    std::lock_guard<std::mutex> lock(
+        g_headNodeHierWidthsMutex);
+    g_headNodeHierWidths.erase(p_index);
+}
 
 size_t AlignUp(size_t value, size_t alignment)
 {
     return (value + alignment - 1) / alignment * alignment;
+}
+
+bool TryAlignUp(size_t value, size_t alignment, size_t& output)
+{
+    if (alignment == 0) return false;
+    const size_t remainder = value % alignment;
+    const size_t padding =
+        remainder == 0 ? 0 : alignment - remainder;
+    if (value >
+        (std::numeric_limits<size_t>::max)() -
+            padding) {
+        return false;
+    }
+    output = value + padding;
+    return true;
 }
 
 std::uint8_t* HeadNodeMetaBase(VectorIndex* index, SizeType sampleId)
@@ -251,6 +303,7 @@ VectorIndex::VectorIndex()
 
 VectorIndex::~VectorIndex()
 {
+    EraseHeadNodeHierWidths(this);
 }
 
 void VectorIndex::ClearHeadNodeMeta()
@@ -264,13 +317,137 @@ void VectorIndex::ClearHeadNodeMeta()
     m_headNodeHeadOnlyOffset = 0;
     m_headNodeNumQuantOffset = 0;
     m_headNodeNumQuantCols = 0;
+    EraseHeadNodeHierWidths(this);
     m_headNodeMeta.clear();
 }
 
-void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples, int p_numQuantCols)
+bool VectorIndex::TryComputeHeadNodeMetaStride(
+    int p_numQuantCols, size_t& p_stride)
+{
+    return TryComputeHeadNodeMetaStride(
+        p_numQuantCols, Cache::HierWidths(),
+        p_stride);
+}
+
+bool VectorIndex::TryComputeHeadNodeMetaStride(
+    int p_numQuantCols,
+    const Cache::HierWidthTable& p_hierWidths,
+    size_t& p_stride)
+{
+    p_stride = 0;
+    if (p_numQuantCols < 0) return false;
+
+    size_t offset =
+        sizeof(Cache::PostingBitmask);
+    if (!TryAlignUp(
+            offset,
+            alignof(Cache::HierarchicalOwnTags),
+            offset) ||
+        offset >
+            (std::numeric_limits<size_t>::max)() -
+                sizeof(Cache::HierarchicalOwnTags)) {
+        return false;
+    }
+    offset += sizeof(Cache::HierarchicalOwnTags);
+    if (!TryAlignUp(
+            offset,
+            alignof(Cache::HierarchicalPostingMask),
+            offset) ||
+        offset >
+            (std::numeric_limits<size_t>::max)() -
+                Cache::HierPostingMaskBytes(
+                    p_hierWidths)) {
+        return false;
+    }
+    offset += Cache::HierPostingMaskBytes(
+        p_hierWidths);
+    if (!TryAlignUp(
+            offset, alignof(SizeType), offset) ||
+        offset >
+            (std::numeric_limits<size_t>::max)() -
+                sizeof(SizeType)) {
+        return false;
+    }
+    offset += sizeof(SizeType);
+    if (!TryAlignUp(
+            offset, alignof(int16_t), offset) ||
+        offset >
+            (std::numeric_limits<size_t>::max)() -
+                sizeof(int16_t)) {
+        return false;
+    }
+    offset += sizeof(int16_t);
+    if (!TryAlignUp(
+            offset, alignof(std::uint8_t), offset) ||
+        offset >
+            (std::numeric_limits<size_t>::max)() -
+                sizeof(std::uint8_t)) {
+        return false;
+    }
+    offset += sizeof(std::uint8_t);
+
+    if (p_numQuantCols > 0) {
+        if (!TryAlignUp(
+                offset,
+                alignof(std::uint64_t),
+                offset)) {
+            return false;
+        }
+        constexpr size_t bytesPerColumn =
+            static_cast<size_t>(
+                Cache::NUM_QUANT_WORDS) *
+            sizeof(std::uint64_t);
+        const size_t columns =
+            static_cast<size_t>(p_numQuantCols);
+        if (columns >
+            (std::numeric_limits<size_t>::max)() /
+                bytesPerColumn) {
+            return false;
+        }
+        const size_t numericBytes =
+            columns * bytesPerColumn;
+        if (offset >
+            (std::numeric_limits<size_t>::max)() -
+                numericBytes) {
+            return false;
+        }
+        offset += numericBytes;
+    }
+    return TryAlignUp(
+        offset,
+        alignof(Cache::PostingBitmask),
+        p_stride);
+}
+
+void VectorIndex::InitializeHeadNodeMeta(
+    SizeType p_numSamples, int p_numQuantCols)
+{
+    const Cache::HierWidthTable legacyWidths =
+        Cache::HierWidths();
+    InitializeHeadNodeMeta(
+        p_numSamples, p_numQuantCols,
+        legacyWidths);
+}
+
+void VectorIndex::InitializeHeadNodeMeta(
+    SizeType p_numSamples, int p_numQuantCols,
+    const Cache::HierWidthTable& p_hierWidths)
 {
     ClearHeadNodeMeta();
     if (p_numSamples <= 0) return;
+    StoreHeadNodeHierWidths(
+        this, p_hierWidths);
+    const int quantCols =
+        p_numQuantCols > 0 ? p_numQuantCols : 0;
+    size_t computedStride = 0;
+    if (!TryComputeHeadNodeMetaStride(
+            quantCols, p_hierWidths,
+            computedStride) ||
+        static_cast<size_t>(p_numSamples) >
+            (std::numeric_limits<size_t>::max)() /
+                computedStride) {
+        return;
+    }
 
     // V3 layout per sample:
     // | PostingBitmask | HierarchicalOwnTags own-tags | HierarchicalPostingMask posting-content | globalVID (4B) | bundleNodeId (2B) | headOnly (1B) |
@@ -280,14 +457,17 @@ void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples, int p_numQuantCo
     m_headNodePSOffset = 0;
     m_headNodeHierMaskOffset = AlignUp(m_headNodePSOffset + sizeof(Cache::PostingBitmask), alignof(Cache::HierarchicalOwnTags));
     m_headNodePostingHierMaskOffset = AlignUp(m_headNodeHierMaskOffset + sizeof(Cache::HierarchicalOwnTags), alignof(Cache::HierarchicalPostingMask));
-    // Posting-content mask uses the runtime per-column width packing
-    // (HierPostingMaskBytes), not the type's compile-time sizeof, so narrow
-    // schemas shrink the per-head record. Width table must be set (build: env;
-    // load: V5 header) BEFORE this is called.
-    m_headNodeGlobalVIDOffset = AlignUp(m_headNodePostingHierMaskOffset + Cache::HierPostingMaskBytes(), alignof(SizeType));
+    // Posting-content masks use this index's persisted width packing rather
+    // than process-global state, so separately loaded tenants cannot alter the
+    // record layout.
+    m_headNodeGlobalVIDOffset = AlignUp(
+        m_headNodePostingHierMaskOffset +
+            Cache::HierPostingMaskBytes(
+                p_hierWidths),
+        alignof(SizeType));
     m_headNodeBundleNodeIdOffset = AlignUp(m_headNodeGlobalVIDOffset + sizeof(SizeType), alignof(int16_t));
     m_headNodeHeadOnlyOffset = AlignUp(m_headNodeBundleNodeIdOffset + sizeof(int16_t), alignof(std::uint8_t));
-    m_headNodeNumQuantCols = p_numQuantCols > 0 ? p_numQuantCols : 0;
+    m_headNodeNumQuantCols = quantCols;
     size_t afterHeadOnly = m_headNodeHeadOnlyOffset + sizeof(std::uint8_t);
     if (m_headNodeNumQuantCols > 0) {
         m_headNodeNumQuantOffset = AlignUp(afterHeadOnly, alignof(std::uint64_t));
@@ -296,7 +476,7 @@ void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples, int p_numQuantCo
     } else {
         m_headNodeNumQuantOffset = 0;
     }
-    m_headNodeMetaStride = AlignUp(afterHeadOnly, alignof(Cache::PostingBitmask));
+    m_headNodeMetaStride = computedStride;
 
     m_headNodeMeta.assign(static_cast<size_t>(p_numSamples) * m_headNodeMetaStride, 0);
     for (SizeType sampleId = 0; sampleId < p_numSamples; ++sampleId) {
@@ -396,9 +576,11 @@ void VectorIndex::SetHeadNodePostingHierMask(SizeType p_sampleId, const Cache::H
 {
     auto* base = HeadNodeMetaBase(this, p_sampleId);
     if (base == nullptr) return;
-    // Copy only the bytes occupied by the current width packing (the mask's
-    // tail beyond HierPostingMaskBytes is unused and outside the per-head slot).
-    std::memcpy(base + m_headNodePostingHierMaskOffset, &p_mask, Cache::HierPostingMaskBytes());
+    std::memcpy(
+        base + m_headNodePostingHierMaskOffset,
+        &p_mask,
+        m_headNodeGlobalVIDOffset -
+            m_headNodePostingHierMaskOffset);
 }
 
 const Cache::HierarchicalPostingMask* VectorIndex::GetHeadNodePostingHierMask(SizeType p_sampleId) const
@@ -424,7 +606,28 @@ int16_t VectorIndex::GetHeadNodeBundleNodeId(SizeType p_sampleId) const
     return bundleNodeId;
 }
 
-bool VectorIndex::HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, const std::vector<uint8_t>& p_routedNodeMask) const
+Cache::HierWidthTable
+VectorIndex::GetHeadNodeHierWidths() const
+{
+    return LoadHeadNodeHierWidths(this);
+}
+
+bool VectorIndex::HeadNodeMatchesQuery(
+    SizeType p_sampleId,
+    const Cache::HierarchicalPostingMask& p_queryMask,
+    const std::vector<uint8_t>& p_routedNodeMask) const
+{
+    return HeadNodeMatchesQuery(
+        p_sampleId, p_queryMask,
+        p_routedNodeMask,
+        GetHeadNodeHierWidths());
+}
+
+bool VectorIndex::HeadNodeMatchesQuery(
+    SizeType p_sampleId,
+    const Cache::HierarchicalPostingMask& p_queryMask,
+    const std::vector<uint8_t>& p_routedNodeMask,
+    const Cache::HierWidthTable& p_hierWidths) const
 {
     // Only consider heads that are head-only (have their own tags)
     if (!IsHeadNodeHeadOnly(p_sampleId)) return false;
@@ -445,23 +648,50 @@ bool VectorIndex::HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::Hierarc
     // Check hierarchical mask intersection
     const auto* hierMask = GetHeadNodeHierMask(p_sampleId);
     if (hierMask == nullptr) return false;
-    return hierMask->MayIntersect(p_queryMask);
+    return hierMask->MayIntersect(
+        p_queryMask, p_hierWidths);
 }
 
-bool VectorIndex::HeadHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const
+bool VectorIndex::HeadHierMaskMayIntersect(
+    SizeType p_sampleId,
+    const Cache::HierarchicalPostingMask& p_queryMask) const
+{
+    return HeadHierMaskMayIntersect(
+        p_sampleId, p_queryMask,
+        GetHeadNodeHierWidths());
+}
+
+bool VectorIndex::HeadHierMaskMayIntersect(
+    SizeType p_sampleId,
+    const Cache::HierarchicalPostingMask& p_queryMask,
+    const Cache::HierWidthTable& p_hierWidths) const
 {
     const auto* hierMask = GetHeadNodeHierMask(p_sampleId);
     if (hierMask == nullptr) return false;
-    return hierMask->MayIntersect(p_queryMask);
+    return hierMask->MayIntersect(
+        p_queryMask, p_hierWidths);
 }
 
-bool VectorIndex::HeadPostingHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const
+bool VectorIndex::HeadPostingHierMaskMayIntersect(
+    SizeType p_sampleId,
+    const Cache::HierarchicalPostingMask& p_queryMask) const
+{
+    return HeadPostingHierMaskMayIntersect(
+        p_sampleId, p_queryMask,
+        GetHeadNodeHierWidths());
+}
+
+bool VectorIndex::HeadPostingHierMaskMayIntersect(
+    SizeType p_sampleId,
+    const Cache::HierarchicalPostingMask& p_queryMask,
+    const Cache::HierWidthTable& p_hierWidths) const
 {
     const auto* postingMask = GetHeadNodePostingHierMask(p_sampleId);
     // Fail-open: legacy / V2 indexes lack the posting-union mask. Keep head
     // so the caller doesn't drop posting candidates spuriously.
     if (postingMask == nullptr) return true;
-    return postingMask->MayIntersect(p_queryMask);
+    return postingMask->MayIntersect(
+        p_queryMask, p_hierWidths);
 }
 
 void VectorIndex::ResetThreadLocalPostingScanStats()

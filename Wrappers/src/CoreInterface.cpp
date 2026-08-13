@@ -4,6 +4,7 @@
 #include "inc/CoreInterface.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/TenantPrefixedKeyValueIO.h"
+#include "inc/Helper/AtomicFile.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #ifdef ROCKSDB
@@ -30,6 +31,8 @@
 #include <unordered_map>
 #include <queue>
 #include <limits>
+#include <cctype>
+#include <set>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cstdlib>
@@ -44,13 +47,245 @@
 namespace {
 
 struct TagRoutingStatRecord {
+    uint32_t column;
     uint32_t tag;
     int32_t vectorCount;
     int32_t postingCount;
 };
 
-static_assert(sizeof(TagRoutingStatRecord) == sizeof(uint32_t) + 2 * sizeof(int32_t),
+static_assert(sizeof(TagRoutingStatRecord) == 2 * sizeof(uint32_t) + 2 * sizeof(int32_t),
               "Unexpected TagRoutingStatRecord layout");
+
+struct LegacyTagRoutingStatRecord {
+    uint32_t tag;
+    int32_t vectorCount;
+    int32_t postingCount;
+};
+
+static_assert(sizeof(LegacyTagRoutingStatRecord) == sizeof(uint32_t) + 2 * sizeof(int32_t),
+              "Unexpected legacy TagRoutingStatRecord layout");
+
+constexpr std::uint32_t kTagRoutingStatsMagic = 0x53525454U; // TTRS
+constexpr std::uint32_t kTagRoutingStatsVersion = 3;
+
+std::uint64_t MakeTagRoutingKey(
+    std::uint32_t column,
+    std::uint32_t tag)
+{
+    return
+        (static_cast<std::uint64_t>(column) << 32) |
+        static_cast<std::uint64_t>(tag);
+}
+
+struct TagRoutingStatsFileHeader {
+    std::uint32_t magic = kTagRoutingStatsMagic;
+    std::uint32_t version = kTagRoutingStatsVersion;
+    std::int32_t vectorCount = 0;
+    std::int32_t recordCount = 0;
+    std::uint64_t generationFingerprint = 0;
+};
+
+bool SaveTagRoutingStatsFile(
+    const std::string& path,
+    int vectorCount,
+    std::uint64_t generationFingerprint,
+    const TenantIndexManager::TagRoutingStatsMap& stats)
+{
+    if (vectorCount <= 0 ||
+        stats.size() > static_cast<size_t>((std::numeric_limits<std::int32_t>::max)())) {
+        return false;
+    }
+    std::vector<TagRoutingStatRecord> records;
+    records.reserve(stats.size());
+    for (const auto& entry : stats) {
+        if (entry.second.vectorCount < 0 || entry.second.vectorCount > vectorCount ||
+            entry.second.postingCount < 0) {
+            return false;
+        }
+        records.push_back({
+            static_cast<std::uint32_t>(
+                entry.first >> 32),
+            static_cast<std::uint32_t>(
+                entry.first),
+            entry.second.vectorCount,
+            entry.second.postingCount});
+    }
+    std::sort(records.begin(), records.end(),
+        [](const TagRoutingStatRecord& left, const TagRoutingStatRecord& right) {
+            return left.column == right.column
+                ? left.tag < right.tag
+                : left.column < right.column;
+        });
+
+    const std::string temporary = path + ".tmp";
+    FILE* file = std::fopen(temporary.c_str(), "wb");
+    if (file == nullptr) return false;
+    TagRoutingStatsFileHeader header;
+    header.vectorCount = vectorCount;
+    header.recordCount = static_cast<std::int32_t>(records.size());
+    header.generationFingerprint =
+        generationFingerprint;
+    bool ok = std::fwrite(&header, sizeof(header), 1, file) == 1 &&
+        (records.empty() ||
+         std::fwrite(records.data(), sizeof(TagRoutingStatRecord),
+                     records.size(), file) == records.size());
+    if (std::fclose(file) != 0) ok = false;
+    if (!ok) {
+        std::remove(temporary.c_str());
+        return false;
+    }
+    if (!SPTAG::Helper::AtomicReplaceFile(
+            temporary, path)) {
+        std::remove(temporary.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool LoadTagRoutingStatsFile(
+    const std::string& path,
+    int expectedVectorCount,
+    std::uint64_t& generationFingerprint,
+    TenantIndexManager::TagRoutingStatsMap& stats)
+{
+    stats.clear();
+    generationFingerprint = 0;
+    FILE* file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr) return false;
+    TagRoutingStatsFileHeader header;
+    bool ok = std::fread(&header, sizeof(header), 1, file) == 1 &&
+        header.magic == kTagRoutingStatsMagic &&
+        header.version == kTagRoutingStatsVersion &&
+        header.vectorCount == expectedVectorCount &&
+        header.recordCount >= 0;
+    if (ok) {
+        const std::uint64_t recordCount =
+            static_cast<std::uint64_t>(
+                header.recordCount);
+        ok =
+            recordCount <=
+                ((std::numeric_limits<
+                      std::uint64_t>::max)() -
+                 sizeof(header)) /
+                    sizeof(TagRoutingStatRecord);
+        const std::uint64_t expectedBytes = ok
+            ? static_cast<std::uint64_t>(
+                  sizeof(header)) +
+                  recordCount *
+                      static_cast<std::uint64_t>(
+                          sizeof(TagRoutingStatRecord))
+            : 0;
+        ok = ok &&
+            std::fseek(file, 0, SEEK_END) == 0;
+        const long fileBytes = ok
+            ? std::ftell(file)
+            : -1;
+        ok = ok && fileBytes >= 0 &&
+            static_cast<std::uint64_t>(
+                fileBytes) == expectedBytes &&
+            std::fseek(
+                file,
+                static_cast<long>(sizeof(header)),
+                SEEK_SET) == 0;
+    }
+    if (!ok) {
+        std::fclose(file);
+        return false;
+    }
+    stats.reserve((std::min<size_t>)(
+        static_cast<size_t>(header.recordCount),
+        static_cast<size_t>(1 << 20)));
+    for (std::int32_t index = 0;
+         index < header.recordCount; ++index) {
+        TagRoutingStatRecord record;
+        if (std::fread(
+                &record, sizeof(record), 1,
+                file) != 1) {
+            stats.clear();
+            std::fclose(file);
+            return false;
+        }
+        if (record.vectorCount < 0 || record.vectorCount > expectedVectorCount ||
+            record.postingCount < 0 ||
+            !stats.emplace(
+                MakeTagRoutingKey(
+                    record.column, record.tag),
+                TenantIndexManager::TagRoutingStats{
+                 record.vectorCount, record.postingCount}).second) {
+            stats.clear();
+            std::fclose(file);
+            return false;
+        }
+    }
+    if (std::fclose(file) != 0) {
+        stats.clear();
+        return false;
+    }
+    generationFingerprint =
+        header.generationFingerprint;
+    return true;
+}
+
+std::string ReadBuildSSDIndexValue(
+    const std::string& path,
+    const std::string& requestedKey)
+{
+    std::ifstream input(path);
+    if (!input) return std::string();
+    std::string section;
+    std::string line;
+    std::string normalizedRequested = requestedKey;
+    const auto trim = [](std::string& text) {
+        const size_t begin = text.find_first_not_of(" \t\r\n");
+        const size_t end = text.find_last_not_of(" \t\r\n");
+        text = begin == std::string::npos
+            ? std::string()
+            : text.substr(begin, end - begin + 1);
+    };
+    const auto lower = [](std::string& text) {
+        std::transform(text.begin(), text.end(), text.begin(),
+            [](unsigned char value) {
+                return static_cast<char>(std::tolower(value));
+            });
+    };
+    lower(normalizedRequested);
+    while (std::getline(input, line)) {
+        trim(line);
+        if (line.empty() || line[0] == ';') continue;
+        if (line.front() == '[') {
+            const size_t close = line.find(']');
+            section = close == std::string::npos
+                ? std::string()
+                : line.substr(1, close - 1);
+            lower(section);
+            continue;
+        }
+        if (section != "buildssdindex") continue;
+        const size_t equal = line.find('=');
+        if (equal == std::string::npos) continue;
+        std::string key = line.substr(0, equal);
+        std::string value = line.substr(equal + 1);
+        trim(key);
+        trim(value);
+        lower(key);
+        if (key == normalizedRequested) return value;
+    }
+    return std::string();
+}
+
+bool IniEnablesHybridDistance(const std::string& path)
+{
+    std::string value = ReadBuildSSDIndexValue(
+        path, "EnableHybridDistance");
+    std::transform(
+        value.begin(), value.end(), value.begin(),
+        [](unsigned char item) {
+            return static_cast<char>(
+                std::tolower(item));
+        });
+    return value == "1" || value == "true" ||
+        value == "yes" || value == "on";
+}
 
 int ReadPositiveEnvironmentInt(const char* name, int fallback)
 {
@@ -133,10 +368,14 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
                                  int p_expectedHeadCount,
                                  int p_expectedTagCount,
                                  int p_aclTagCount,
-                                 std::vector<SPTAG::Cache::HierarchicalPostingMask>& p_masks)
+                                 const SPTAG::Cache::HierWidthTable& p_hierWidths,
+                                 std::vector<SPTAG::Cache::HierarchicalPostingMask>& p_masks,
+                                 std::unordered_map<std::uint64_t, int>*
+                                     p_tagPostingCounts = nullptr)
 {
     constexpr std::uint32_t kStaticMetadataMagic = 0x314D5453U; // "STM1"
-    constexpr int kHeaderIntCount = 9;
+    constexpr int kHeaderV1IntCount = 9;
+    constexpr int kHeaderV2IntCount = 11;
     constexpr size_t kPageSize = 4096;
 
     std::ifstream input(p_snapshotPath, std::ios::binary);
@@ -144,8 +383,11 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
         fprintf(stderr, "[ERROR] Cannot open static snapshot %s for posting masks\n", p_snapshotPath.c_str());
         return false;
     }
-    std::int32_t header[kHeaderIntCount] = {};
-    if (!input.read(reinterpret_cast<char*>(header), sizeof(header))) {
+    std::int32_t header[kHeaderV2IntCount] = {};
+    if (!input.read(
+            reinterpret_cast<char*>(header),
+            sizeof(std::int32_t) *
+                kHeaderV1IntCount)) {
         fprintf(stderr, "[ERROR] Cannot read STM1 header from %s\n", p_snapshotPath.c_str());
         return false;
     }
@@ -154,10 +396,26 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
     const int listCount = header[2];
     const int recordBytes = header[5];
     const int tagCount = header[6];
-    const int listPageOffset = header[8];
+    if (version == 2 &&
+        !input.read(
+            reinterpret_cast<char*>(
+                header + kHeaderV1IntCount),
+            sizeof(std::int32_t) *
+                (kHeaderV2IntCount -
+                 kHeaderV1IntCount))) {
+        fprintf(
+            stderr,
+            "[ERROR] Cannot read STM1 generation header from %s\n",
+            p_snapshotPath.c_str());
+        return false;
+    }
+    const int listPageOffset =
+        version == 2 ? header[10] : header[8];
     const int metadataBytes = static_cast<int>(sizeof(std::int32_t) +
                                                static_cast<size_t>(tagCount) * sizeof(std::uint32_t));
-    if (magic != kStaticMetadataMagic || version != 1 || listCount != p_expectedHeadCount ||
+    if (magic != kStaticMetadataMagic ||
+        (version != 1 && version != 2) ||
+        listCount != p_expectedHeadCount ||
         tagCount != p_expectedTagCount || tagCount <= 0 || recordBytes < metadataBytes ||
         listPageOffset < 0) {
         fprintf(stderr,
@@ -215,6 +473,9 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
     }
 
     p_masks.assign(static_cast<size_t>(listCount), SPTAG::Cache::HierarchicalPostingMask());
+    if (p_tagPostingCounts != nullptr) {
+        p_tagPostingCounts->clear();
+    }
     std::vector<std::uint32_t> postingOrder;
     postingOrder.reserve(static_cast<size_t>(listCount));
     for (std::uint32_t postingId = 0; postingId < static_cast<std::uint32_t>(listCount);
@@ -274,6 +535,12 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
             const auto& list = lists[postingId];
             const char* records = batch.data() + (recordOffsetFor(postingId) - batchStart);
             auto& mask = p_masks[postingId];
+            std::vector<std::uint64_t> postingTags;
+            if (p_tagPostingCounts != nullptr) {
+                postingTags.reserve(
+                    static_cast<size_t>(list.pureCount) *
+                    static_cast<size_t>(aclTagCount));
+            }
             for (int i = 0; i < list.pureCount; ++i) {
                 const char* record = records + static_cast<size_t>(i) * static_cast<size_t>(recordBytes);
                 for (int tagColumn = 0; tagColumn < aclTagCount; ++tagColumn) {
@@ -281,7 +548,26 @@ bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
                     std::memcpy(&tag, record + sizeof(std::int32_t) +
                                       static_cast<size_t>(tagColumn) * sizeof(tag),
                                 sizeof(tag));
-                    mask.Insert(tagColumn, tag);
+                    mask.Insert(
+                        tagColumn, tag,
+                        p_hierWidths);
+                    if (p_tagPostingCounts != nullptr) {
+                        postingTags.push_back(
+                            MakeTagRoutingKey(
+                                static_cast<std::uint32_t>(
+                                    tagColumn),
+                                tag));
+                    }
+                }
+            }
+            if (p_tagPostingCounts != nullptr) {
+                std::sort(postingTags.begin(), postingTags.end());
+                postingTags.erase(
+                    std::unique(
+                        postingTags.begin(), postingTags.end()),
+                    postingTags.end());
+                for (std::uint64_t key : postingTags) {
+                    ++(*p_tagPostingCounts)[key];
                 }
             }
         }
@@ -340,13 +626,296 @@ int TagLevel(uint32_t tag)
 
 float EstimateQueryVectorSelectivity(
     int tenantSize,
-    const std::unordered_map<uint32_t, TenantIndexManager::TagRoutingStats>* tagStats,
+    const TenantIndexManager::TagRoutingStatsMap* tagStats,
     const uint32_t* queryTags,
-    int numQueryTags)
+    int numQueryTags,
+    const SPTAG::Cache::DNFPredicate* dnf,
+    int hierarchyColumnCount,
+    int numericBaseColumn,
+    const SPTAG::Cache::NumQuantParam*
+        numericParams,
+    size_t numericParamCount)
 {
-    if (tenantSize <= 0 || tagStats == nullptr || queryTags == nullptr || numQueryTags <= 0) {
+    if (tenantSize <= 0 || tagStats == nullptr) {
         return 1.0f;
     }
+
+    if (dnf != nullptr && !dnf->Empty()) {
+        struct EstimatedClause {
+            std::unordered_map<uint32_t, uint32_t>
+                categoricalByColumn;
+            std::vector<std::tuple<
+                uint8_t, uint8_t, uint32_t, uint32_t>>
+                canonical;
+            double selectivity = 1.0;
+        };
+        std::vector<EstimatedClause> estimates;
+        std::set<std::vector<std::tuple<
+            uint8_t, uint8_t, uint32_t, uint32_t>>>
+            seenClauses;
+        bool sawNonemptyClause = false;
+        for (const auto& clause : dnf->clauses) {
+            if (clause.lits.empty()) continue;
+            sawNonemptyClause = true;
+            std::vector<std::tuple<
+                uint8_t, uint8_t, uint32_t, uint32_t>>
+                canonical;
+            canonical.reserve(clause.lits.size());
+            for (const auto& literal : clause.lits) {
+                canonical.emplace_back(
+                    literal.kind, literal.op,
+                    literal.col, literal.val);
+            }
+            std::sort(canonical.begin(),
+                      canonical.end());
+            canonical.erase(
+                std::unique(canonical.begin(),
+                            canonical.end()),
+                canonical.end());
+            if (!seenClauses.insert(canonical).second) {
+                continue;
+            }
+            double hierarchySelectivity = 1.0;
+            double independentSelectivity = 1.0;
+            double numericSelectivity = 1.0;
+            bool estimatedLiteral = false;
+            std::unordered_map<uint32_t, uint32_t> categoricalByColumn;
+            bool impossibleClause = false;
+            for (const auto& literal : clause.lits) {
+                if (literal.kind != 0 ||
+                    literal.op != SPTAG::Cache::DNF_EQ) {
+                    continue;
+                }
+                const auto inserted =
+                    categoricalByColumn.emplace(literal.col, literal.val);
+                if (!inserted.second &&
+                    inserted.first->second != literal.val) {
+                    impossibleClause = true;
+                    break;
+                }
+                const auto stat = tagStats->find(
+                    MakeTagRoutingKey(
+                        literal.col, literal.val));
+                if (stat == tagStats->end()) {
+                    impossibleClause = true;
+                    break;
+                }
+                const double literalSelectivity =
+                    static_cast<double>(
+                        stat->second.vectorCount) /
+                    static_cast<double>(tenantSize);
+                if (hierarchyColumnCount < 0 ||
+                    static_cast<int>(literal.col) <
+                        hierarchyColumnCount) {
+                    hierarchySelectivity = std::min(
+                        hierarchySelectivity,
+                        literalSelectivity);
+                } else {
+                    independentSelectivity *=
+                        literalSelectivity;
+                }
+                estimatedLiteral = true;
+            }
+            std::unordered_map<
+                uint32_t,
+                std::pair<std::uint64_t,
+                          std::uint64_t>>
+                numericRanges;
+            for (const auto& literal : clause.lits) {
+                if (literal.kind == 0 ||
+                    static_cast<int>(literal.col) <
+                        numericBaseColumn ||
+                    numericParams == nullptr) {
+                    continue;
+                }
+                const size_t numericIndex =
+                    static_cast<size_t>(
+                        static_cast<int>(literal.col) -
+                        numericBaseColumn);
+                if (numericIndex >=
+                    numericParamCount) {
+                    continue;
+                }
+                const auto& domain =
+                    numericParams[numericIndex];
+                if (domain.hi < domain.lo) {
+                    impossibleClause = true;
+                    break;
+                }
+                auto inserted = numericRanges.emplace(
+                    literal.col,
+                    std::make_pair(
+                        static_cast<std::uint64_t>(
+                            domain.lo),
+                        static_cast<std::uint64_t>(
+                            domain.hi)));
+                auto& range = inserted.first->second;
+                const std::uint64_t value =
+                    literal.val;
+                switch (literal.op) {
+                case SPTAG::Cache::DNF_EQ:
+                    range.first = (std::max)(
+                        range.first, value);
+                    range.second = (std::min)(
+                        range.second, value);
+                    break;
+                case SPTAG::Cache::DNF_LT:
+                    if (value == 0) {
+                        impossibleClause = true;
+                    } else {
+                        range.second = (std::min)(
+                            range.second, value - 1);
+                    }
+                    break;
+                case SPTAG::Cache::DNF_LE:
+                    range.second = (std::min)(
+                        range.second, value);
+                    break;
+                case SPTAG::Cache::DNF_GT:
+                    if (value ==
+                        (std::numeric_limits<
+                            uint32_t>::max)()) {
+                        impossibleClause = true;
+                    } else {
+                        range.first = (std::max)(
+                            range.first, value + 1);
+                    }
+                    break;
+                case SPTAG::Cache::DNF_GE:
+                    range.first = (std::max)(
+                        range.first, value);
+                    break;
+                default:
+                    impossibleClause = true;
+                    break;
+                }
+                if (impossibleClause ||
+                    range.first > range.second) {
+                    impossibleClause = true;
+                    break;
+                }
+            }
+            if (impossibleClause) continue;
+            for (const auto& numeric :
+                 numericRanges) {
+                const size_t numericIndex =
+                    static_cast<size_t>(
+                        static_cast<int>(
+                            numeric.first) -
+                        numericBaseColumn);
+                const auto& domain =
+                    numericParams[numericIndex];
+                const long double selected =
+                    static_cast<long double>(
+                        numeric.second.second -
+                        numeric.second.first) +
+                    1.0L;
+                const long double total =
+                    static_cast<long double>(
+                        static_cast<std::uint64_t>(
+                            domain.hi) -
+                        static_cast<std::uint64_t>(
+                            domain.lo)) +
+                    1.0L;
+                numericSelectivity *=
+                    static_cast<double>(
+                        selected / total);
+                estimatedLiteral = true;
+            }
+            if (impossibleClause) continue;
+            const double clauseSelectivity =
+                estimatedLiteral
+                ? hierarchySelectivity *
+                      independentSelectivity *
+                      numericSelectivity
+                : 1.0;
+            estimates.push_back({
+                std::move(categoricalByColumn),
+                std::move(canonical),
+                clauseSelectivity});
+        }
+        if (estimates.empty()) {
+            return sawNonemptyClause ? 1e-6f : 1.0f;
+        }
+        for (size_t candidate = 0;
+             candidate < estimates.size();) {
+            bool redundant = false;
+            for (size_t broader = 0;
+                 broader < estimates.size(); ++broader) {
+                if (candidate == broader ||
+                    estimates[broader].canonical.size() >=
+                        estimates[candidate]
+                            .canonical.size()) {
+                    continue;
+                }
+                if (std::includes(
+                        estimates[candidate]
+                            .canonical.begin(),
+                        estimates[candidate]
+                            .canonical.end(),
+                        estimates[broader]
+                            .canonical.begin(),
+                        estimates[broader]
+                            .canonical.end())) {
+                    redundant = true;
+                    break;
+                }
+            }
+            if (redundant) {
+                estimates.erase(
+                    estimates.begin() + candidate);
+            } else {
+                ++candidate;
+            }
+        }
+        bool pairwiseDisjoint = estimates.size() > 1;
+        for (size_t left = 0;
+             left < estimates.size() && pairwiseDisjoint;
+             ++left) {
+            for (size_t right = left + 1;
+                 right < estimates.size(); ++right) {
+                bool conflicts = false;
+                for (const auto& column :
+                     estimates[left].categoricalByColumn) {
+                    const auto other = estimates[right]
+                        .categoricalByColumn.find(
+                            column.first);
+                    if (other != estimates[right]
+                                     .categoricalByColumn.end() &&
+                        other->second != column.second) {
+                        conflicts = true;
+                        break;
+                    }
+                }
+                if (!conflicts) {
+                    pairwiseDisjoint = false;
+                    break;
+                }
+            }
+        }
+        double unionSelectivity = 0.0;
+        if (pairwiseDisjoint) {
+            for (const auto& estimate : estimates) {
+                unionSelectivity +=
+                    estimate.selectivity;
+            }
+        } else {
+            double productNotSelected = 1.0;
+            for (const auto& estimate : estimates) {
+                productNotSelected *=
+                    std::max(
+                        0.0,
+                        1.0 -
+                            estimate.selectivity);
+            }
+            unionSelectivity =
+                1.0 - productNotSelected;
+        }
+        return static_cast<float>(std::clamp(
+            unionSelectivity, 1e-6, 1.0));
+    }
+
+    if (queryTags == nullptr || numQueryTags <= 0) return 1.0f;
 
     std::unordered_set<uint32_t> seenTags;
     std::unordered_map<int, double> levelSelectivities;
@@ -356,12 +925,25 @@ float EstimateQueryVectorSelectivity(
             continue;
         }
 
-        auto statIt = tagStats->find(tag);
-        if (statIt == tagStats->end()) {
+        std::int64_t vectorCount = 0;
+        for (const auto& entry : *tagStats) {
+            if (static_cast<std::uint32_t>(
+                    entry.first) == tag) {
+                vectorCount = (std::min)(
+                    static_cast<std::int64_t>(
+                        tenantSize),
+                    vectorCount +
+                        static_cast<std::int64_t>(
+                            entry.second.vectorCount));
+            }
+        }
+        if (vectorCount <= 0) {
             continue;
         }
 
-        double tagSelectivity = static_cast<double>(statIt->second.vectorCount) / static_cast<double>(tenantSize);
+        double tagSelectivity =
+            static_cast<double>(vectorCount) /
+            static_cast<double>(tenantSize);
         int level = TagLevel(tag);
         double& levelSel = levelSelectivities[level];
         levelSel = std::min(1.0, levelSel + tagSelectivity);
@@ -498,20 +1080,17 @@ struct HeadNodeMetaFileHeader {
     int32_t stride;
 };
 
-// V5 appends, after the base header, HIER_LEVELS int32 per-column mask widths
-// (bits). These must be applied (SetHierWidths) BEFORE InitializeHeadNodeMeta on
-// load so the computed stride matches the persisted byte layout. V3/V4 files
-// carry no widths and load with the uniform default.
+// V5 appends HIER_LEVELS int32 per-column mask widths after the base header.
+// V3/V4 files carry no widths and load with the uniform default.
 
 // Parse SPTAG_HIER_LEVEL_WIDTHS (comma-separated per-column bit widths, e.g.
-// "256,64,64,128,64") and apply it to the process-global mask width table. With
-// the env unset, restores the uniform HIER_LEVEL_BITS default (legacy layout).
-void ApplyHierWidthsFromEnv()
+// "256,64,64,128,64") into a build-local layout.
+SPTAG::Cache::HierWidthTable HierWidthsFromEnv()
 {
+    SPTAG::Cache::HierWidthTable table;
     const char* e = std::getenv("SPTAG_HIER_LEVEL_WIDTHS");
     if (e == nullptr || e[0] == '\0') {
-        SPTAG::Cache::SetHierWidthsUniform();
-        return;
+        return table;
     }
     int widths[SPTAG::Cache::HIER_LEVELS];
     for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l) widths[l] = SPTAG::Cache::HIER_LEVEL_BITS;
@@ -523,11 +1102,12 @@ void ApplyHierWidthsFromEnv()
         if (comma == nullptr) break;
         p = comma + 1;
     }
-    SPTAG::Cache::SetHierWidths(widths, n);
-    const auto& t = SPTAG::Cache::HierWidths();
+    table.Set(widths, n);
     fprintf(stderr, "[INFO] Hier mask widths: bits=[%d,%d,%d,%d,%d] totalWords=%d (%zu B/head)\n",
-            t.bits[0], t.bits[1], t.bits[2], t.bits[3], t.bits[4], t.totalWords,
-            SPTAG::Cache::HierPostingMaskBytes());
+            table.bits[0], table.bits[1], table.bits[2], table.bits[3],
+            table.bits[4], table.totalWords,
+            SPTAG::Cache::HierPostingMaskBytes(table));
+    return table;
 }
 
 std::string HeadNodeMetaPath(const std::string& workDir)
@@ -556,7 +1136,8 @@ bool SaveHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
     // Persist per-column hier mask widths only when they are non-uniform; a
     // uniform table reproduces the legacy V3/V4 layout exactly, so keep emitting
     // V3/V4 for those (older readers stay compatible).
-    const auto& widths = SPTAG::Cache::HierWidths();
+    const auto& widths =
+        headIndex->GetHeadNodeHierWidths();
     bool nonUniformWidths = false;
     for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l)
         if (widths.bits[l] != SPTAG::Cache::HIER_LEVEL_BITS) { nonUniformWidths = true; break; }
@@ -611,12 +1192,51 @@ bool LoadHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
         fclose(f);
         return false;
     }
+    const std::uint64_t prefixBytes =
+        static_cast<std::uint64_t>(
+            sizeof(header)) +
+        (header.version == kHeadNodeMetaVersionV5
+             ? static_cast<std::uint64_t>(
+                   sizeof(int32_t)) *
+                   SPTAG::Cache::HIER_LEVELS
+             : 0);
+    const std::uint64_t sampleCount =
+        static_cast<std::uint64_t>(
+            header.numSamples);
+    const std::uint64_t stride =
+        static_cast<std::uint64_t>(
+            header.stride);
+    const bool sizeSafe =
+        sampleCount <=
+            ((std::numeric_limits<
+                  std::uint64_t>::max)() -
+             prefixBytes) /
+                stride &&
+        fseek(f, 0, SEEK_END) == 0;
+    const long fileBytes = sizeSafe
+        ? ftell(f)
+        : -1;
+    const std::uint64_t expectedBytes =
+        sizeSafe
+        ? prefixBytes + sampleCount * stride
+        : 0;
+    if (!sizeSafe || fileBytes < 0 ||
+        static_cast<std::uint64_t>(fileBytes) !=
+            expectedBytes ||
+        fseek(
+            f, static_cast<long>(sizeof(header)),
+            SEEK_SET) != 0) {
+        fclose(f);
+        return false;
+    }
     int quantCols = (header.version == kHeadNodeMetaVersionV4 || header.version == kHeadNodeMetaVersionV5)
                     ? header.numTagsPerSample : 0;
+    if (quantCols < 0) {
+        fclose(f);
+        return false;
+    }
 
-    // Apply per-column mask widths BEFORE InitializeHeadNodeMeta so the computed
-    // stride matches the persisted byte layout. V5 carries explicit widths; V3/V4
-    // predate variable widths and use the uniform default.
+    SPTAG::Cache::HierWidthTable hierWidths;
     if (header.version == kHeadNodeMetaVersionV5) {
         int32_t wbits[SPTAG::Cache::HIER_LEVELS];
         if (fread(wbits, sizeof(int32_t), SPTAG::Cache::HIER_LEVELS, f) != (size_t)SPTAG::Cache::HIER_LEVELS) {
@@ -625,16 +1245,40 @@ bool LoadHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
         }
         int widths[SPTAG::Cache::HIER_LEVELS];
         for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l) widths[l] = wbits[l];
-        SPTAG::Cache::SetHierWidths(widths, SPTAG::Cache::HIER_LEVELS);
-    } else {
-        SPTAG::Cache::SetHierWidthsUniform();
+        hierWidths.Set(
+            widths,
+            SPTAG::Cache::HIER_LEVELS);
     }
 
-    headIndex->InitializeHeadNodeMeta(header.numSamples, quantCols);
-    if (static_cast<int32_t>(headIndex->GetHeadNodeMetaStride()) != header.stride) {
+    size_t expectedStride = 0;
+    const bool validLayout =
+        SPTAG::VectorIndex::TryComputeHeadNodeMetaStride(
+            quantCols, hierWidths,
+            expectedStride) &&
+        expectedStride <=
+            static_cast<size_t>(
+                (std::numeric_limits<int32_t>::max)()) &&
+        expectedStride ==
+            static_cast<size_t>(header.stride) &&
+        sampleCount <=
+            (std::numeric_limits<size_t>::max)() /
+                expectedStride &&
+        sampleCount * expectedStride <=
+            headIndex->GetHeadNodeMetaBlob().max_size();
+    if (!validLayout) {
         fprintf(stderr, "[ERROR] head_node_meta.bin stride mismatch: file has stride %d, expected %zu. "
                         "Binary layout has changed.\n",
-                header.stride, headIndex->GetHeadNodeMetaStride());
+                header.stride, expectedStride);
+        fclose(f);
+        return false;
+    }
+    headIndex->InitializeHeadNodeMeta(
+        header.numSamples, quantCols,
+        hierWidths);
+    if (headIndex->GetHeadNodeMetaStride() !=
+            expectedStride ||
+        headIndex->GetHeadNodeMetaBlob().size() !=
+            sampleCount * expectedStride) {
         headIndex->ClearHeadNodeMeta();
         fclose(f);
         return false;
@@ -687,7 +1331,7 @@ bool EnsureHeadNodeMetaLoaded(const std::string& workDir, const std::shared_ptr<
     return LoadPostingSignaturesIntoHeadIndex(workDir, internalIndex);
 }
 
-constexpr int32_t kHeadNodeRoutingIndexVersion = 1;
+constexpr int32_t kHeadNodeRoutingIndexVersion = 2;
 
 struct HeadNodeRoutingIndexFileHeader {
     int32_t version;
@@ -1160,9 +1804,19 @@ void BuildTagToNodeIndexForCandidate(const PivotEstimatorCandidate& candidate,
             std::vector<int> nodes;
             CollectNodesForTag(level, tag, candidate, levelData, nodeByPivotTag, nodes);
             if (!nodes.empty()) {
-                tagToNodes[tag] = std::move(nodes);
+                auto& merged = tagToNodes[tag];
+                merged.insert(
+                    merged.end(),
+                    nodes.begin(), nodes.end());
             }
         }
+    }
+    for (auto& entry : tagToNodes) {
+        auto& nodes = entry.second;
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(
+            std::unique(nodes.begin(), nodes.end()),
+            nodes.end());
     }
 }
 
@@ -1286,7 +1940,8 @@ bool TryCollectRoutingNodesForQuery(const std::unordered_map<uint32_t, std::vect
     {
         auto tagIt = tagToNodes.find(queryTags[idx]);
         if (tagIt == tagToNodes.end() || tagIt->second.empty()) {
-            continue;
+            outNodes.clear();
+            return false;
         }
 
         unionNodes.insert(tagIt->second.begin(), tagIt->second.end());
@@ -1297,59 +1952,49 @@ bool TryCollectRoutingNodesForQuery(const std::unordered_map<uint32_t, std::vect
     return !outNodes.empty();
 }
 
-// DNF-aware routing: predicate = OR of clauses, clause = AND of literals.
-//   routedNodes = ⋃_clause ( ⋂_literal tagToNodes[literal.val] )
-// A clause's matching vectors all carry every literal tag, so they live in the
-// intersection of those tags' node-sets (sound because tag→node placement is by
-// a single pivot with no replication: node(pivot) ∈ tagToNodes[t] for every tag
-// t the vector carries, hence in the intersection). The OR across clauses unions
-// the clause node-sets. A literal whose value is absent from tagToNodes makes its
-// clause unsatisfiable, contributing the empty set. Result feeds the same
-// allowedNodeMask / m_searchHeadBundleNodes / routedNodeMask plumbing as the
-// legacy collector, so cross-edge navigation stays inside the routed subgraphs.
-bool TryCollectRoutingNodesForDNF(const std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
-                                  const SPTAG::Cache::DNFPredicate& dnf,
-                                  std::vector<int>& outNodes)
+bool TryCollectRoutingNodesForDNF(
+    const std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
+    const SPTAG::Cache::DNFPredicate& dnf,
+    std::vector<int>& outNodes)
 {
     outNodes.clear();
-    if (dnf.clauses.empty()) {
-        return false;
-    }
+    if (dnf.Empty()) return false;
 
     std::unordered_set<int> unionNodes;
-    for (const auto& clause : dnf.clauses)
-    {
-        if (clause.lits.empty()) {
-            continue;
-        }
-
+    for (const auto& clause : dnf.clauses) {
         std::unordered_set<int> clauseNodes;
-        bool first = true;
-        for (const auto& lit : clause.lits)
-        {
-            auto tagIt = tagToNodes.find(lit.val);
-            if (tagIt == tagToNodes.end() || tagIt->second.empty()) {
-                clauseNodes.clear();  // unsatisfiable literal → empty clause
-                break;
+        bool constrained = false;
+        for (const auto& literal : clause.lits) {
+            if (literal.kind != 0) continue;
+            if (literal.op != SPTAG::Cache::DNF_EQ) {
+                outNodes.clear();
+                return false;
             }
-
-            if (first) {
-                clauseNodes.insert(tagIt->second.begin(), tagIt->second.end());
-                first = false;
-            } else {
-                std::unordered_set<int> intersected;
-                for (int nodeId : tagIt->second) {
-                    if (clauseNodes.count(nodeId)) intersected.insert(nodeId);
+            const auto tag = tagToNodes.find(literal.val);
+            if (tag == tagToNodes.end() || tag->second.empty()) {
+                outNodes.clear();
+                return false;
+            }
+            if (!constrained) {
+                clauseNodes.insert(
+                    tag->second.begin(), tag->second.end());
+                constrained = true;
+                continue;
+            }
+            std::unordered_set<int> intersection;
+            for (int node : tag->second) {
+                if (clauseNodes.count(node) != 0) {
+                    intersection.insert(node);
                 }
-                clauseNodes.swap(intersected);
             }
-
-            if (clauseNodes.empty()) {
-                break;
-            }
+            clauseNodes.swap(intersection);
         }
-
-        unionNodes.insert(clauseNodes.begin(), clauseNodes.end());
+        if (!constrained || clauseNodes.empty()) {
+            outNodes.clear();
+            return false;
+        }
+        unionNodes.insert(
+            clauseNodes.begin(), clauseNodes.end());
     }
 
     outNodes.assign(unionNodes.begin(), unionNodes.end());
@@ -3111,18 +3756,85 @@ ByteArray TenantIndexManager::GetTagRoutingStatsBlob(int p_tenantId) const
         return ByteArray();
     }
 
+    std::unordered_map<std::uint32_t, TagRoutingStats>
+        aggregate;
+    aggregate.reserve(routeIt->second.size());
+    const auto countIt =
+        m_tenantVectorCounts.find(p_tenantId);
+    const std::int64_t vectorLimit =
+        countIt == m_tenantVectorCounts.end()
+            ? (std::numeric_limits<std::int32_t>::max)()
+            : countIt->second;
+    for (const auto& entry : routeIt->second) {
+        auto& stats = aggregate[
+            static_cast<std::uint32_t>(entry.first)];
+        stats.vectorCount = static_cast<int>(
+            (std::min)(
+                vectorLimit,
+                static_cast<std::int64_t>(
+                    stats.vectorCount) +
+                    entry.second.vectorCount));
+        stats.postingCount = static_cast<int>(
+            (std::min)(
+                static_cast<std::int64_t>(
+                    (std::numeric_limits<
+                         std::int32_t>::max)()),
+                static_cast<std::int64_t>(
+                    stats.postingCount) +
+                    entry.second.postingCount));
+    }
+
+    std::vector<LegacyTagRoutingStatRecord> entries;
+    entries.reserve(aggregate.size());
+    for (const auto& entry : aggregate) {
+        entries.push_back({
+            entry.first,
+            static_cast<std::int32_t>(
+                entry.second.vectorCount),
+            static_cast<std::int32_t>(
+                entry.second.postingCount)});
+    }
+    std::sort(
+        entries.begin(), entries.end(),
+        [](const LegacyTagRoutingStatRecord& left,
+           const LegacyTagRoutingStatRecord& right) {
+            return left.tag < right.tag;
+        });
+
+    ByteArray payload = ByteArray::Alloc(
+        entries.size() *
+        sizeof(LegacyTagRoutingStatRecord));
+    std::memcpy(
+        payload.Data(), entries.data(),
+        payload.Length());
+    return payload;
+}
+
+ByteArray TenantIndexManager::
+    GetColumnAwareTagRoutingStatsBlob(
+        int p_tenantId) const
+{
+    auto routeIt = m_tenantTagRoutingStats.find(p_tenantId);
+    if (routeIt == m_tenantTagRoutingStats.end() || routeIt->second.empty()) {
+        return ByteArray();
+    }
+
     std::vector<TagRoutingStatRecord> entries;
     entries.reserve(routeIt->second.size());
-    for (const auto& [tag, stats] : routeIt->second) {
+    for (const auto& [key, stats] : routeIt->second) {
         entries.push_back(TagRoutingStatRecord{
-            tag,
+            static_cast<std::uint32_t>(
+                key >> 32),
+            static_cast<std::uint32_t>(key),
             static_cast<int32_t>(stats.vectorCount),
             static_cast<int32_t>(stats.postingCount),
         });
     }
 
     std::sort(entries.begin(), entries.end(), [](const TagRoutingStatRecord& left, const TagRoutingStatRecord& right) {
-        return left.tag < right.tag;
+        return left.column == right.column
+            ? left.tag < right.tag
+            : left.column < right.column;
     });
 
     ByteArray payload = ByteArray::Alloc(entries.size() * sizeof(TagRoutingStatRecord));
@@ -3410,10 +4122,79 @@ bool TenantIndexManager::LoadAll(const char* p_baseDir)
             int tenantId = kv.first;
             m_tenantSpannWorkDirs[tenantId] = baseDir + "/tenant_" + std::to_string(tenantId) + "/index";
         }
+        if (!LoadTenantTagRoutingStats()) return false;
         LoadTenantSparseIndices();
         LoadTenantTagPureIndices();
         return true;
     }
+}
+
+bool TenantIndexManager::LoadTenantTagRoutingStats()
+{
+    for (const auto& entry : m_tenantSpannWorkDirs) {
+        const int tenantId = entry.first;
+        m_tenantTagRoutingStats.erase(tenantId);
+        const auto vectorCount = m_tenantVectorCounts.find(tenantId);
+        if (vectorCount == m_tenantVectorCounts.end() ||
+            vectorCount->second <= 0) {
+            fprintf(stderr,
+                    "[ERROR] Tenant %d: invalid vector count for tag routing stats\n",
+                    tenantId);
+            return false;
+        }
+        const std::string path =
+            entry.second + "/tag_routing_stats.bin";
+        TagRoutingStatsMap stats;
+        std::uint64_t generationFingerprint = 0;
+        if (LoadTagRoutingStatsFile(
+                path, vectorCount->second,
+                generationFingerprint, stats)) {
+            const std::string iniPath =
+                entry.second + "/indexloader.ini";
+            if (IniEnablesHybridDistance(iniPath)) {
+                std::string postingFile =
+                    ReadBuildSSDIndexValue(
+                        iniPath, "HybridPostingFile");
+                if (postingFile.empty() ||
+                    postingFile == "Undefined!") {
+                    postingFile =
+                        "SPTAGHybridList.bin";
+                }
+                SPTAG::SPANN::HybridRoutingStats
+                    hybridStats;
+                std::string error;
+                if (!hybridStats.Load(
+                        entry.second + "/" +
+                            postingFile + ".stats",
+                        error) ||
+                    generationFingerprint == 0 ||
+                    generationFingerprint !=
+                        hybridStats
+                            .m_generationFingerprint) {
+                    fprintf(
+                        stderr,
+                        "[WARN] Tenant %d: tag routing stats generation "
+                        "does not match hybrid postings; filtered search is "
+                        "disabled until BuildSignatures regenerates it\n",
+                        tenantId);
+                    continue;
+                }
+            }
+            m_tenantTagRoutingStats[tenantId] =
+                std::move(stats);
+            continue;
+        }
+        const bool required = IniEnablesHybridDistance(
+            entry.second + "/indexloader.ini");
+        if (required) {
+            fprintf(stderr,
+                    "[WARN] Tenant %d: hybrid routing requires a valid %s; "
+                    "filtered search is disabled until BuildSignatures "
+                    "generates it\n",
+                    tenantId, path.c_str());
+        }
+    }
+    return true;
 }
 
 void TenantIndexManager::LoadTenantSparseIndices()
@@ -3692,6 +4473,7 @@ bool TenantIndexManager::LoadUnifiedStorage(const char* p_baseDir)
         }
     }
 
+    if (!LoadTenantTagRoutingStats()) return false;
     LoadTenantSparseIndices();
     LoadTenantTagPureIndices();
 
@@ -4156,6 +4938,10 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     // persisted option from the just-built (or reloaded) index instead of
     // consulting a process environment override.
     int directSparseMaxPostings = 320;
+    bool hybridDistanceEnabled = false;
+    bool staticStorage = false;
+    std::string hybridPostingFile =
+        "SPTAGHybridList.bin";
     if (!EnsureTenantLoaded(p_tenantId)) return false;
     {
         std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
@@ -4174,6 +4960,35 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                             "[WARN] Tenant %d: invalid DirectSparseMaxPostings=%s; using %d\n",
                             p_tenantId, configured.c_str(), directSparseMaxPostings);
                 }
+                const std::string hybridConfigured =
+                    internalIdx->GetParameter(
+                        "EnableHybridDistance",
+                        "BuildSSDIndex");
+                if (!hybridConfigured.empty()) {
+                    SPTAG::Helper::Convert::
+                        ConvertStringTo<bool>(
+                            hybridConfigured.c_str(),
+                            hybridDistanceEnabled);
+                }
+                const std::string postingConfigured =
+                    internalIdx->GetParameter(
+                        "HybridPostingFile",
+                        "BuildSSDIndex");
+                if (!postingConfigured.empty() &&
+                    postingConfigured != "Undefined!") {
+                    hybridPostingFile =
+                        postingConfigured;
+                }
+                if (auto* spann = dynamic_cast<
+                        SPTAG::SPANN::ISPANNIndex*>(
+                        internalIdx.get())) {
+                    const auto* options =
+                        spann->GetOptions();
+                    staticStorage =
+                        options != nullptr &&
+                        options->m_storage ==
+                            SPTAG::Storage::STATIC;
+                }
             }
         }
     }
@@ -4190,28 +5005,69 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         const std::string sigPath     = workDir + "/signatures_bitmask.bin";
         const std::string sparsePath  = workDir + "/sparse_tags.bin";
         const std::string tagPurePath = workDir + "/tagpure_meta.bin";
+        const std::string routeStatsPath =
+            workDir + "/tag_routing_stats.bin";
+        const std::string headMetaPath =
+            workDir + "/HeadIndex/head_node_meta.bin";
         bool sigOk     = stat(sigPath.c_str(),     &st) == 0;
         bool sparseOk  = stat(sparsePath.c_str(),  &st) == 0;
         bool tagPureOk = stat(tagPurePath.c_str(), &st) == 0;
-        if (sigOk && sparseOk && tagPureOk) {
+        bool routeStatsOk =
+            stat(routeStatsPath.c_str(), &st) == 0;
+        bool headMetaOk =
+            stat(headMetaPath.c_str(), &st) == 0;
+        const bool baseArtifactsOk = staticStorage
+            ? headMetaOk
+            : (sigOk && sparseOk && tagPureOk);
+        if (baseArtifactsOk &&
+            (!hybridDistanceEnabled || routeStatsOk)) {
             // Make sure the PS signatures are attached to the head index.
             EnsureTenantLoaded(p_tenantId);
+            bool headMetadataValid =
+                !staticStorage;
             {
                 std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
                 auto it = m_tenantIndices.find(p_tenantId);
                 if (it != m_tenantIndices.end()) {
-                    EnsureHeadNodeMetaLoaded(workDir, it->second->GetInternalIndex());
+                    const auto internalIndex =
+                        it->second->GetInternalIndex();
+                    headMetadataValid = staticStorage
+                        ? LoadHeadNodeMetaFile(
+                              workDir,
+                              GetMemoryIndexForInternal(
+                                  internalIndex))
+                        : EnsureHeadNodeMetaLoaded(
+                              workDir, internalIndex);
                 }
             }
             // tag-pure + sparse metadata is loaded by LoadAll; touch the
             // loaders again for safety (idempotent — skips already-loaded).
             LoadTenantSparseIndices();
             LoadTenantTagPureIndices();
+            if (!LoadTenantTagRoutingStats()) {
+                return false;
+            }
+            const auto loadedStats =
+                m_tenantTagRoutingStats.find(
+                    p_tenantId);
+            if (headMetadataValid &&
+                (!hybridDistanceEnabled ||
+                 (loadedStats !=
+                      m_tenantTagRoutingStats.end() &&
+                  !loadedStats->second.empty()))) {
+                fprintf(stderr,
+                        "[INFO] Tenant %d: BuildSignatures short-circuit "
+                        "(static=%d headmeta=%d sig=%d sparse=%d tagpure=%d "
+                        "routeStats=%d on disk)\n",
+                        p_tenantId, (int)staticStorage, (int)headMetaOk,
+                        (int)sigOk, (int)sparseOk,
+                        (int)tagPureOk, (int)routeStatsOk);
+                return true;
+            }
             fprintf(stderr,
-                    "[INFO] Tenant %d: BuildSignatures short-circuit "
-                    "(sig=%d sparse=%d tagpure=%d on disk)\n",
-                    p_tenantId, (int)sigOk, (int)sparseOk, (int)tagPureOk);
-            return true;
+                    "[INFO] Tenant %d: rebuilding signatures because persisted "
+                    "head metadata or hybrid routing stats are invalid\n",
+                    p_tenantId);
         }
     }
 
@@ -4229,11 +5085,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     }
     if (numHeads <= 0) return false;
 
-    // Apply per-column hier mask widths from SPTAG_HIER_LEVEL_WIDTHS before any
-    // mask is built or InitializeHeadNodeMeta is called below; this fixes the
-    // per-head posting-mask byte layout for the whole build (and is persisted in
-    // the V5 head_node_meta header by SaveHeadNodeMetaFile).
-    ApplyHierWidthsFromEnv();
+    const auto hierWidths =
+        HierWidthsFromEnv();
 
     // ── Routing-only fast path (SPTAG_ROUTING_ONLY=1) ───────────────────────
     // Regenerate ONLY the query-time routing sidecar (tag_node_index.bin) from
@@ -4268,7 +5121,9 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             memoryIndex->HasHeadNodeMeta() &&
             memoryIndex->GetHeadNodeMetaSampleCount() >= numHeadSamples;
         if (!preserveHeadNodeMeta) {
-            memoryIndex->InitializeHeadNodeMeta(numHeadSamples);
+            memoryIndex->InitializeHeadNodeMeta(
+                numHeadSamples, 0,
+                hierWidths);
         }
         spannInternalIdx->PopulateHeadNodeGlobalVIDsFromBundles();
 
@@ -4433,9 +5288,42 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             }
 
             // Pivot estimator (tags-only) drives per-bundle tag routing.
+            const std::uint32_t* routingTags =
+                p_tagsPtr;
+            int routingTagCount =
+                p_numTagsPerVec;
+            std::vector<std::uint32_t>
+                categoricalTags;
+            if (staticACLTagCols <
+                p_numTagsPerVec) {
+                categoricalTags.resize(
+                    static_cast<size_t>(
+                        p_numVectors) *
+                    static_cast<size_t>(
+                        staticACLTagCols));
+                for (int vid = 0;
+                     vid < p_numVectors; ++vid) {
+                    std::memcpy(
+                        categoricalTags.data() +
+                            static_cast<size_t>(vid) *
+                                staticACLTagCols,
+                        p_tagsPtr +
+                            static_cast<size_t>(vid) *
+                                p_numTagsPerVec,
+                        static_cast<size_t>(
+                            staticACLTagCols) *
+                            sizeof(std::uint32_t));
+                }
+                routingTags =
+                    categoricalTags.data();
+                routingTagCount =
+                    staticACLTagCols;
+            }
             PivotEstimatorComputation pivotComputation;
             const PivotEstimatorCandidate* pivotCandidate = nullptr;
-            if (BuildPivotEstimatorComputation(p_tagsPtr, p_numVectors, p_numTagsPerVec,
+            if (BuildPivotEstimatorComputation(
+                    routingTags, p_numVectors,
+                    routingTagCount,
                                                0, 0.99, 10.0, 1.0, std::string(), pivotComputation)) {
                 pivotCandidate = FindBestPivotEstimatorCandidate(pivotComputation.candidates);
             }
@@ -4447,7 +5335,9 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                                                 m_tenantTagToNodes[p_tenantId]);
             }
 
-            memoryIndex->InitializeHeadNodeMeta(numHeadSamples);
+            memoryIndex->InitializeHeadNodeMeta(
+                numHeadSamples, 0,
+                hierWidths);
             // Monolithic roots resolve through their head-ID map; metadata-only
             // roots fall back to the bundle structures.
             spannInternalIdx->PopulateHeadNodeGlobalVIDsFromBundles();
@@ -4459,6 +5349,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             // them in opq_slim.bin. Never leave an empty mask attached to a static
             // snapshot: that would turn an enabled pre-filter into false negatives.
             std::vector<SPTAG::Cache::HierarchicalPostingMask> postingHierMasks;
+            std::unordered_map<std::uint64_t, int>
+                tagPostingCounts;
             {
                 const std::string slimBinPath = workDir + "/opq_slim.bin";
                 const std::string slimIdxPath = workDir + "/opq_slim.idx";
@@ -4466,8 +5358,9 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 struct stat staticSnapshotStat {};
                 if (stat(staticSnapshotPath.c_str(), &staticSnapshotStat) == 0) {
                     if (!BuildStaticPostingHierMasks(staticSnapshotPath, numHeads, p_numTagsPerVec,
-                                                      staticACLTagCols,
-                                                      postingHierMasks)) {
+                                                      staticACLTagCols, hierWidths,
+                                                      postingHierMasks,
+                                                      &tagPostingCounts)) {
                         return false;
                     }
                     fprintf(stderr, "[INFO] Tenant %d: built posting hier masks for %zu STM1 postings.\n",
@@ -4505,7 +5398,9 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                                 const std::uint8_t* e = base + i * (size_t)recSize;
                                 const uint32_t* vt = reinterpret_cast<const uint32_t*>(e + tagByteOff);
                                 for (int t = 0; t < p_numTagsPerVec; ++t)
-                                    postingHierMasks[h].Insert(t, vt[t]);
+                                    postingHierMasks[h].Insert(
+                                        t, vt[t],
+                                        hierWidths);
                             }
                         }
                         fprintf(stderr, "[INFO] Tenant %d: built posting hier masks for %zu slim postings.\n",
@@ -4516,6 +5411,153 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                                 "posting pre-filter will be empty.\n", p_tenantId);
                     }
                 }
+            }
+
+            const int numNumericCols =
+                p_numTagsPerVec - staticACLTagCols;
+            if (numNumericCols > 0) {
+                std::vector<SPTAG::Cache::NumQuantParam>
+                    quantParams(
+                        static_cast<size_t>(
+                            numNumericCols));
+                for (auto& parameter : quantParams) {
+                    parameter.lo =
+                        (std::numeric_limits<
+                            std::uint32_t>::max)();
+                    parameter.hi = 0;
+                }
+                for (int vid = 0; vid < p_numVectors; ++vid) {
+                    for (int column = 0;
+                         column < numNumericCols;
+                         ++column) {
+                        const std::uint32_t value =
+                            p_tagsPtr[
+                                static_cast<size_t>(vid) *
+                                    p_numTagsPerVec +
+                                staticACLTagCols +
+                                column];
+                        auto& parameter =
+                            quantParams[
+                                static_cast<size_t>(
+                                    column)];
+                        parameter.lo =
+                            (std::min)(
+                                parameter.lo, value);
+                        parameter.hi =
+                            (std::max)(
+                                parameter.hi, value);
+                    }
+                }
+                const std::string numericPath =
+                    workDir + "/numeric_meta.bin";
+                FILE* numericFile =
+                    fopen(numericPath.c_str(), "wb");
+                if (numericFile == nullptr) {
+                    return false;
+                }
+                const std::int32_t magic =
+                    0x54454d4e;
+                const std::int32_t base =
+                    staticACLTagCols;
+                const std::int32_t count =
+                    numNumericCols;
+                bool numericOk =
+                    fwrite(
+                        &magic, sizeof(magic), 1,
+                        numericFile) == 1 &&
+                    fwrite(
+                        &base, sizeof(base), 1,
+                        numericFile) == 1 &&
+                    fwrite(
+                        &count, sizeof(count), 1,
+                        numericFile) == 1;
+                for (const auto& parameter :
+                     quantParams) {
+                    numericOk =
+                        numericOk &&
+                        fwrite(
+                            &parameter.lo,
+                            sizeof(parameter.lo), 1,
+                            numericFile) == 1 &&
+                        fwrite(
+                            &parameter.hi,
+                            sizeof(parameter.hi), 1,
+                            numericFile) == 1;
+                }
+                numericOk =
+                    fclose(numericFile) == 0 &&
+                    numericOk;
+                if (!numericOk) return false;
+                m_tenantNumericMeta[p_tenantId] = {
+                    staticACLTagCols,
+                    std::move(quantParams)};
+            }
+
+            std::unordered_map<std::uint64_t, int>
+                tagVectorCounts;
+            tagVectorCounts.reserve(
+                (std::min)(
+                    static_cast<size_t>(
+                        p_numVectors) *
+                        static_cast<size_t>(
+                            staticACLTagCols),
+                    static_cast<size_t>(1 << 20)));
+            for (int vid = 0; vid < p_numVectors;
+                 ++vid) {
+                for (int column = 0;
+                     column < staticACLTagCols;
+                     ++column) {
+                    const std::uint32_t tag =
+                        p_tagsPtr[
+                            static_cast<size_t>(vid) *
+                                p_numTagsPerVec +
+                            column];
+                    ++tagVectorCounts[
+                        MakeTagRoutingKey(
+                            static_cast<std::uint32_t>(
+                                column),
+                            tag)];
+                }
+            }
+            auto& routeStats =
+                m_tenantTagRoutingStats[p_tenantId];
+            routeStats.clear();
+            routeStats.reserve(
+                tagVectorCounts.size());
+            for (const auto& entry :
+                 tagVectorCounts) {
+                routeStats[entry.first] = {
+                    entry.second,
+                    tagPostingCounts[entry.first]};
+            }
+            std::uint64_t routeGeneration = 0;
+            if (hybridDistanceEnabled) {
+                SPTAG::SPANN::HybridRoutingStats
+                    hybridStats;
+                std::string error;
+                if (!hybridStats.Load(
+                        workDir + "/" +
+                            hybridPostingFile +
+                            ".stats",
+                        error)) {
+                    fprintf(
+                        stderr,
+                        "[ERROR] Tenant %d: cannot bind "
+                        "tag routing stats to hybrid "
+                        "postings: %s\n",
+                        p_tenantId, error.c_str());
+                    return false;
+                }
+                routeGeneration =
+                    hybridStats
+                        .m_generationFingerprint;
+            }
+            if (!SaveTagRoutingStatsFile(
+                    workDir +
+                        "/tag_routing_stats.bin",
+                    p_numVectors, routeGeneration,
+                    routeStats)) {
+                return false;
             }
 
             int resolved = 0;
@@ -4539,8 +5581,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
 
             if (pivotCandidate != nullptr) {
                 std::vector<int> headNodeToNode;
-                BuildHeadNodeToNodeIndexForCandidate(*pivotCandidate, p_tagsPtr, p_numVectors,
-                                                     p_numTagsPerVec, memoryIndex, spannInternalIdx,
+                BuildHeadNodeToNodeIndexForCandidate(*pivotCandidate, routingTags, p_numVectors,
+                                                     routingTagCount, memoryIndex, spannInternalIdx,
                                                      headNodeToNode);
                 m_tenantHeadNodeToNode[p_tenantId] = headNodeToNode;
                 for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
@@ -4648,6 +5690,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     // 4. For each posting, read its blocks and extract vector IDs
     std::vector<std::vector<uint32_t>> posting_tags(numHeads);
     std::vector<SPTAG::Cache::HierarchicalPostingMask> posting_hier_masks(numHeads);
+    std::unordered_map<std::uint64_t, int>
+        routingPostingCounts;
     uint64_t totalAssignments = 0;
     std::vector<uint8_t> blockBuf(PAGE_SIZE);
     auto postingRecordStride = [&](const int64_t* rowAddrs, int nVecs) -> int {
@@ -4738,6 +5782,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
 
         // Extract VIDs and map to tags
         const int nPure = pureLimit(pid, nVecs);
+        std::vector<std::uint64_t>
+            postingRoutingKeys;
         for (int j = 0; j < nVecs; j++) {
             int offset = j * recordStride;
             int32_t vid;
@@ -4750,8 +5796,14 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 for (int t = 0; t < numBaseCols; t++) {
                     uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
                     posting_tags[pid].push_back(tag);
+                    postingRoutingKeys.push_back(
+                        MakeTagRoutingKey(
+                            static_cast<std::uint32_t>(
+                                t),
+                            tag));
                     // Also insert into hierarchical mask at level t
-                    posting_hier_masks[pid].Insert(t, tag);
+                    posting_hier_masks[pid].Insert(
+                        t, tag, hierWidths);
                 }
                 // Numeric attributes (cols numBaseCols..) -> quantized signature.
                 for (int c = 0; c < numNumericCols; c++) {
@@ -4773,6 +5825,18 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                             src, m_inputVectorSize);
                 vidSeen[vid] = 1;
             }
+        }
+        std::sort(
+            postingRoutingKeys.begin(),
+            postingRoutingKeys.end());
+        postingRoutingKeys.erase(
+            std::unique(
+                postingRoutingKeys.begin(),
+                postingRoutingKeys.end()),
+            postingRoutingKeys.end());
+        for (std::uint64_t key :
+             postingRoutingKeys) {
+            ++routingPostingCounts[key];
         }
     }
     fclose(postF);
@@ -4810,20 +5874,20 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         }
     }
 
-    std::unordered_map<uint32_t, int> tagVectorCounts;
+    std::unordered_map<std::uint64_t, int> tagVectorCounts;
     // The tag vocabulary is usually tiny compared with the vector count (340
     // for the SIFT/SPACEV hierarchy). Reserving p_numVectors * numTags would
     // allocate billions of unused hash buckets at 1B scale.
     tagVectorCounts.reserve(std::min<size_t>(
-        static_cast<size_t>(p_numVectors) * static_cast<size_t>(p_numTagsPerVec),
+        static_cast<size_t>(p_numVectors) * static_cast<size_t>(numBaseCols),
         static_cast<size_t>(1 << 20)));
     for (int vid = 0; vid < p_numVectors; ++vid) {
-        std::unordered_set<uint32_t> seenTags;
-        for (int t = 0; t < p_numTagsPerVec; ++t) {
+        for (int t = 0; t < numBaseCols; ++t) {
             uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
-            if (seenTags.insert(tag).second) {
-                ++tagVectorCounts[tag];
-            }
+            ++tagVectorCounts[
+                MakeTagRoutingKey(
+                    static_cast<std::uint32_t>(t),
+                    tag)];
         }
     }
 
@@ -4841,8 +5905,37 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     auto& routeStats = m_tenantTagRoutingStats[p_tenantId];
     routeStats.clear();
     routeStats.reserve(tagVectorCounts.size());
-    for (const auto& [tag, vectorCount] : tagVectorCounts) {
-        routeStats[tag] = TagRoutingStats{vectorCount, tagPostingCounts[tag]};
+    for (const auto& [key, vectorCount] : tagVectorCounts) {
+        routeStats[key] = TagRoutingStats{
+            vectorCount,
+            routingPostingCounts[key]};
+    }
+    std::uint64_t routeGeneration = 0;
+    if (hybridDistanceEnabled) {
+        SPTAG::SPANN::HybridRoutingStats hybridStats;
+        std::string error;
+        if (!hybridStats.Load(
+                workDir + "/" +
+                    hybridPostingFile + ".stats",
+                error)) {
+            fprintf(
+                stderr,
+                "[ERROR] Tenant %d: cannot bind tag routing stats to "
+                "hybrid postings: %s\n",
+                p_tenantId, error.c_str());
+            return false;
+        }
+        routeGeneration =
+            hybridStats.m_generationFingerprint;
+    }
+    if (!SaveTagRoutingStatsFile(
+            workDir + "/tag_routing_stats.bin",
+            p_numVectors, routeGeneration,
+            routeStats)) {
+        fprintf(stderr,
+                "[ERROR] Tenant %d: failed to persist tag_routing_stats.bin\n",
+                p_tenantId);
+        return false;
     }
 
     // Sparse-path single native knob: [BuildSSDIndex]
@@ -4946,7 +6039,9 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
         if (memoryIndex != nullptr && spannInternalIdx != nullptr) {
             const SizeType numHeadSamples = memoryIndex->GetNumSamples();
-            memoryIndex->InitializeHeadNodeMeta(numHeadSamples, numNumericCols);
+            memoryIndex->InitializeHeadNodeMeta(
+                numHeadSamples, numNumericCols,
+                hierWidths);
             for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
                 SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
                 memoryIndex->SetHeadNodeGlobalVID(hid, globalVID);
@@ -5356,25 +6451,6 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             }
         }
     }
-    // ── Lower pure-OR DNF to the legacy flat-OR path ───────────────────────
-    // A DNF with no real conjunction (every clause a single literal) is
-    // logically identical to a flat OR/IN-list over the union of literal
-    // values. The legacy OR path is the tuned, optimal implementation for that
-    // case; the generic DNF dense path is a parallel reimplementation that
-    // selects a marginally different posting set (measured ~2.4% fewer scanned
-    // vectors at equal nprobe -> ~1 lost neighbour/query -> needs higher nprobe
-    // for the same recall). So when there is no AND clause, dedup the union and
-    // hand off to the legacy path verbatim (dnfMode off, positive p_numTags).
-    // The DNF dense path is then reserved for predicates that genuinely need
-    // conjunctions, where there is no legacy equivalent.
-    if (dnfMode && !dnf.Empty() && !dnf.HasAndClause() && !dnf.HasNumericLiteral()) {
-        std::sort(dnfValues.begin(), dnfValues.end());
-        dnfValues.erase(std::unique(dnfValues.begin(), dnfValues.end()), dnfValues.end());
-        queryTagsPtr = dnfValues.empty() ? nullptr : dnfValues.data();
-        p_numTags = static_cast<int>(dnfValues.size());
-        dnf.Clear();
-        dnfMode = false;
-    }
     // Effective flat tag view used by the dense-path mask/selectivity builders.
     // In DNF mode this is the union of all literal values.
     const uint32_t* effTagsPtr = dnfMode ? (dnfValues.empty() ? nullptr : dnfValues.data()) : queryTagsPtr;
@@ -5411,6 +6487,7 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                                : std::chrono::high_resolution_clock::time_point{};
     bool forceDenseTagSearch = false;
     bool adaptiveFilteredNprobeEnabled = false;
+    bool hybridDistanceEnabled = false;
     float filteredSearchNprobeSafety = 1.0f;
     if (internalIdx != nullptr) {
         const std::string forceDenseParam = internalIdx->GetParameter("ForceDenseTagSearch", "BuildSSDIndex");
@@ -5431,6 +6508,19 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         const auto* searchOptions = spannIndex != nullptr ? spannIndex->GetOptions() : nullptr;
         adaptiveFilteredNprobeEnabled =
             searchOptions != nullptr && searchOptions->m_enableAdaptiveFilteredNprobe;
+        const std::string hybridDistanceParam =
+            internalIdx->GetParameter(
+                "EnableHybridDistance", "BuildSSDIndex");
+        if (!hybridDistanceParam.empty()) {
+            SPTAG::Helper::Convert::ConvertStringTo<bool>(
+                hybridDistanceParam.c_str(), hybridDistanceEnabled);
+        }
+        if (hybridDistanceEnabled) {
+            // Hybrid-enabled filtered queries must reach the core cost router.
+            // Tag-pure and sparse early returns cannot compare the original and
+            // hybrid graph/posting layouts, so they are not eligible here.
+            forceDenseTagSearch = true;
+        }
     }
 
     auto _ck_afterIdx = s_wrapperTime ? std::chrono::high_resolution_clock::now()
@@ -5508,6 +6598,16 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
 
     const auto tagStatsIt = m_tenantTagRoutingStats.find(p_tenantId);
     const auto* tagStats = (tagStatsIt != m_tenantTagRoutingStats.end()) ? &tagStatsIt->second : nullptr;
+    if (hybridDistanceEnabled &&
+        (tagStats == nullptr || tagStats->empty())) {
+        fprintf(
+            stderr,
+            "[ERROR] Tenant %d: hybrid filtered search requires "
+            "tag_routing_stats.bin; run BuildSignatures with the native "
+            "INI before serving filtered queries\n",
+            p_tenantId);
+        return nullptr;
+    }
 
     auto _ck_routingStart = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                           : std::chrono::high_resolution_clock::time_point{};
@@ -5520,25 +6620,19 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     std::vector<int> routedNodes;
     std::vector<uint8_t> allowedNodeMask;
     bool hasRoutingNodeFilter = false;
-    // Collect routed subgraph nodes: DNF predicates use the OR-of-clauses /
-    // AND-of-literals collector (⋃ clause ⋂ literal); legacy flat OR/IN lists
-    // (including pure-OR DNF already lowered to a positive p_numTags) use the
-    // union collector. Both feed the identical allowedNodeMask plumbing below.
+    // Flat queries union the nodes containing each requested value. DNF can
+    // narrow safely only when every clause has categorical equality literals:
+    // intersect within each AND clause, then union across OR clauses. Numeric
+    // or non-equality-only clauses conservatively retain every bundle.
     bool routingCollected = false;
-    static const bool s_noRoute = []() { const char* e = std::getenv("SPTAG_DNF_NOROUTE"); return e && e[0] == '1'; }();
-    if (!s_noRoute &&
-        tagToNodesIt != m_tenantTagToNodes.end() &&
+    if (tagToNodesIt != m_tenantTagToNodes.end() &&
         headNodeToNode != nullptr &&
         !headNodeToNode->empty()) {
         if (dnfMode && !dnf.Empty()) {
-            routingCollected = TryCollectRoutingNodesForDNF(tagToNodesIt->second, dnf, routedNodes);
-            static const bool s_routeDbg = (std::getenv("SPTAG_ROUTE_DEBUG") != nullptr);
-            if (s_routeDbg) {
-                static std::atomic<int> g_rc{0};
-                if (g_rc++ < 8)
-                    fprintf(stderr, "[DNF-ROUTE] clauses=%zu routedNodes=%zu collected=%d\n",
-                            dnf.clauses.size(), routedNodes.size(), (int)routingCollected);
-            }
+            routingCollected =
+                TryCollectRoutingNodesForDNF(
+                    tagToNodesIt->second, dnf,
+                    routedNodes);
         } else if (p_numTags > 0) {
             routingCollected = TryCollectRoutingNodesForQuery(tagToNodesIt->second, queryTagsPtr, p_numTags, routedNodes);
             static const bool s_routeDbg2 = (std::getenv("SPTAG_ROUTE_DEBUG") != nullptr);
@@ -5727,6 +6821,14 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     queryMask.Clear();
     SPTAG::Cache::HierarchicalPostingMask queryHierMask;
     queryHierMask.Clear();
+    auto memoryIndex =
+        GetMemoryIndexForInternal(internalIdx);
+    EnsureHeadNodeMetaLoaded(
+        workDir, internalIdx);
+    const SPTAG::Cache::HierWidthTable queryHierWidths =
+        memoryIndex != nullptr
+            ? memoryIndex->GetHeadNodeHierWidths()
+            : SPTAG::Cache::HierWidthTable();
     // Map a raw tag value to its hierarchical level using the per-level offsets
     // persisted at build time (tag_level_offsets.bin). Tag value ranges are
     // disjoint and ascending per level, so the level is the largest index i
@@ -5754,10 +6856,10 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         } else {
             level = (qtag < 2000) ? 0 : (qtag < 3000) ? 1 : (qtag < 4000) ? 2 : 3;
         }
-        queryHierMask.Insert(level, qtag);
+        queryHierMask.Insert(
+            level, qtag,
+            queryHierWidths);
     }
-    auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
-    EnsureHeadNodeMetaLoaded(workDir, internalIdx);
     auto _ck_qmask = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                    : std::chrono::high_resolution_clock::time_point{};
     SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
@@ -5811,7 +6913,8 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                     (numMeta != nullptr && !numMeta->params.empty()) ? numMeta->params.data() : nullptr;
                 const int numBase = (numMeta != nullptr) ? numMeta->numBaseCols : 0;
                 searchContext.m_postingFilter =
-                    [memIdx = memoryIndex.get(), queryHierMask, dnf, dnfHasNum, quantCols, qp, numBase](int localHid) {
+                    [memIdx = memoryIndex.get(), queryHierMask, queryHierWidths,
+                     dnf, dnfHasNum, quantCols, qp, numBase](int localHid) {
                         // Use the per-posting multi-membership mask (union of all
                         // member-vector tags). MayIntersect / MayMatchHier are
                         // no-false-negative so they are safe as a pre-filter; the
@@ -5825,11 +6928,18 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                             if (dnfHasNum && quantCols > 0 && qp != nullptr) {
                                 const std::uint64_t* quant = memIdx->GetHeadNodeNumQuant(localHid);
                                 if (quant != nullptr)
-                                    return dnf.MayMatchHierQuant(*hierMask, quant, quantCols, qp, numBase);
+                                    return dnf.MayMatchHierQuant(
+                                        *hierMask, quant,
+                                        quantCols, qp, numBase,
+                                        queryHierWidths);
                             }
-                            return dnf.MayMatchHier(*hierMask);
+                            return dnf.MayMatchHier(
+                                *hierMask,
+                                queryHierWidths);
                         }
-                        return hierMask->MayIntersect(queryHierMask);
+                        return hierMask->MayIntersect(
+                            queryHierMask,
+                            queryHierWidths);
                     };
                 }
             }
@@ -5841,14 +6951,30 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             (void)allowedNodeMask;
             (void)headNodeToNode;
 
-        if (adaptiveFilteredNprobeEnabled) {
+        if (adaptiveFilteredNprobeEnabled || hybridDistanceEnabled) {
             auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
             int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
             float vectorSel = EstimateQueryVectorSelectivity(
-                tenantSize2, tagStats, effTagsPtr, effNumTags);
-            vectorSel = std::clamp(
-                vectorSel / std::max(1.0f, filteredSearchNprobeSafety), 1e-6f, 1.0f);
-            searchContext.m_filterSelectivity = vectorSel;
+                tenantSize2, tagStats, effTagsPtr, effNumTags,
+                dnfMode && !dnf.Empty() ? &dnf : nullptr,
+                levelOffsets != nullptr
+                    ? static_cast<int>(
+                          levelOffsets->size())
+                    : -1,
+                numMeta != nullptr
+                    ? numMeta->numBaseCols
+                    : 0,
+                numMeta != nullptr &&
+                        !numMeta->params.empty()
+                    ? numMeta->params.data()
+                    : nullptr,
+                numMeta != nullptr
+                    ? numMeta->params.size()
+                    : 0);
+            searchContext.m_routeSelectivity = vectorSel;
+            searchContext.m_filterSelectivity = std::clamp(
+                vectorSel / std::max(1.0f, filteredSearchNprobeSafety),
+                1e-6f, 1.0f);
 
             // Per-query selectivity fallback is needed only by adaptive nprobe.
             // Fixed-nprobe searches must not scan global head metadata for a value
@@ -5862,7 +6988,8 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                 int v = e ? atoi(e) : 16384;
                 return static_cast<SizeType>(v > 0 ? v : 16384);
             }();
-            if (!s_disableSelFallback && memoryIndex != nullptr &&
+            if (adaptiveFilteredNprobeEnabled &&
+                !s_disableSelFallback && memoryIndex != nullptr &&
                 memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 &&
                 searchContext.m_filterSelectivity >= 1.0f) {
                 SizeType totalHeads = memoryIndex->GetHeadNodeMetaSampleCount();

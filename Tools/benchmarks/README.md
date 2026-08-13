@@ -39,6 +39,36 @@ Release/spannaclbench ... \
   --search-ini Tools/benchmarks/search_turbopuffer_sift1m_tenant0_n20.ini
 ```
 
+## Random-Head Hybrid Distance Routing
+
+`build_spann_attr_sift1m_tagged_4node_static_hybrid_distance.ini` is the
+hybrid-on experiment; `build_spann_attr_sift1m_tagged_4node_static_random_control.ini`
+is its matched hybrid-off control. Both use deterministic
+`SelectHeadType=Random`. Hybrid mode preserves the original pure-vector graph
+and complete pure+tail STM1 postings for unfiltered and broad-filter queries,
+then adds a separate hybrid graph and no-tail STM1 sidecar for restrictive
+filters:
+
+```text
+D_hybrid = w_v D_vector
+         + sum_i w_cat,i [query_i != head_i]
+         + sum_j w_num,j |query_j - head_j|
+```
+
+Unfiltered queries are never eligible for the hybrid route. Filtered queries
+compare both layouts with persisted selectivity, enrichment, duplicate ratio,
+and physical posting statistics:
+
+```text
+Y_r = min(R_r, s E_r R_r U_r)
+N_r = max(N_base, ceil(alpha K / Y_r))
+C_r = H_r + N_r (T_io + P_r T_page + B_r / BW + R_r T_vector)
+```
+
+`HybridCostMaxPostings` caps `N_r` for resource safety; it is not a selectivity
+threshold. Exact record-level flat or DNF filtering remains authoritative on
+either route. All weights and cost coefficients are native INI parameters.
+
 ## SIFT1B Raw STM1 Recommendation
 
 The SIFT1B recommendation uses raw UInt8 vectors in postings, four ACL

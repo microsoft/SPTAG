@@ -60,6 +60,27 @@ def _tenant_get_tag_routing_stats(self, tenant_id):
     ]
 
 
+def _tenant_get_column_aware_tag_routing_stats(self, tenant_id):
+    """Return exact column-aware tag routing stats for one tenant."""
+    import struct as _struct
+
+    payload = self.GetColumnAwareTagRoutingStatsBlob(int(tenant_id))
+    entry_format = "<IIii"
+    entry_size = _struct.calcsize(entry_format)
+    if len(payload) % entry_size != 0:
+        raise ValueError("Unexpected column-aware tag routing stats payload length")
+
+    return [
+        {
+            "column": int(column),
+            "tag": int(tag),
+            "vector_count": int(vector_count),
+            "posting_count": int(posting_count),
+        }
+        for column, tag, vector_count, posting_count in _struct.iter_unpack(entry_format, payload)
+    ]
+
+
 def _tenant_get_head_index_cache_state(self):
     """Return estimated HeadIndex usage together with live RSS and RSS high-water settings."""
     return {
@@ -154,6 +175,7 @@ def _create_tenant_index_manager(dimension, algo_type="BKT", value_type="Float")
 # Python API additions for multi-tenant index construction.
 TenantIndexManager.BuildFromNumpy = _tenant_build_from_numpy
 TenantIndexManager.GetTagRoutingStats = _tenant_get_tag_routing_stats
+TenantIndexManager.GetColumnAwareTagRoutingStats = _tenant_get_column_aware_tag_routing_stats
 TenantIndexManager.GetHeadIndexCacheState = _tenant_get_head_index_cache_state
 TenantIndexManager.EstimatePivotPlan = _tenant_estimate_pivot_build_plan
 CreateTenantIndexManager = _create_tenant_index_manager

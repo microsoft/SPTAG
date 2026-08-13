@@ -2512,7 +2512,7 @@ namespace SPTAG::SPANN {
                                  "Workspace channel pool exhausted; allocating an additional channel.\n");
                     wid = m_workspaceCount.fetch_add(1);
                 }
-                p_exWorkSpace->m_diskRequests[0].m_status = wid;
+                p_exWorkSpace->SetAsyncContextID(wid);
                 p_exWorkSpace->m_callback = [m_freeWorkSpaceIds = m_freeWorkSpaceIds, wid] () {
                     if (m_freeWorkSpaceIds) m_freeWorkSpaceIds->push(wid);
                 };

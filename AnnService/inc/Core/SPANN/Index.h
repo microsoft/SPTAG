@@ -26,6 +26,8 @@
 #include "inc/Core/Common/IQuantizer.h"
 
 #include "IExtraSearcher.h"
+#include "HybridHeadGraph.h"
+#include "HybridRoutingStats.h"
 #include "Options.h"
 
 #include <functional>
@@ -98,10 +100,13 @@ namespace SPTAG
             mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
             mutable std::mutex m_globalHeadVIDToLocalHIDMutex;
             mutable std::mutex m_headBundleLoadLock;
-            // Runtime-only cross edges are appended directly after each bundle RNG row.
+            // Runtime-only hybrid and cross edges share the bundle RNG row:
+            // [pure vector RNG | hybrid local RNG | encoded cross-bundle].
             // The on-disk head_cross_edges.bin format remains unchanged; load resolves
             // each target into an encoded (bundle, local-id) locator. Native BKT/KDT
             // searches keep using the ordinary bundle-local RNG prefix.
+            mutable DimensionType m_headHybridEdgeSize = 0;
+            mutable size_t m_headHybridEdgeTotal = 0;
             mutable DimensionType m_headInlineCrossEdgeSize = 0;
             mutable size_t m_headInlineCrossEdgeTotal = 0;
             mutable DimensionType m_headLocatorLocalBits = 0;
@@ -113,6 +118,11 @@ namespace SPTAG
             mutable std::atomic<bool> m_headCrossEdgesLoaded{false};
             mutable std::mutex m_headCrossEdgesMutex;
             mutable std::atomic<bool> m_headCrossEdgesDirty{false};
+            mutable HybridHeadGraph m_hybridHeadGraph;
+            mutable HybridDistanceConfig m_hybridDistance;
+            mutable HybridRoutingStats m_hybridRoutingStats;
+            mutable std::atomic<bool> m_headHybridGraphLoaded{false};
+            mutable std::mutex m_headHybridGraphMutex;
             mutable std::shared_timed_mutex m_headTopologyLock;
             // globalVID -> (bundleNodeId, localHidWithinBundle) reverse map, populated
             // on each EnsureHeadBundleNodeLoaded for the loaded node only.
@@ -187,6 +197,8 @@ namespace SPTAG
             inline bool HasHeadBundleNodes() const { return !m_headBundleNodes.empty(); }
             inline DimensionType GetInlineHeadCrossEdgeSize() const { return m_headInlineCrossEdgeSize; }
             inline size_t GetInlineHeadCrossEdgeTotal() const { return m_headInlineCrossEdgeTotal; }
+            inline DimensionType GetHeadHybridEdgeSize() const { return m_headHybridEdgeSize; }
+            inline size_t GetHeadHybridEdgeTotal() const { return m_headHybridEdgeTotal; }
             inline DimensionType GetInlineHeadLocatorLocalBits() const { return m_headLocatorLocalBits; }
 
             // v5: Σ bundle.headCount — canonical "total head count" after cross-edges unified
@@ -325,7 +337,13 @@ namespace SPTAG
             ErrorCode SetupMetadataOnlyHeadStore(const std::string& p_baseDir);
             ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;
             ErrorCode EnsureHeadBundleDenseMaps() const;
+            ErrorCode ResizeInlineHeadCrossEdges(
+                DimensionType p_crossEdgeCount) const;
+            ErrorCode LoadHeadHybridGraph(
+                bool p_requireRoutingStats = true) const;
+            ErrorCode LoadHybridRoutingStats();
             ErrorCode LoadHeadCrossEdges() const;
+            ErrorCode EnsureHeadHybridGraph();
             ErrorCode EnsureStaticTailCrossEdges();
             bool SearchStaticTailCrossGraph(
                 const T* p_target,
@@ -336,7 +354,20 @@ namespace SPTAG
                 COMMON::QueryResultSet<T>* p_queryResults,
                 int p_entryNode,
                 int p_graphResultNum,
-                int& p_scannedOut) const;
+                int& p_scannedOut,
+                bool p_useHybrid = false,
+                const std::uint32_t* p_queryTags = nullptr,
+                int p_numQueryTags = 0,
+                const Cache::DNFPredicate* p_queryDNF = nullptr,
+                const std::vector<int>* p_allowedNodes = nullptr) const;
+            ErrorCode SearchHeadBundlesHybridNative(
+                COMMON::QueryResultSet<T>* p_queryResults,
+                const std::vector<int>& p_candidateNodes,
+                int p_graphResultNum,
+                int& p_scannedOut,
+                const std::uint32_t* p_queryTags,
+                int p_numQueryTags,
+                const Cache::DNFPredicate* p_queryDNF) const;
             ErrorCode SearchHeadBundlesNative(
                 COMMON::QueryResultSet<T>* p_queryResults,
                 const std::vector<int>& p_candidateNodes,

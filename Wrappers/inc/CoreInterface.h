@@ -172,6 +172,8 @@ public:
         int vectorCount = 0;
         int postingCount = 0;
     };
+    using TagRoutingStatsMap =
+        std::unordered_map<std::uint64_t, TagRoutingStats>;
 
 
     // Build indices from global vectors and metadata (metadata are tenant IDs as integers)
@@ -226,9 +228,14 @@ public:
     // Returns 0 when the tenant has no HeadIndex workdir.
     uint64_t GetTenantHeadIndexSize(int p_tenantId) const;
 
-    // Get exact tag routing stats for a tenant as a packed byte buffer.
-    // Each entry uses the layout: uint32_t tag, int32_t vectorCount, int32_t postingCount.
+    // Get tag routing stats using the legacy packed layout:
+    // uint32_t tag, int32_t vectorCount, int32_t postingCount.
     ByteArray GetTagRoutingStatsBlob(int p_tenantId) const;
+
+    // Get exact column-aware tag routing stats as a packed byte buffer.
+    // Each entry uses the layout: uint32_t column, uint32_t tag,
+    // int32_t vectorCount, int32_t postingCount.
+    ByteArray GetColumnAwareTagRoutingStatsBlob(int p_tenantId) const;
 
     // Build-time pivot planner cost estimator.
     // Returns a UTF-8 JSON payload with all candidates and the selected best plan.
@@ -375,7 +382,7 @@ private:
     std::map<int, int> m_tenantVectorCounts;
 
     // Exact per-tag routing stats computed by BuildSignatures.
-    std::map<int, std::unordered_map<uint32_t, TagRoutingStats>> m_tenantTagRoutingStats;
+    std::map<int, TagRoutingStatsMap> m_tenantTagRoutingStats;
 
     // Per-level tag value offsets (minimum tag value at each hierarchical
     // level/column), computed by BuildSignatures and persisted to
@@ -509,6 +516,9 @@ private:
     // Also resolves and caches the KV store handle + page budget needed by
     // the SearchWithACL fast path. Mirrors LoadTenantSparseIndices.
     void LoadTenantTagPureIndices();
+
+    // Reload exact per-tag selectivity statistics used by hybrid cost routing.
+    bool LoadTenantTagRoutingStats();
 
     // Concurrent cache management
     void InitCache();

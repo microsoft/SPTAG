@@ -6,8 +6,13 @@
 
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
+#include "inc/Helper/AtomicFile.h"
 #include "IExtraSearcher.h"
 #include "inc/Core/Common/TruthSet.h"
+#include "inc/Core/SPANN/HybridArtifactPaths.h"
+#include "inc/Core/SPANN/HybridCandidateSelector.h"
+#include "inc/Core/SPANN/HybridDistance.h"
+#include "inc/Core/SPANN/HybridRoutingStats.h"
 #include "Compressor.h"
 #include "PipePQ.h"
 
@@ -51,7 +56,17 @@ namespace SPTAG
             std::vector<Edge> m_selections;
             static EdgeCompare g_edgeComparer;
 
-            Selection(size_t totalsize, std::string tmpdir) : m_tmpfile(tmpdir + FolderSep + "selection_tmp"), m_totalsize(totalsize), m_start(0), m_end(totalsize) { remove(m_tmpfile.c_str()); m_selections.resize(totalsize); }
+            Selection(size_t totalsize,
+                      std::string tmpdir,
+                      const std::string& tmpfile = "selection_tmp")
+                : m_tmpfile(tmpdir + FolderSep + tmpfile),
+                  m_totalsize(totalsize),
+                  m_start(0),
+                  m_end(totalsize)
+            {
+                remove(m_tmpfile.c_str());
+                m_selections.resize(totalsize);
+            }
 
             ErrorCode SaveBatch()
             {
@@ -246,6 +261,16 @@ namespace SPTAG
                 return m_avgBytesPerList;
             }
 
+            virtual int GetPostingBufferBytes(
+                bool p_useHybrid = false) const override
+            {
+                const int postingPages = p_useHybrid
+                    ? m_hybridMaxListPageCount
+                    : m_staticMaxListPageCount;
+                return (std::max)(
+                    1, postingPages + 1) << PageSizeEx;
+            }
+
             void SetVectorTags(const uint32_t* p_tags, int p_numVectors,
                                int p_numTagsPerVec) override
             {
@@ -257,6 +282,13 @@ namespace SPTAG
                     p_tags,
                     p_tags + static_cast<size_t>(p_numVectors) * static_cast<size_t>(p_numTagsPerVec));
                 m_staticBuildNumTagsPerVec = p_numTagsPerVec;
+            }
+
+            void SetHybridGenerationFingerprint(
+                std::uint64_t p_generationFingerprint) override
+            {
+                m_hybridGenerationFingerprint =
+                    p_generationFingerprint;
             }
 
             void SetNodeVectorAssignments(
@@ -347,13 +379,15 @@ namespace SPTAG
                 std::unique_ptr<std::uint16_t[]> postPageOffset;
                 std::vector<int> postingOrderInIndex;
                 SelectPostingOffset(postingListBytes, postPageNum, postPageOffset, postingOrderInIndex);
+                const std::string temporary =
+                    p_outputFile + ".tmp";
 
                 try {
                     std::shared_ptr<VectorIndex> unusedHeadIndex;
                     const std::vector<int> noOrderedPageStartAttrs;
                     const std::vector<std::uint32_t> noOrderedPageStartBases;
                     OutputSSDIndexFile(
-                        p_outputFile,
+                        temporary,
                         false,
                         false,
                         false,
@@ -375,12 +409,836 @@ namespace SPTAG
                         false);
                 }
                 catch (const std::exception& e) {
+                    std::remove(temporary.c_str());
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                                  "Failed to write static posting sidecar %s: %s\n",
                                  p_outputFile.c_str(),
                                  e.what());
                     return false;
                 }
+                if (!Helper::AtomicReplaceFile(
+                        temporary,
+                        p_outputFile)) {
+                    std::remove(temporary.c_str());
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Failed to publish static posting sidecar %s.\n",
+                        p_outputFile.c_str());
+                    return false;
+                }
+                return true;
+            }
+
+            bool ComputeHybridRouteLayout(
+                const Selection& p_selections,
+                const std::vector<int>& p_postingSizes,
+                const std::vector<SizeType>& p_headVectorIDs,
+                const std::vector<int>& p_categoricalColumns,
+                SizeType p_fullCount,
+                HybridRouteLayout& p_layout)
+            {
+                p_layout = HybridRouteLayout();
+                if (p_categoricalColumns.size() > 16 ||
+                    p_postingSizes.size() !=
+                        p_headVectorIDs.size() ||
+                    p_fullCount <= 0) {
+                    return false;
+                }
+                const size_t maskCount =
+                    static_cast<size_t>(1) <<
+                    p_categoricalColumns.size();
+                std::vector<double> baseSelectivity(
+                    maskCount, 1.0);
+                const auto mix64 = [](std::uint64_t value) {
+                    value += 0x9e3779b97f4a7c15ULL;
+                    value =
+                        (value ^ (value >> 30)) *
+                        0xbf58476d1ce4e5b9ULL;
+                    value =
+                        (value ^ (value >> 27)) *
+                        0x94d049bb133111ebULL;
+                    return value ^ (value >> 31);
+                };
+                const std::uint64_t sampleCount =
+                    (std::min<std::uint64_t>)(
+                        1ULL << 20,
+                        (std::max<std::uint64_t>)(
+                            4096,
+                            static_cast<std::uint64_t>(
+                                p_fullCount) * 32ULL));
+                std::vector<std::uint64_t> pairEqual(
+                    maskCount, 0);
+                for (std::uint64_t sample = 0;
+                     sample < sampleCount; ++sample) {
+                    const SizeType left = static_cast<SizeType>(
+                        mix64(sample) %
+                        static_cast<std::uint64_t>(
+                            p_fullCount));
+                    const SizeType right = static_cast<SizeType>(
+                        mix64(sample ^
+                              0xd1b54a32d192ed03ULL) %
+                        static_cast<std::uint64_t>(
+                            p_fullCount));
+                    const auto* leftAttributes =
+                        m_staticBuildTags.data() +
+                        static_cast<size_t>(left) *
+                            static_cast<size_t>(
+                                m_staticNumTagsPerVec);
+                    const auto* rightAttributes =
+                        m_staticBuildTags.data() +
+                        static_cast<size_t>(right) *
+                            static_cast<size_t>(
+                                m_staticNumTagsPerVec);
+                    size_t equalMask = 0;
+                    for (size_t bit = 0;
+                         bit < p_categoricalColumns.size();
+                         ++bit) {
+                        const int column =
+                            p_categoricalColumns[bit];
+                        if (leftAttributes[column] ==
+                            rightAttributes[column]) {
+                            equalMask |=
+                                static_cast<size_t>(1)
+                                << bit;
+                        }
+                    }
+                    ++pairEqual[equalMask];
+                }
+                std::vector<std::uint64_t> pairMatched =
+                    pairEqual;
+                for (size_t bit = 0;
+                     bit < p_categoricalColumns.size();
+                     ++bit) {
+                    const size_t bitValue =
+                        static_cast<size_t>(1) << bit;
+                    for (size_t mask = 0;
+                         mask < maskCount; ++mask) {
+                        if ((mask & bitValue) == 0) {
+                            pairMatched[mask] +=
+                                pairMatched[mask | bitValue];
+                        }
+                    }
+                }
+                for (size_t mask = 1;
+                     mask < maskCount; ++mask) {
+                    baseSelectivity[mask] =
+                        (std::max)(
+                            1.0 / static_cast<double>(
+                                sampleCount),
+                            static_cast<double>(
+                                pairMatched[mask]) /
+                                static_cast<double>(
+                                    sampleCount));
+                }
+
+                std::vector<std::uint64_t> exactEqual(
+                    maskCount, 0);
+                std::uint64_t totalRecords = 0;
+                const bool countUniqueExactly =
+                    p_fullCount <= 10000000;
+                std::unordered_set<SizeType>
+                    retainedVectors;
+                constexpr size_t kHLLBits = 16;
+                constexpr size_t kHLLRegisters =
+                    static_cast<size_t>(1) << kHLLBits;
+                std::vector<std::uint8_t> hllRegisters;
+                if (countUniqueExactly) {
+                    retainedVectors.reserve(
+                        static_cast<size_t>(p_fullCount));
+                } else {
+                    hllRegisters.assign(kHLLRegisters, 0);
+                }
+                for (SizeType head = 0;
+                     head <
+                         static_cast<SizeType>(
+                             p_postingSizes.size());
+                     ++head) {
+                    const int postingSize =
+                        p_postingSizes[
+                            static_cast<size_t>(head)];
+                    if (postingSize <= 0) continue;
+                    const SizeType headVectorID =
+                        p_headVectorIDs[
+                            static_cast<size_t>(head)];
+                    if (headVectorID < 0 ||
+                        headVectorID >= p_fullCount) {
+                        return false;
+                    }
+                    const auto begin = std::lower_bound(
+                        p_selections.m_selections.begin(),
+                        p_selections.m_selections.end(),
+                        head, Selection::g_edgeComparer);
+                    if (begin ==
+                            p_selections.m_selections.end() ||
+                        begin->node != head ||
+                        static_cast<size_t>(
+                            p_selections.m_selections.end() -
+                            begin) <
+                            static_cast<size_t>(
+                                postingSize)) {
+                        return false;
+                    }
+                    const auto* headAttributes =
+                        m_staticBuildTags.data() +
+                        static_cast<size_t>(
+                            headVectorID) *
+                            static_cast<size_t>(
+                                m_staticNumTagsPerVec);
+                    for (int record = 0;
+                         record < postingSize; ++record) {
+                        const SizeType vectorID =
+                            begin[record].tonode;
+                        if (vectorID < 0 ||
+                            vectorID >= p_fullCount) {
+                            return false;
+                        }
+                        if (countUniqueExactly) {
+                            retainedVectors.insert(vectorID);
+                        } else {
+                            const std::uint64_t hash =
+                                mix64(static_cast<
+                                      std::uint64_t>(
+                                    vectorID));
+                            const size_t bucket =
+                                static_cast<size_t>(
+                                    hash &
+                                    (kHLLRegisters - 1));
+                            std::uint64_t suffix =
+                                hash >> kHLLBits;
+                            std::uint8_t rank = 1;
+                            while ((suffix & 1ULL) == 0 &&
+                                   rank <=
+                                       64 - kHLLBits) {
+                                ++rank;
+                                suffix >>= 1;
+                            }
+                            hllRegisters[bucket] =
+                                (std::max)(
+                                    hllRegisters[bucket],
+                                    rank);
+                        }
+                        const auto* attributes =
+                            m_staticBuildTags.data() +
+                            static_cast<size_t>(
+                                vectorID) *
+                                static_cast<size_t>(
+                                    m_staticNumTagsPerVec);
+                        size_t equalMask = 0;
+                        for (size_t bit = 0;
+                             bit <
+                                 p_categoricalColumns.size();
+                             ++bit) {
+                            const int column =
+                                p_categoricalColumns[bit];
+                            if (attributes[column] ==
+                                headAttributes[column]) {
+                                equalMask |=
+                                    static_cast<size_t>(1)
+                                    << bit;
+                            }
+                        }
+                        ++exactEqual[equalMask];
+                        ++totalRecords;
+                    }
+                }
+                if (totalRecords == 0) return false;
+                std::vector<std::uint64_t> matched =
+                    exactEqual;
+                for (size_t bit = 0;
+                     bit < p_categoricalColumns.size();
+                     ++bit) {
+                    const size_t bitValue =
+                        static_cast<size_t>(1) << bit;
+                    for (size_t mask = 0;
+                         mask < maskCount; ++mask) {
+                        if ((mask & bitValue) == 0) {
+                            matched[mask] +=
+                                matched[mask | bitValue];
+                        }
+                    }
+                }
+
+                p_layout.m_enrichmentByMask.assign(
+                    maskCount, 1.0);
+                for (size_t mask = 1;
+                     mask < maskCount; ++mask) {
+                    const double matchRate =
+                        static_cast<double>(
+                            matched[mask]) /
+                        static_cast<double>(
+                            totalRecords);
+                    p_layout.m_enrichmentByMask[mask] =
+                        (std::max)(
+                            1e-9,
+                            matchRate /
+                                (std::max)(
+                                    1e-12,
+                                    baseSelectivity[mask]));
+                }
+                p_layout.m_layout.m_averageRecords =
+                    static_cast<double>(totalRecords) /
+                    static_cast<double>(
+                        p_postingSizes.size());
+                p_layout.m_layout.m_averageBytes =
+                    p_layout.m_layout.m_averageRecords *
+                    static_cast<double>(m_vectorInfoSize);
+                double uniqueVectors = static_cast<double>(
+                    retainedVectors.size());
+                if (!countUniqueExactly) {
+                    double inverseSum = 0.0;
+                    size_t zeroRegisters = 0;
+                    for (const std::uint8_t rank :
+                         hllRegisters) {
+                        inverseSum +=
+                            std::ldexp(1.0, -rank);
+                        if (rank == 0) ++zeroRegisters;
+                    }
+                    const double registers =
+                        static_cast<double>(
+                            kHLLRegisters);
+                    const double alpha =
+                        0.7213 /
+                        (1.0 + 1.079 / registers);
+                    uniqueVectors =
+                        alpha * registers * registers /
+                        inverseSum;
+                    if (zeroRegisters > 0 &&
+                        uniqueVectors <=
+                            2.5 * registers) {
+                        uniqueVectors =
+                            registers *
+                            std::log(
+                                registers /
+                                static_cast<double>(
+                                    zeroRegisters));
+                    }
+                    uniqueVectors = std::clamp(
+                        uniqueVectors, 1.0,
+                        static_cast<double>(
+                            p_fullCount));
+                }
+                p_layout.m_layout.m_uniqueRatio =
+                    (std::min)(
+                        1.0,
+                        uniqueVectors /
+                            static_cast<double>(
+                                totalRecords));
+
+                std::vector<size_t> postingBytes(
+                    p_postingSizes.size());
+                for (size_t head = 0;
+                     head < p_postingSizes.size(); ++head) {
+                    postingBytes[head] =
+                        static_cast<size_t>(
+                            (std::max)(
+                                0,
+                                p_postingSizes[head])) *
+                        static_cast<size_t>(
+                            m_vectorInfoSize);
+                }
+                std::unique_ptr<int[]> pageCount;
+                std::unique_ptr<std::uint16_t[]>
+                    pageOffset;
+                std::vector<int> postingOrder;
+                SelectPostingOffset(
+                    postingBytes, pageCount, pageOffset,
+                    postingOrder);
+                double totalPages = 0.0;
+                for (size_t head = 0;
+                     head < p_postingSizes.size(); ++head) {
+                    if (postingBytes[head] == 0) continue;
+                    totalPages += static_cast<double>(
+                        (static_cast<size_t>(
+                             pageOffset[head]) +
+                         postingBytes[head] +
+                         PageSize - 1) /
+                        PageSize);
+                }
+                p_layout.m_layout.m_averagePages =
+                    totalPages /
+                    static_cast<double>(
+                        p_postingSizes.size());
+                return true;
+            }
+
+            bool BuildHybridPostingSidecar(
+                const std::string& p_outputFile,
+                const std::vector<std::vector<SizeType>>& p_nodeVectors,
+                Selection& p_originalSelections,
+                const std::vector<int>& p_originalPostingSizes,
+                std::shared_ptr<VectorSet> p_fullVectors,
+                SizeType p_fullCount,
+                SizeType p_globalHeadCount,
+                int p_postingSizeLimit,
+                const Options& p_opt)
+            {
+                if (!ValidHybridPostingFile(p_opt)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "HybridPostingFile must be a distinct basename and "
+                        "its data/stats/temp paths cannot alias index "
+                        "artifacts.\n");
+                    return false;
+                }
+                if (p_opt.m_batches != 1 ||
+                    p_fullVectors == nullptr ||
+                    m_staticHeadBundleLocalToGlobalHIDs == nullptr ||
+                    m_staticHeadBundleNodeHeadVectorIDs == nullptr ||
+                    m_staticHeadBundleIndexes.size() != p_nodeVectors.size() ||
+                    m_staticHeadBundleLocalToGlobalHIDs->size() !=
+                        p_nodeVectors.size() ||
+                    m_staticHeadBundleNodeHeadVectorIDs->size() !=
+                        p_nodeVectors.size()) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid static posting construction requires one-batch "
+                        "bundle-local node-aware placement.\n");
+                    return false;
+                }
+                if (!m_staticHasMetadata ||
+                    m_staticNumTagsPerVec <= 0 ||
+                    m_staticBuildTags.size() !=
+                        static_cast<size_t>(p_fullCount) *
+                            static_cast<size_t>(
+                                m_staticNumTagsPerVec)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid static posting construction requires a complete "
+                        "STM1 attribute table.\n");
+                    return false;
+                }
+
+                HybridDistanceConfig distance;
+                std::string error;
+                if (!HybridDistanceConfig::Parse(
+                        p_opt.m_hybridCategoricalCols,
+                        p_opt.m_hybridCategoricalWeights,
+                        p_opt.m_hybridNumericCols,
+                        p_opt.m_hybridNumericWeights,
+                        m_staticNumTagsPerVec,
+                        p_opt.m_hybridVectorWeight,
+                        distance,
+                        error)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Invalid hybrid posting distance: %s\n",
+                        error.c_str());
+                    return false;
+                }
+
+                std::vector<std::vector<std::uint32_t>>
+                    nodeHeadAttributes(p_nodeVectors.size());
+                std::vector<std::unique_ptr<
+                    HybridCandidateSelector<ValueType>>>
+                    selectors;
+                selectors.reserve(p_nodeVectors.size());
+                std::vector<uint8_t> seenGlobalHeads(
+                    static_cast<size_t>(p_globalHeadCount), 0);
+                std::vector<SizeType> globalHeadVectorIDs(
+                    static_cast<size_t>(p_globalHeadCount), -1);
+                for (size_t node = 0;
+                     node < p_nodeVectors.size(); ++node) {
+                    const auto& index =
+                        m_staticHeadBundleIndexes[node];
+                    const auto& localToGlobal =
+                        (*m_staticHeadBundleLocalToGlobalHIDs)[node];
+                    const auto& headVectorIDs =
+                        (*m_staticHeadBundleNodeHeadVectorIDs)[node];
+                    if (index == nullptr ||
+                        index->m_pQuantizer != nullptr ||
+                        index->GetNumSamples() !=
+                            static_cast<SizeType>(
+                                localToGlobal.size()) ||
+                        localToGlobal.size() !=
+                            headVectorIDs.size() ||
+                        !std::is_sorted(
+                            headVectorIDs.begin(),
+                            headVectorIDs.end())) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Hybrid posting node %zu has inconsistent bundle "
+                            "head metadata.\n",
+                            node);
+                        return false;
+                    }
+                    auto& attributes = nodeHeadAttributes[node];
+                    attributes.resize(
+                        headVectorIDs.size() *
+                        static_cast<size_t>(
+                            m_staticNumTagsPerVec));
+                    for (size_t local = 0;
+                         local < headVectorIDs.size(); ++local) {
+                        const SizeType vectorID =
+                            headVectorIDs[local];
+                        const SizeType globalHead =
+                            localToGlobal[local];
+                        if (vectorID < 0 ||
+                            vectorID >= p_fullCount ||
+                            globalHead < 0 ||
+                            globalHead >= p_globalHeadCount ||
+                            seenGlobalHeads[
+                                static_cast<size_t>(
+                                    globalHead)] != 0) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Hybrid posting node %zu contains an invalid "
+                                "or duplicate head mapping.\n",
+                                node);
+                            return false;
+                        }
+                        seenGlobalHeads[
+                            static_cast<size_t>(
+                                globalHead)] = 1;
+                        globalHeadVectorIDs[
+                            static_cast<size_t>(
+                                globalHead)] = vectorID;
+                        std::copy_n(
+                            m_staticBuildTags.data() +
+                                static_cast<size_t>(vectorID) *
+                                    static_cast<size_t>(
+                                        m_staticNumTagsPerVec),
+                            m_staticNumTagsPerVec,
+                            attributes.data() +
+                                local *
+                                    static_cast<size_t>(
+                                        m_staticNumTagsPerVec));
+                    }
+                    selectors.emplace_back(
+                        new HybridCandidateSelector<ValueType>(
+                            index.get(),
+                            attributes.data(),
+                            static_cast<SizeType>(
+                                headVectorIDs.size()),
+                            m_staticNumTagsPerVec,
+                            &distance));
+                    if (!selectors.back()->Build(error)) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Cannot build hybrid posting candidates for node "
+                            "%zu: %s\n",
+                            node, error.c_str());
+                        return false;
+                    }
+                }
+                if (std::find(
+                        seenGlobalHeads.begin(),
+                        seenGlobalHeads.end(),
+                        static_cast<uint8_t>(0)) !=
+                    seenGlobalHeads.end()) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid posting bundle mappings do not cover all "
+                        "global heads.\n");
+                    return false;
+                }
+                const std::uint64_t generation =
+                    m_hybridGenerationFingerprint;
+                if (generation == 0) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid posting build requires a non-zero "
+                        "build generation.\n");
+                    return false;
+                }
+
+                std::vector<int> categoricalColumns;
+                categoricalColumns.reserve(
+                    distance.m_categorical.size());
+                for (const auto& column :
+                     distance.m_categorical) {
+                    categoricalColumns.push_back(
+                        column.m_column);
+                }
+                HybridRouteLayout originalLayout;
+                if (!ComputeHybridRouteLayout(
+                        p_originalSelections,
+                        p_originalPostingSizes,
+                        globalHeadVectorIDs,
+                        categoricalColumns,
+                        p_fullCount,
+                        originalLayout)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Cannot compute original posting routing "
+                        "statistics.\n");
+                    return false;
+                }
+                std::vector<Edge>().swap(
+                    p_originalSelections.m_selections);
+
+                std::vector<size_t> nodeOffsets(
+                    p_nodeVectors.size() + 1, 0);
+                for (size_t node = 0;
+                     node < p_nodeVectors.size(); ++node) {
+                    if (p_nodeVectors[node].size() >
+                        (std::numeric_limits<size_t>::max)() -
+                            nodeOffsets[node]) {
+                        return false;
+                    }
+                    nodeOffsets[node + 1] =
+                        nodeOffsets[node] +
+                        p_nodeVectors[node].size();
+                }
+                const size_t assignmentCountTotal =
+                    nodeOffsets.back();
+                if (assignmentCountTotal !=
+                    static_cast<size_t>(p_fullCount)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid posting placement covers %zu/%d vectors.\n",
+                        assignmentCountTotal, p_fullCount);
+                    return false;
+                }
+                if (p_opt.m_replicaCount <= 0 ||
+                    assignmentCountTotal >
+                        (std::numeric_limits<size_t>::max)() /
+                            static_cast<size_t>(
+                                p_opt.m_replicaCount)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid posting selection size overflows.\n");
+                    return false;
+                }
+
+                Selection hybridSelections(
+                    assignmentCountTotal *
+                        static_cast<size_t>(
+                            p_opt.m_replicaCount),
+                    p_opt.m_tmpdir,
+                    "hybrid_selection_tmp");
+                std::vector<std::atomic_int> postingListSize(
+                    static_cast<size_t>(p_globalHeadCount));
+                for (auto& size : postingListSize) size = 0;
+                std::atomic_size_t sent(0);
+                std::atomic_bool failed(false);
+                std::atomic<std::uint64_t> checkedLeaves(0);
+                std::mutex errorLock;
+                std::string firstError;
+                std::vector<std::thread> threads;
+                threads.reserve(
+                    p_opt.m_iSSDNumberOfThreads);
+                for (int thread = 0;
+                     thread < p_opt.m_iSSDNumberOfThreads;
+                     ++thread) {
+                    threads.emplace_back([&]() {
+                        std::vector<HybridScoredCandidate>
+                            selected;
+                        while (!failed.load()) {
+                            const size_t assignment =
+                                sent.fetch_add(1);
+                            if (assignment >=
+                                assignmentCountTotal) {
+                                return;
+                            }
+                            const auto nodePosition =
+                                std::upper_bound(
+                                    nodeOffsets.begin() + 1,
+                                    nodeOffsets.end(),
+                                    assignment);
+                            const int node =
+                                static_cast<int>(
+                                    nodePosition -
+                                    nodeOffsets.begin() - 1);
+                            const SizeType vectorID =
+                                p_nodeVectors[
+                                    static_cast<size_t>(
+                                        node)]
+                                    [assignment -
+                                     nodeOffsets[
+                                         static_cast<size_t>(
+                                             node)]];
+                            const auto& headVectorIDs =
+                                (*m_staticHeadBundleNodeHeadVectorIDs)
+                                    [static_cast<size_t>(node)];
+                            const auto& localToGlobal =
+                                (*m_staticHeadBundleLocalToGlobalHIDs)
+                                    [static_cast<size_t>(node)];
+                            const auto head =
+                                std::lower_bound(
+                                    headVectorIDs.begin(),
+                                    headVectorIDs.end(),
+                                    vectorID);
+                            const SizeType self =
+                                head != headVectorIDs.end() &&
+                                    *head == vectorID
+                                ? static_cast<SizeType>(
+                                      head -
+                                      headVectorIDs.begin())
+                                : -1;
+                            const size_t selectionOffset =
+                                assignment *
+                                static_cast<size_t>(
+                                    p_opt.m_replicaCount);
+                            if (self >= 0) {
+                                if (!p_opt.m_excludehead) {
+                                    Edge& edge =
+                                        hybridSelections
+                                            .m_selections[
+                                                selectionOffset];
+                                    edge.node =
+                                        localToGlobal[
+                                            static_cast<size_t>(
+                                                self)];
+                                    edge.tonode = vectorID;
+                                    edge.distance = 0.0f;
+                                    ++postingListSize[
+                                        static_cast<size_t>(
+                                            edge.node)];
+                                }
+                                continue;
+                            }
+
+                            std::string selectError;
+                            std::uint64_t localChecked = 0;
+                            if (!selectors[
+                                     static_cast<size_t>(
+                                         node)]
+                                     ->Select(
+                                         static_cast<
+                                             const ValueType*>(
+                                             p_fullVectors
+                                                 ->GetVector(
+                                                     vectorID)),
+                                         m_staticBuildTags
+                                                 .data() +
+                                             static_cast<size_t>(
+                                                 vectorID) *
+                                                 static_cast<
+                                                     size_t>(
+                                                     m_staticNumTagsPerVec),
+                                         vectorID,
+                                         -1,
+                                         p_opt
+                                             .m_hybridCandidateCount,
+                                         p_opt.m_replicaCount,
+                                         selected,
+                                         &localChecked,
+                                         selectError)) {
+                                failed.store(true);
+                                std::lock_guard<std::mutex>
+                                    guard(errorLock);
+                                if (firstError.empty()) {
+                                    firstError =
+                                        selectError;
+                                }
+                                return;
+                            }
+                            checkedLeaves.fetch_add(
+                                localChecked);
+                            for (size_t result = 0;
+                                 result < selected.size();
+                                 ++result) {
+                                Edge& edge =
+                                    hybridSelections
+                                        .m_selections[
+                                            selectionOffset +
+                                            result];
+                                edge.node =
+                                    localToGlobal[
+                                        static_cast<size_t>(
+                                            selected[result]
+                                                .m_head)];
+                                edge.tonode = vectorID;
+                                edge.distance =
+                                    selected[result]
+                                        .m_distance;
+                                ++postingListSize[
+                                    static_cast<size_t>(
+                                        edge.node)];
+                            }
+                        }
+                    });
+                }
+                for (auto& thread : threads) thread.join();
+                if (failed.load()) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid posting candidate search failed: %s\n",
+                        firstError.c_str());
+                    return false;
+                }
+
+                VectorIndex::SortSelections(
+                    &hybridSelections.m_selections);
+                if (p_postingSizeLimit < INT_MAX) {
+                    for (SizeType head = 0;
+                         head < p_globalHeadCount; ++head) {
+                        if (postingListSize[
+                                static_cast<size_t>(head)] >
+                            p_postingSizeLimit) {
+                            postingListSize[
+                                static_cast<size_t>(head)] =
+                                p_postingSizeLimit;
+                        }
+                    }
+                }
+                std::vector<int> postingSizes(
+                    static_cast<size_t>(p_globalHeadCount));
+                std::uint64_t assignmentCount = 0;
+                for (SizeType head = 0;
+                     head < p_globalHeadCount; ++head) {
+                    postingSizes[
+                        static_cast<size_t>(head)] =
+                        postingListSize[
+                            static_cast<size_t>(head)]
+                            .load();
+                    assignmentCount += static_cast<
+                        std::uint64_t>(
+                        postingSizes[
+                            static_cast<size_t>(head)]);
+                }
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Hybrid static placement selected %llu assignments "
+                    "(checkedLeaves=%llu); writing %s.\n",
+                    static_cast<unsigned long long>(
+                        assignmentCount),
+                    static_cast<unsigned long long>(
+                        checkedLeaves.load()),
+                    p_outputFile.c_str());
+                if (!WriteStaticPostingSidecar(
+                        p_outputFile,
+                        postingSizes,
+                        hybridSelections,
+                        p_fullVectors)) {
+                    return false;
+                }
+
+                HybridRoutingStats routingStats;
+                routingStats.m_categoricalColumns =
+                    categoricalColumns;
+                routingStats.m_generationFingerprint =
+                    generation;
+                routingStats.m_original =
+                    std::move(originalLayout);
+                if (!ComputeHybridRouteLayout(
+                        hybridSelections,
+                        postingSizes,
+                        globalHeadVectorIDs,
+                        categoricalColumns,
+                        p_fullCount,
+                        routingStats.m_hybrid)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Cannot compute hybrid posting routing "
+                        "statistics.\n");
+                    return false;
+                }
+                const std::string statsPath =
+                    p_outputFile + ".stats";
+                if (!routingStats.Save(
+                        statsPath, error)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Cannot save hybrid routing statistics: "
+                        "%s\n",
+                        error.c_str());
+                    return false;
+                }
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Saved hybrid routing statistics to %s.\n",
+                    statsPath.c_str());
                 return true;
             }
 
@@ -397,10 +1255,7 @@ namespace SPTAG
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FreeWorkSpaceIds is not initalized or the workspace number is not enough! Please increase iothread number.\n");
                         wid = m_workspaceCount.fetch_add(1);
                     }
-                    for (auto & req : p_exWorkSpace->m_diskRequests)
-                    {
-                        req.m_status = wid;
-                    }
+                    p_exWorkSpace->SetAsyncContextID(wid);
                     p_exWorkSpace->m_callback = [m_freeWorkSpaceIds = m_freeWorkSpaceIds, wid] () {
                         if (m_freeWorkSpaceIds) m_freeWorkSpaceIds->push(wid);
                     };
@@ -408,6 +1263,29 @@ namespace SPTAG
             }
 
             virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& p_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) {
+                if (p_opt.m_enableHybridDistance &&
+                    !ValidHybridPostingFile(p_opt)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "HybridPostingFile must be a distinct basename and "
+                        "its data/stats/temp paths cannot alias index "
+                        "artifacts.\n");
+                    return false;
+                }
+                m_hybridGenerationFingerprint = 0;
+                if (p_opt.m_enableHybridDistance &&
+                    (!Helper::Convert::ConvertStringTo<
+                         std::uint64_t>(
+                         p_opt.m_hybridGenerationFingerprint
+                             .c_str(),
+                         m_hybridGenerationFingerprint) ||
+                     m_hybridGenerationFingerprint == 0)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid distance requires a non-zero persisted "
+                        "HybridGenerationFingerprint.\n");
+                    return false;
+                }
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 m_hybridGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_hybridPostingFile;
                 m_opt = &p_opt;
@@ -494,6 +1372,21 @@ namespace SPTAG
                     "Static adaptive posting reads: maximum physical posting size is %d pages.\n",
                     m_staticMaxListPageCount);
                 m_oneContext = (m_indexFiles.size() == 1);
+                const std::uint64_t primaryGeneration =
+                    m_staticLoadedGenerationFingerprint;
+                if (p_opt.m_enableHybridDistance &&
+                    primaryGeneration !=
+                        m_hybridGenerationFingerprint) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Primary static posting generation mismatch: "
+                        "config=%llu posting=%llu\n",
+                        static_cast<unsigned long long>(
+                            m_hybridGenerationFingerprint),
+                        static_cast<unsigned long long>(
+                            primaryGeneration));
+                    return false;
+                }
 
                 if (m_staticHasMetadata && p_opt.m_numTagsPerVec > 0 &&
                     p_opt.m_numTagsPerVec != m_staticNumTagsPerVec) {
@@ -535,6 +1428,9 @@ namespace SPTAG
                     const bool primaryHasUnfilterTail = m_staticHasUnfilterTail;
                     const bool primaryAttributeOrdered = m_staticAttributeOrdered;
                     const int primaryACLTagCols = m_staticACLTagCols;
+                    const std::uint64_t
+                        primaryLoadedGeneration =
+                            m_staticLoadedGenerationFingerprint;
 
                     m_staticHasMetadata = false;
                     m_staticNumTagsPerVec = 0;
@@ -604,6 +1500,22 @@ namespace SPTAG
                             "Hybrid posting sidecar must not contain unfilter tails.\n");
                         hybridValid = false;
                     }
+                    if (m_staticLoadedGenerationFingerprint !=
+                            m_hybridGenerationFingerprint ||
+                        m_staticLoadedGenerationFingerprint !=
+                            primaryLoadedGeneration) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Hybrid posting generation mismatch: "
+                            "config=%llu primary=%llu hybrid=%llu\n",
+                            static_cast<unsigned long long>(
+                                m_hybridGenerationFingerprint),
+                            static_cast<unsigned long long>(
+                                primaryLoadedGeneration),
+                            static_cast<unsigned long long>(
+                                m_staticLoadedGenerationFingerprint));
+                        hybridValid = false;
+                    }
                     for (size_t i = 0; i < m_hybridListInfos.size(); ++i) {
                         if (m_hybridListInfos[i].pureEleCount != m_hybridListInfos[i].listEleCount) {
                             SPTAGLIB_LOG(
@@ -625,6 +1537,8 @@ namespace SPTAG
                     m_staticTailPageBudget = primaryTailPageBudget;
                     m_staticMaxListPageCount = primaryMaxListPageCount;
                     m_staticAttributeOrdered = primaryAttributeOrdered;
+                    m_staticLoadedGenerationFingerprint =
+                        primaryLoadedGeneration;
                     m_iDataDimension = primaryDimension;
                     m_vectorInfoSize = primaryVectorInfoSize;
 
@@ -2153,6 +3067,22 @@ namespace SPTAG
                         }
                     }
                 }
+                if (p_opt.m_enableHybridDistance &&
+                    (!useBundleLocalNodeAwareBuild ||
+                     p_opt.m_ssdIndexFileNum != 1 ||
+                     p_opt.m_batches != 1 ||
+                     !m_staticHasMetadata ||
+                     m_staticPipePQ ||
+                     p_opt.m_enableDeltaEncoding ||
+                     p_opt.m_enablePostingListRearrange ||
+                     p_opt.m_enableDataCompression ||
+                     p_opt.m_hybridPostingFile.empty())) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid static postings require one raw STM1 file, "
+                        "one build batch, and bundle-local node-aware placement.\n");
+                    return false;
+                }
 
                 if (!useBundleLocalNodeAwareBuild) {
                     for (int i = 0; i < p_vectorTranslateMap.R(); i++) {
@@ -2815,6 +3745,32 @@ namespace SPTAG
                         orderedPageStartBases);
                 }
 
+                if (p_opt.m_enableHybridDistance) {
+                    std::vector<int> originalPostingSizes(
+                        postingListSize.size());
+                    for (size_t head = 0;
+                         head < postingListSize.size();
+                         ++head) {
+                        originalPostingSizes[head] =
+                            postingListSize[head].load();
+                    }
+                    const std::string hybridOutputFile =
+                        p_opt.m_indexDirectory + FolderSep +
+                        p_opt.m_hybridPostingFile;
+                    if (!BuildHybridPostingSidecar(
+                            hybridOutputFile,
+                            plannedNodeVectors,
+                            selections,
+                            originalPostingSizes,
+                            fullVectors,
+                            fullCount,
+                            p_headIndex->GetNumSamples(),
+                            postingSizeLimit,
+                            p_opt)) {
+                        return false;
+                    }
+                }
+
                 p_versionMap.Save(p_opt.m_indexDirectory + FolderSep + p_opt.m_deleteIDFile);
 
                 auto t5 = std::chrono::high_resolution_clock::now();
@@ -2826,6 +3782,22 @@ namespace SPTAG
             virtual bool CheckValidPosting(SizeType postingID)
             {
                 return m_listInfos[postingID].listEleCount != 0;
+            }
+
+            virtual bool CheckValidPosting(
+                SizeType postingID,
+                const ExtraWorkSpace* p_exWorkSpace) override
+            {
+                const auto& listInfos =
+                    UseHybridPostings(p_exWorkSpace)
+                    ? m_hybridListInfos
+                    : m_listInfos;
+                return postingID >= 0 &&
+                    static_cast<size_t>(postingID) <
+                        listInfos.size() &&
+                    listInfos[static_cast<size_t>(
+                        postingID)]
+                            .listEleCount != 0;
             }
 
             virtual ErrorCode CheckPosting(SizeType postingID, std::vector<std::uint8_t> *visited = nullptr,
@@ -3295,6 +4267,11 @@ namespace SPTAG
             int StaticScanLimit(const ExtraWorkSpace* p_exWorkSpace, const ListInfo* p_listInfo) const
             {
                 if (p_listInfo == nullptr) return 0;
+                if (p_exWorkSpace != nullptr &&
+                    p_exWorkSpace->m_scanFullPostingForFilter &&
+                    !UseHybridPostings(p_exWorkSpace)) {
+                    return p_listInfo->listEleCount;
+                }
                 if (!HasStaticMetadataFilter(p_exWorkSpace)) {
                     return p_listInfo->listEleCount;
                 }
@@ -3335,6 +4312,10 @@ namespace SPTAG
                                           size_t& p_attrIndex,
                                           std::int32_t& p_queryBit) const
             {
+                if (p_exWorkSpace != nullptr &&
+                    p_exWorkSpace->m_scanFullPostingForFilter) {
+                    return false;
+                }
                 if (UseHybridPostings(p_exWorkSpace)) return false;
                 if (m_opt == nullptr || !m_opt->m_enableOrderedPageStart ||
                     !HasStaticDNFFilter(p_exWorkSpace) || m_orderedPageStartAttrs.empty() ||
@@ -3590,6 +4571,18 @@ namespace SPTAG
             static constexpr std::uint32_t kStaticMetadataMagic = 0x314D5453U; // "STM1"
             static constexpr int kStaticMetadataVersion = 1;
             static constexpr int kStaticMetadataHeaderInts = 9;
+            static constexpr int kStaticMetadataGenerationVersion = 2;
+            static constexpr int kStaticMetadataGenerationHeaderInts = 11;
+
+            static bool ValidHybridPostingFile(
+                const Options& p_opt)
+            {
+                std::string error;
+                return ValidateHybridArtifactPaths(
+                    p_opt,
+                    p_opt.m_indexDirectory,
+                    error);
+            }
 
             std::string ResolveStaticPath(const std::string& p_path, const Options& p_opt) const
             {
@@ -4073,6 +5066,7 @@ namespace SPTAG
                 int m_listCount = 0;
                 int m_totalDocumentCount = 0;
                 int m_listPageOffset = 0;
+                m_staticLoadedGenerationFingerprint = 0;
                 if (!readInt(firstHeaderValue)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
@@ -4091,18 +5085,42 @@ namespace SPTAG
                     int tailPageBudget = 0;
                     if (!readInt(version) || !readInt(m_listCount) || !readInt(m_totalDocumentCount) ||
                         !readInt(m_iDataDimension) || !readInt(recordBytes) ||
-                        !readInt(numTagsPerVec) || !readInt(tailPageBudget) ||
-                        !readInt(m_listPageOffset)) {
+                        !readInt(numTagsPerVec) || !readInt(tailPageBudget)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                     "Failed to read static metadata header!\n");
+                                    "Failed to read static metadata header!\n");
                         throw std::runtime_error("Failed read static metadata header");
+                    }
+                    m_staticLoadedGenerationFingerprint = 0;
+                    if (version ==
+                        kStaticMetadataGenerationVersion) {
+                        int generationLo = 0;
+                        int generationHi = 0;
+                        if (!readInt(generationLo) ||
+                           !readInt(generationHi)) {
+                           throw std::runtime_error(
+                               "Failed read static metadata generation");
+                        }
+                        m_staticLoadedGenerationFingerprint =
+                           static_cast<std::uint64_t>(
+                               static_cast<std::uint32_t>(
+                                   generationLo)) |
+                           (static_cast<std::uint64_t>(
+                                static_cast<std::uint32_t>(
+                                    generationHi))
+                            << 32);
+                    }
+                    if (!readInt(m_listPageOffset)) {
+                        throw std::runtime_error(
+                           "Failed read static metadata page offset");
                     }
                     const int metadataBytes =
                         static_cast<int>(sizeof(int) +
                                          static_cast<size_t>(numTagsPerVec) * sizeof(uint32_t));
                     const int expectedRecordBytes =
                         m_iDataDimension * sizeof(ValueType) + metadataBytes;
-                    if (version != kStaticMetadataVersion || m_staticPipePQ || numTagsPerVec <= 0 ||
+                    if ((version != kStaticMetadataVersion &&
+                         version != kStaticMetadataGenerationVersion) ||
+                        m_staticPipePQ || numTagsPerVec <= 0 ||
                         recordBytes != expectedRecordBytes || tailPageBudget < -1) {
                         SPTAGLIB_LOG(
                             Helper::LogLevel::LL_Error,
@@ -4362,8 +5380,8 @@ namespace SPTAG
                 std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                 std::vector<int>& p_postingOrderInIndex)
             {
-                p_postPageNum.reset(new int[p_postingListBytes.size()]);
-                p_postPageOffset.reset(new std::uint16_t[p_postingListBytes.size()]);
+                p_postPageNum.reset(new int[p_postingListBytes.size()]());
+                p_postPageOffset.reset(new std::uint16_t[p_postingListBytes.size()]());
 
                 struct PageModWithID
                 {
@@ -4506,6 +5524,9 @@ namespace SPTAG
                 }
                 const bool staticTailHeader = p_pureCounts != nullptr;
                 const bool staticMetadataHeader = m_staticHasMetadata;
+                const bool staticMetadataGenerationHeader =
+                    staticMetadataHeader &&
+                    m_hybridGenerationFingerprint != 0;
                 if (staticTailHeader &&
                     (m_staticPipePQ || p_pureCounts->size() != p_postingListSizes.size() ||
                      p_tailPageBudget < -1)) {
@@ -4518,7 +5539,11 @@ namespace SPTAG
                 // static tail/metadata snapshots use versioned headers so record
                 // metadata is never inferred from the legacy vector-only layout.
                 std::uint64_t listOffset =
-                    staticMetadataHeader ? sizeof(int) * kStaticMetadataHeaderInts
+                    staticMetadataHeader
+                        ? sizeof(int) *
+                              (staticMetadataGenerationHeader
+                                   ? kStaticMetadataGenerationHeaderInts
+                                   : kStaticMetadataHeaderInts)
                                         : (staticTailHeader ? sizeof(int) * kStaticTailHeaderInts
                                                             : (m_staticPipePQ
                                                                    ? sizeof(int) * kStaticPipePQHeaderInts
@@ -4562,13 +5587,26 @@ namespace SPTAG
                 };
                 if (staticMetadataHeader) {
                     writeHeaderInt(static_cast<int>(kStaticMetadataMagic));
-                    writeHeaderInt(kStaticMetadataVersion);
+                    writeHeaderInt(
+                        staticMetadataGenerationHeader
+                            ? kStaticMetadataGenerationVersion
+                            : kStaticMetadataVersion);
                     writeHeaderInt(static_cast<int>(p_postingListSizes.size()));
                     writeHeaderInt(static_cast<int>(p_fullVectors->Count()));
                     writeHeaderInt(static_cast<int>(p_fullVectors->Dimension()));
                     writeHeaderInt(static_cast<int>(p_spacePerVector));
                     writeHeaderInt(m_staticNumTagsPerVec);
                     writeHeaderInt(p_tailPageBudget);
+                    if (staticMetadataGenerationHeader) {
+                        writeHeaderInt(
+                            static_cast<int>(
+                                static_cast<std::uint32_t>(
+                                    m_hybridGenerationFingerprint)));
+                        writeHeaderInt(
+                            static_cast<int>(
+                                static_cast<std::uint32_t>(
+                                    m_hybridGenerationFingerprint >> 32)));
+                    }
                     writeHeaderInt(static_cast<int>(listOffset / PageSize));
                 }
                 else if (staticTailHeader) {
@@ -5010,6 +6048,8 @@ namespace SPTAG
 
             std::string m_extraFullGraphFile;
             std::string m_hybridGraphFile;
+            std::uint64_t m_hybridGenerationFingerprint = 0;
+            std::uint64_t m_staticLoadedGenerationFingerprint = 0;
 
             std::vector<ListInfo> m_listInfos;
             bool m_oneContext;

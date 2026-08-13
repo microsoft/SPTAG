@@ -4,7 +4,9 @@
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/BKT/Index.h"
 #include "inc/Core/KDT/Index.h"
+#include "inc/Core/SPANN/HybridArtifactPaths.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
@@ -23,11 +25,13 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <thread>
 #include <ctime>
@@ -1516,6 +1520,622 @@ BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
     std::filesystem::remove_all(indexDirectory);
 }
 
+BOOST_AUTO_TEST_CASE(StaticHybridBuildRouteAndReload)
+{
+    constexpr SizeType baseCount = 256;
+    constexpr DimensionType dimension = 8;
+    constexpr int tagCount = 3;
+    const std::string indexDirectory =
+        "static_hybrid_route_index";
+    std::filesystem::remove_all(indexDirectory);
+    std::filesystem::create_directories(
+        indexDirectory);
+
+    ByteArray bytes = ByteArray::Alloc(
+        sizeof(float) *
+        static_cast<size_t>(baseCount) *
+        static_cast<size_t>(dimension));
+    auto* data = reinterpret_cast<float*>(
+        bytes.Data());
+    std::vector<std::uint32_t> tags(
+        static_cast<size_t>(baseCount) *
+        tagCount);
+    std::vector<std::vector<SizeType>>
+        nodeAssignments(2);
+    for (SizeType row = 0; row < baseCount;
+         ++row) {
+        const int node = row % 2;
+        nodeAssignments[
+            static_cast<size_t>(node)]
+            .push_back(row);
+        for (DimensionType dim = 0;
+             dim < dimension; ++dim) {
+            data[static_cast<size_t>(row) *
+                     dimension +
+                 dim] =
+                static_cast<float>(
+                    ((dim * 17) %
+                     baseCount)) /
+                static_cast<float>(baseCount);
+        }
+        tags[static_cast<size_t>(row) *
+                 tagCount] =
+            static_cast<std::uint32_t>(node);
+        tags[static_cast<size_t>(row) *
+                 tagCount +
+             1] =
+            static_cast<std::uint32_t>(
+                (row / 2) % 8);
+        tags[static_cast<size_t>(row) *
+                 tagCount +
+             2] =
+            static_cast<std::uint32_t>(row / 2);
+    }
+    auto vectors =
+        std::make_shared<BasicVectorSet>(
+            bytes, VectorValueType::Float,
+            dimension, baseCount);
+
+    const auto configure =
+        [&](const std::shared_ptr<VectorIndex>&
+                target) {
+            const auto set =
+                [&](const char* section,
+                    const char* key,
+                    const std::string& value) {
+                    BOOST_REQUIRE(
+                        target->SetParameter(
+                            key, value.c_str(),
+                            section) ==
+                        ErrorCode::Success);
+                };
+            set("Base", "DistCalcMethod", "L2");
+            set("Base", "IndexAlgoType", "BKT");
+            set("Base", "ValueType", "Float");
+            set("Base", "Dim",
+                std::to_string(dimension));
+            set("Base", "IndexDirectory",
+                indexDirectory);
+            set("SelectHead", "isExecute",
+                "true");
+            set("SelectHead", "SelectHeadType",
+                "Random");
+            set("SelectHead", "Ratio", "0.25");
+            set("SelectHead", "NumberOfThreads",
+                "1");
+            set("BuildHead", "isExecute", "true");
+            set("BuildHead", "NumberOfThreads",
+                "1");
+            set("BuildSSDIndex", "isExecute",
+                "true");
+            set("BuildSSDIndex",
+                "BuildSsdIndex", "true");
+            set("BuildSSDIndex", "Storage",
+                "STATIC");
+            set("BuildSSDIndex",
+                "InternalResultNum", "16");
+            set("BuildSSDIndex",
+                "SearchInternalResultNum", "8");
+            set("BuildSSDIndex",
+                "NumberOfThreads", "2");
+            set("BuildSSDIndex",
+                "PostingPageLimit", "2");
+            set("BuildSSDIndex",
+                "SearchPostingPageLimit", "2");
+            set("BuildSSDIndex",
+                "SSDIndexFileNum", "1");
+            set("BuildSSDIndex", "ReplicaCount",
+                "3");
+            set("BuildSSDIndex",
+                "TailReplicaCount", "2");
+            set("BuildSSDIndex",
+                "EnableUnfilterTail", "true");
+            set("BuildSSDIndex",
+                "UnfilterTailBufferLength",
+                "-1");
+            set("BuildSSDIndex", "CrossEdges",
+                "1");
+            set("BuildSSDIndex",
+                "CrossExtraEdges", "4");
+            set("BuildSSDIndex", "ExcludeHead",
+                "true");
+            set("BuildSSDIndex",
+                "NumTagsPerVec",
+                std::to_string(tagCount));
+            set("BuildSSDIndex",
+                "StaticACLTagCols", "2");
+            set("BuildSSDIndex",
+                "EnableHybridDistance", "true");
+            set("BuildSSDIndex",
+                "HybridVectorWeight", "1");
+            set("BuildSSDIndex",
+                "HybridCategoricalCols",
+                "0,1");
+            set("BuildSSDIndex",
+                "HybridCategoricalWeights",
+                "100,100");
+            set("BuildSSDIndex",
+                "HybridNumericCols", "2");
+            set("BuildSSDIndex",
+                "HybridNumericWeights",
+                "0.01");
+            set("BuildSSDIndex",
+                "HybridGraphDegree", "4");
+            set("BuildSSDIndex",
+                "HybridCandidateCount", "32");
+            set("BuildSSDIndex",
+                "HybridCostHeadOriginalUS",
+                "1000000");
+            set("BuildSSDIndex",
+                "HybridCostHeadHybridUS", "0");
+        };
+
+    auto index = VectorIndex::CreateInstance(
+        IndexAlgoType::SPANN,
+        VectorValueType::Float);
+    BOOST_REQUIRE(index != nullptr);
+    configure(index);
+    auto* spann =
+        dynamic_cast<SPANN::ISPANNIndex*>(
+            index.get());
+    BOOST_REQUIRE(spann != nullptr);
+    spann->SetVectorTags(
+        tags.data(), baseCount, tagCount);
+    spann->SetNodeVectorAssignments(
+        nodeAssignments);
+    spann->SetPrimaryNodeVectorAssignments(
+        nodeAssignments);
+    BOOST_REQUIRE(
+        index->BuildIndex(
+            vectors, nullptr, true, false,
+            false) == ErrorCode::Success);
+
+    const std::string hybridPostings =
+        indexDirectory +
+        "/SPTAGHybridList.bin";
+    const std::string hybridStats =
+        hybridPostings + ".stats";
+    const std::string hybridGraph =
+        indexDirectory +
+        "/HeadIndex/head_hybrid_edges.bin";
+    BOOST_REQUIRE(
+        std::filesystem::exists(
+            hybridPostings));
+    BOOST_REQUIRE(
+        std::filesystem::exists(hybridStats));
+    BOOST_REQUIRE(
+        std::filesystem::exists(hybridGraph));
+    auto* typed =
+        dynamic_cast<SPANN::Index<float>*>(
+            index.get());
+    BOOST_REQUIRE(typed != nullptr);
+    BOOST_REQUIRE(
+        typed->GetDiskIndex() != nullptr);
+    BOOST_CHECK(
+        typed->GetDiskIndex()
+            ->HasHybridPostings());
+    BOOST_CHECK_GT(
+        typed->GetHeadHybridEdgeTotal(),
+        0);
+    const int globalHeadCount =
+        static_cast<int>(
+            typed->TotalHeadSampleCount());
+    BOOST_REQUIRE_GT(globalHeadCount, 0);
+    for (int head = 0;
+         head < globalHeadCount; ++head) {
+        const SizeType vectorID =
+            typed->GetGlobalVID(head);
+        BOOST_REQUIRE_GE(vectorID, 0);
+        BOOST_REQUIRE_LT(vectorID, baseCount);
+        VectorIndex::ThreadLocalSearchContext
+            context;
+        context.m_active = true;
+        context.m_routeSelectivity =
+            1.0f /
+            static_cast<float>(baseCount);
+        context.m_filterSelectivity =
+            context.m_routeSelectivity;
+        context.m_searchHeadBundleNodes = {
+            static_cast<int>(
+                tags[static_cast<size_t>(
+                         vectorID) *
+                     tagCount])};
+        Cache::DNFClause clause;
+        clause.lits.push_back(
+            {0,
+             tags[static_cast<size_t>(
+                      vectorID) *
+                  tagCount],
+             Cache::DNF_EQ, 0});
+        clause.lits.push_back(
+            {1,
+             tags[static_cast<size_t>(
+                      vectorID) *
+                      tagCount +
+                  1],
+             Cache::DNF_EQ, 0});
+        const std::uint32_t numeric =
+            tags[static_cast<size_t>(
+                     vectorID) *
+                     tagCount +
+                 2];
+        clause.lits.push_back(
+            {2, numeric, Cache::DNF_GE, 1});
+        clause.lits.push_back(
+            {2, numeric, Cache::DNF_LE, 1});
+        context.m_dnf.clauses.push_back(
+            clause);
+        VectorIndex::
+            ThreadLocalSearchContextGuard
+                guard(std::move(context));
+        COMMON::QueryResultSet<float> query(
+            data +
+                static_cast<size_t>(vectorID) *
+                    dimension,
+            1);
+        BOOST_REQUIRE(
+            index->SearchIndex(query) ==
+            ErrorCode::Success);
+        BOOST_CHECK_EQUAL(
+            query.GetResult(0)->VID,
+            vectorID);
+    }
+
+    COMMON::QueryResultSet<float>
+        unfilteredHybridCosts(data, 10);
+    BOOST_REQUIRE(
+        index->SearchIndex(
+            unfilteredHybridCosts) ==
+        ErrorCode::Success);
+    typed->GetOptions()
+        ->m_hybridCostHeadOriginalUS = 0;
+    typed->GetOptions()
+        ->m_hybridCostHeadHybridUS = 1000000;
+    COMMON::QueryResultSet<float>
+        unfilteredOriginalCosts(data, 10);
+    BOOST_REQUIRE(
+        index->SearchIndex(
+            unfilteredOriginalCosts) ==
+        ErrorCode::Success);
+    for (int rank = 0; rank < 10; ++rank) {
+        BOOST_CHECK_EQUAL(
+            unfilteredHybridCosts
+                .GetResult(rank)
+                ->VID,
+            unfilteredOriginalCosts
+                .GetResult(rank)
+                ->VID);
+        BOOST_CHECK_CLOSE(
+            unfilteredHybridCosts
+                .GetResult(rank)
+                ->Dist,
+            unfilteredOriginalCosts
+                .GetResult(rank)
+                ->Dist,
+            0.0001);
+    }
+
+    const auto runFiltered =
+        [&](bool useHybrid) {
+            typed->GetOptions()
+                ->m_hybridCostHeadOriginalUS =
+                useHybrid ? 1000000.0f : 0.0f;
+            typed->GetOptions()
+                ->m_hybridCostHeadHybridUS =
+                useHybrid ? 0.0f : 1000000.0f;
+            VectorIndex::ThreadLocalSearchContext
+                context;
+            context.m_active = true;
+            context.m_routeSelectivity =
+                1.0f / 32.0f;
+            context.m_filterSelectivity =
+                context.m_routeSelectivity;
+            context.m_searchHeadBundleNodes = {0};
+            Cache::DNFClause clause;
+            clause.lits.push_back(
+                {0, 0, Cache::DNF_EQ, 0});
+            clause.lits.push_back(
+                {1, 0, Cache::DNF_EQ, 0});
+            clause.lits.push_back(
+                {2, 0, Cache::DNF_GE, 1});
+            clause.lits.push_back(
+                {2, 64, Cache::DNF_LE, 1});
+            context.m_dnf.clauses.push_back(
+                clause);
+            VectorIndex::
+                ThreadLocalSearchContextGuard
+                    guard(std::move(context));
+            COMMON::QueryResultSet<float>
+                query(data, 5);
+            BOOST_REQUIRE(
+                index->SearchIndex(query) ==
+                ErrorCode::Success);
+            BOOST_REQUIRE_GE(
+                query.GetResult(0)->VID, 0);
+            for (int rank = 0; rank < 5;
+                 ++rank) {
+                const SizeType vectorID =
+                    query.GetResult(rank)->VID;
+                if (vectorID < 0) break;
+                BOOST_CHECK_EQUAL(
+                    tags[static_cast<size_t>(
+                             vectorID) *
+                         tagCount],
+                    0);
+                BOOST_CHECK_EQUAL(
+                    tags[static_cast<size_t>(
+                             vectorID) *
+                             tagCount +
+                         1],
+                    0);
+                BOOST_CHECK_LE(
+                    tags[static_cast<size_t>(
+                             vectorID) *
+                             tagCount +
+                         2],
+                    64);
+            }
+        };
+    runFiltered(true);
+    runFiltered(false);
+
+    typed->GetOptions()
+        ->m_hybridCostHeadOriginalUS = 1000000;
+    typed->GetOptions()
+        ->m_hybridCostHeadHybridUS = 0;
+    {
+        VectorIndex::ThreadLocalSearchContext context;
+        context.m_active = true;
+        context.m_routeSelectivity = 1.0f / 32.0f;
+        context.m_filterSelectivity =
+            context.m_routeSelectivity;
+        context.m_searchHeadBundleNodes = {0, 1};
+        Cache::DNFClause clause;
+        clause.lits.push_back(
+            {0, 1, Cache::DNF_EQ, 0});
+        clause.lits.push_back(
+            {1, 0, Cache::DNF_EQ, 0});
+        context.m_dnf.clauses.push_back(clause);
+        VectorIndex::ThreadLocalSearchContextGuard
+            guard(std::move(context));
+        COMMON::QueryResultSet<float> query(
+            data + dimension, 5);
+        BOOST_REQUIRE(
+            index->SearchIndex(query) ==
+            ErrorCode::Success);
+        BOOST_REQUIRE_GE(
+            query.GetResult(0)->VID, 0);
+        for (int rank = 0; rank < 5; ++rank) {
+            const SizeType vectorID =
+                query.GetResult(rank)->VID;
+            if (vectorID < 0) break;
+            BOOST_CHECK_EQUAL(
+                tags[static_cast<size_t>(
+                         vectorID) *
+                     tagCount],
+                1);
+            BOOST_CHECK_EQUAL(
+                tags[static_cast<size_t>(
+                         vectorID) *
+                         tagCount +
+                     1],
+                0);
+        }
+    }
+
+    BOOST_REQUIRE(
+        index->SaveIndex(indexDirectory) ==
+        ErrorCode::Success);
+    index.reset();
+    std::shared_ptr<VectorIndex> reloaded;
+    BOOST_REQUIRE(
+        VectorIndex::LoadIndex(
+            indexDirectory, reloaded) ==
+        ErrorCode::Success);
+    auto* reloadedTyped =
+        dynamic_cast<SPANN::Index<float>*>(
+            reloaded.get());
+    BOOST_REQUIRE(reloadedTyped != nullptr);
+    BOOST_CHECK(
+        reloadedTyped->GetDiskIndex()
+            ->HasHybridPostings());
+    COMMON::QueryResultSet<float> reloadQuery(
+        data, 10);
+    BOOST_REQUIRE(
+        reloaded->SearchIndex(reloadQuery) ==
+        ErrorCode::Success);
+    for (int rank = 0; rank < 10; ++rank) {
+        BOOST_CHECK_EQUAL(
+            reloadQuery.GetResult(rank)->VID,
+            unfilteredOriginalCosts
+                .GetResult(rank)
+                ->VID);
+    }
+    reloadedTyped->GetOptions()
+        ->m_hybridCostHeadOriginalUS = 1000000;
+    reloadedTyped->GetOptions()
+        ->m_hybridCostHeadHybridUS = 0;
+    {
+        VectorIndex::ThreadLocalSearchContext context;
+        context.m_active = true;
+        context.m_routeSelectivity = 1.0f / 32.0f;
+        context.m_filterSelectivity =
+            context.m_routeSelectivity;
+        context.m_searchHeadBundleNodes = {0, 1};
+        Cache::DNFClause clause;
+        clause.lits.push_back(
+            {0, 1, Cache::DNF_EQ, 0});
+        context.m_dnf.clauses.push_back(clause);
+        VectorIndex::ThreadLocalSearchContextGuard
+            guard(std::move(context));
+        COMMON::QueryResultSet<float> query(
+            data + dimension, 5);
+        BOOST_REQUIRE(
+            reloaded->SearchIndex(query) ==
+            ErrorCode::Success);
+        BOOST_REQUIRE_GE(
+            query.GetResult(0)->VID, 0);
+        for (int rank = 0; rank < 5; ++rank) {
+            const SizeType vectorID =
+                query.GetResult(rank)->VID;
+            if (vectorID < 0) break;
+            BOOST_CHECK_EQUAL(
+                tags[static_cast<size_t>(
+                        vectorID) *
+                    tagCount],
+                1);
+        }
+    }
+
+    std::ifstream memoryConfigFile(
+        indexDirectory + "/indexloader.ini",
+        std::ios::binary);
+    BOOST_REQUIRE(memoryConfigFile.good());
+    const std::string memoryConfig(
+        (std::istreambuf_iterator<char>(
+            memoryConfigFile)),
+        std::istreambuf_iterator<char>());
+    std::vector<ByteArray> memoryBlobs;
+    std::shared_ptr<VectorIndex> memoryLoaded;
+    BOOST_CHECK(
+        VectorIndex::LoadIndex(
+            memoryConfig, memoryBlobs,
+            memoryLoaded) == ErrorCode::Fail);
+    reloaded.reset();
+
+    const std::string configPath =
+        indexDirectory + "/indexloader.ini";
+    const auto withConfigValue =
+        [](std::string config,
+           const std::string& key,
+           const std::string& value) {
+            const std::string marker =
+                key + "=";
+            const size_t markerPosition =
+                config.find(marker);
+            BOOST_REQUIRE_NE(
+                markerPosition,
+                std::string::npos);
+            const size_t begin =
+                markerPosition + marker.size();
+            size_t end =
+                config.find('\n', begin);
+            if (end == std::string::npos) {
+                end = config.size();
+            }
+            if (end > begin &&
+                config[end - 1] == '\r') {
+                --end;
+            }
+            config.replace(
+                begin, end - begin, value);
+            return config;
+        };
+    const auto writeConfig =
+        [&](const std::string& config) {
+            std::ofstream output(
+                configPath,
+                std::ios::binary |
+                    std::ios::trunc);
+            BOOST_REQUIRE(output.good());
+            output.write(
+                config.data(),
+                static_cast<std::streamsize>(
+                    config.size()));
+            BOOST_REQUIRE(output.good());
+        };
+    writeConfig(withConfigValue(
+        memoryConfig, "HybridPostingFile",
+        "DeletedIDs.bin"));
+    std::shared_ptr<VectorIndex> deleteAlias;
+    BOOST_CHECK(
+        VectorIndex::LoadIndex(
+            indexDirectory, deleteAlias) ==
+        ErrorCode::Fail);
+    writeConfig(withConfigValue(
+        memoryConfig, "SSDIndex",
+        "SPTAGHybridList.bin.stats"));
+    std::shared_ptr<VectorIndex> derivedAlias;
+    BOOST_CHECK(
+        VectorIndex::LoadIndex(
+            indexDirectory, derivedAlias) ==
+        ErrorCode::Fail);
+    writeConfig(memoryConfig);
+
+    const std::uint64_t staleGeneration =
+        0x123456789abcdef0ULL;
+    const auto patchGeneration =
+        [&](const std::string& path,
+            std::streamoff offset) {
+            std::fstream file(
+                path,
+                std::ios::in | std::ios::out |
+                    std::ios::binary);
+            BOOST_REQUIRE(file.good());
+            file.seekp(offset);
+            file.write(
+                reinterpret_cast<const char*>(
+                    &staleGeneration),
+                sizeof(staleGeneration));
+            BOOST_REQUIRE(file.good());
+        };
+    patchGeneration(
+        hybridStats,
+        offsetof(
+            SPANN::HybridRoutingStatsHeader,
+            m_generationFingerprint));
+    patchGeneration(
+        hybridGraph,
+        offsetof(
+            SPANN::HybridHeadGraphHeader,
+            m_generationFingerprint));
+    patchGeneration(hybridPostings, 32);
+    {
+        std::ifstream input(
+            configPath, std::ios::binary);
+        BOOST_REQUIRE(input.good());
+        std::string config(
+            (std::istreambuf_iterator<char>(
+                input)),
+            std::istreambuf_iterator<char>());
+        const std::string key =
+            "HybridGenerationFingerprint=";
+        const size_t valueStart =
+            config.find(key);
+        BOOST_REQUIRE_NE(
+            valueStart, std::string::npos);
+        const size_t begin =
+            valueStart + key.size();
+        size_t end = config.find('\n', begin);
+        if (end == std::string::npos) {
+            end = config.size();
+        }
+        if (end > begin &&
+            config[end - 1] == '\r') {
+            --end;
+        }
+        config.replace(
+            begin, end - begin,
+            std::to_string(staleGeneration));
+        std::ofstream output(
+            configPath,
+            std::ios::binary |
+                std::ios::trunc);
+        BOOST_REQUIRE(output.good());
+        output.write(
+            config.data(),
+            static_cast<std::streamsize>(
+                config.size()));
+        BOOST_REQUIRE(output.good());
+    }
+    std::shared_ptr<VectorIndex> rejected;
+    BOOST_CHECK(
+        VectorIndex::LoadIndex(
+            indexDirectory, rejected) ==
+        ErrorCode::Fail);
+    std::filesystem::remove_all(indexDirectory);
+}
+
 BOOST_AUTO_TEST_CASE(StaticDistanceOrderSerialization)
 {
     constexpr SizeType vectorCount = 4;
@@ -1598,19 +2218,319 @@ BOOST_AUTO_TEST_CASE(StaticHybridWorkspaceResetAndOptionDefaults)
     BOOST_CHECK_EQUAL(opt.m_hybridCostResultSafety, 2.0f);
     BOOST_CHECK_EQUAL(opt.m_hybridCostIOFixedUS, 8.0f);
     BOOST_CHECK_EQUAL(opt.m_hybridCostPageUS, 4.0f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostBytesPerUS, 4000.0f);
     BOOST_CHECK_EQUAL(opt.m_hybridCostVectorUS, 0.04f);
+    BOOST_CHECK_EQUAL(opt.m_hybridCostMaxPostings, 2048);
     BOOST_CHECK_EQUAL(opt.m_hybridCostHeadOriginalUS, 0.0f);
     BOOST_CHECK_EQUAL(opt.m_hybridCostHeadHybridUS, 0.0f);
     BOOST_CHECK(!opt.m_logHybridRoute);
 
     SPANN::ExtraWorkSpace workspace;
     workspace.m_useHybridPostings = true;
+    workspace.m_scanFullPostingForFilter = true;
     workspace.Initialize(8, 4, 2, PageSize, false, false);
     BOOST_CHECK(!workspace.m_useHybridPostings);
+    BOOST_CHECK(!workspace.m_scanFullPostingForFilter);
 
     workspace.m_useHybridPostings = true;
+    workspace.m_scanFullPostingForFilter = true;
     workspace.Clear(2, PageSize, false, false);
     BOOST_CHECK(!workspace.m_useHybridPostings);
+    BOOST_CHECK(!workspace.m_scanFullPostingForFilter);
+
+    workspace.SetAsyncContextID(17);
+    workspace.Clear(4, PageSize * 2, false, false);
+    BOOST_REQUIRE_EQUAL(workspace.m_diskRequests.size(), 4);
+    for (const auto& request : workspace.m_diskRequests) {
+        BOOST_CHECK_EQUAL(request.m_status, 17);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(StaticHybridArtifactPathAliases)
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        ("sptag_hybrid_alias_" +
+         std::to_string(
+             std::chrono::steady_clock::now()
+                 .time_since_epoch().count()));
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(
+        root / "HeadIndex");
+
+    SPANN::Options options;
+    options.m_indexDirectory = root.string();
+    options.m_headIndexFolder = "HeadIndex";
+    std::string error;
+    BOOST_CHECK(
+        SPANN::ValidateHybridArtifactPaths(
+            options, root.string(), error));
+
+    SPANN::Options primaryAlias = options;
+    primaryAlias.m_ssdIndex =
+        "./" + options.m_hybridPostingFile;
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            primaryAlias, root.string(), error));
+
+    SPANN::Options shardAlias = options;
+    shardAlias.m_hybridPostingFile =
+        options.m_ssdIndex + "_1";
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            shardAlias, root.string(), error));
+
+    SPANN::Options graphAlias = options;
+    graphAlias.m_headIndexFolder = ".";
+    graphAlias.m_hybridHeadGraphFile =
+        graphAlias.m_hybridPostingFile;
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            graphAlias, root.string(), error));
+
+    SPANN::Options manifestAlias = options;
+    manifestAlias.m_hybridHeadGraphFile =
+        "head_bundle_manifest.bin";
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            manifestAlias, root.string(), error));
+
+    SPANN::Options manifestTempAlias = options;
+    manifestTempAlias.m_hybridHeadGraphFile =
+        "head_bundle_manifest.bin.tmp";
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            manifestTempAlias, root.string(), error));
+
+    SPANN::Options configTempAlias = options;
+    configTempAlias.m_hybridPostingFile =
+        "indexloader.ini.tmp";
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            configTempAlias, root.string(), error));
+
+#ifdef _WIN32
+    SPANN::Options caseAlias = options;
+    caseAlias.m_hybridPostingFile =
+        "sptagfulllist.bin";
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            caseAlias, root.string(), error));
+
+    SPANN::Options caseShardAlias = options;
+    caseShardAlias.m_hybridPostingFile =
+        "sptagfulllist.bin_1";
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            caseShardAlias, root.string(), error));
+#endif
+
+    const std::filesystem::path primary =
+        root / options.m_ssdIndex;
+    {
+        std::ofstream output(
+            primary,
+            std::ios::binary |
+                std::ios::trunc);
+        BOOST_REQUIRE(output.good());
+        output.put('\0');
+    }
+    const std::filesystem::path hybrid =
+        root / options.m_hybridPostingFile;
+    std::error_code linkError;
+    std::filesystem::create_hard_link(
+        primary, hybrid, linkError);
+    BOOST_REQUIRE(!linkError);
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            options, root.string(), error));
+    std::filesystem::remove(hybrid);
+
+#ifndef _WIN32
+    std::filesystem::create_symlink(
+        options.m_ssdIndex, hybrid, linkError);
+    BOOST_REQUIRE(!linkError);
+    BOOST_CHECK(
+        !SPANN::ValidateHybridArtifactPaths(
+            options, root.string(), error));
+#endif
+    std::filesystem::remove_all(root);
+}
+
+BOOST_AUTO_TEST_CASE(BKTHybridCollapsedSiblingAdmissionAndEdges)
+{
+    constexpr SizeType duplicateCount = 1024;
+    constexpr SizeType vectorCount =
+        duplicateCount + 1;
+    constexpr DimensionType dimension = 2;
+    constexpr SizeType target = duplicateCount;
+    std::vector<float> vectors(
+        static_cast<size_t>(vectorCount) *
+            dimension,
+        0.0f);
+    vectors[static_cast<size_t>(target) *
+                dimension] = 100.0f;
+    vectors[static_cast<size_t>(target) *
+                dimension +
+            1] = 100.0f;
+
+    BKT::Index<float> index;
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "DistCalcMethod", "L2") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "BKTNumber", "1") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "BKTKmeansK", "4") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "BKTLeafSize", "2") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "NeighborhoodSize", "8") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "GraphNeighborhoodScale", "1") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "TPTNumber", "1") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "TPTLeafSize", "64") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "CEF", "64") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "MaxCheckForRefineGraph", "64") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "RefineIterations", "1") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "NumberOfInitialDynamicPivots",
+            "1") == ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "NumberOfOtherDynamicPivots",
+            "1") == ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.SetParameter(
+            "NumberOfThreads", "1") ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(
+        index.BuildIndex(
+            vectors.data(), vectorCount,
+            dimension, false, false) ==
+        ErrorCode::Success);
+
+    auto& graph = index.GetMutableGraph();
+    const DimensionType localEdges =
+        index.GetNeighborhoodSize();
+    SizeType representative = -1;
+    for (SizeType row = 0;
+         row < duplicateCount; ++row) {
+        if (graph[row][localEdges - 1] < -1) {
+            representative = row;
+            break;
+        }
+    }
+    BOOST_REQUIRE_GE(representative, 0);
+    SizeType sibling =
+        representative == 0 ? 1 : 0;
+    std::vector<SizeType> hybridEdges(
+        static_cast<size_t>(vectorCount), -1);
+
+    std::vector<SizeType> localToGlobal(
+        static_cast<size_t>(vectorCount));
+    std::iota(
+        localToGlobal.begin(),
+        localToGlobal.end(), 0);
+    BKT::Index<float>::
+        RuntimeEdgeSearchContext context;
+    context.m_nodes.push_back(
+        {&index, &localToGlobal, &hybridEdges});
+    context.m_entryNode = 0;
+    context.m_locatorLocalBits = 11;
+    context.m_locatorLocalMask = 0x7ff;
+    context.m_hybridEdgeCount = 1;
+    context.m_crossEdgeCount = 0;
+    context.m_useHybridEdges = true;
+    context.m_allowedNodes = {1};
+
+    BKT::Index<float>::
+        CrossGraphSearchContext legacyContext = context;
+    COMMON::QueryResultSet<float>
+        legacySearch(vectors.data(), 1);
+    BOOST_REQUIRE(
+        index.SearchIndexWithCrossEdges(
+            legacySearch, legacyContext,
+            128) == ErrorCode::Success);
+
+    context.m_queryDistance =
+        [representative, sibling](
+            int, SizeType local, float) {
+            if (local == sibling) return 1.0f;
+            if (local == representative) {
+                return 10.0f;
+            }
+            return 20.0f;
+        };
+    COMMON::QueryResultSet<float>
+        admission(vectors.data(), 1);
+    BOOST_REQUIRE(
+        admission.AddPoint(1000, 5.0f));
+    BOOST_REQUIRE(
+        index.SearchIndexWithRuntimeEdges(
+            admission, context, 128) ==
+        ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        admission.GetResult(0)->VID,
+        sibling);
+
+    context.m_queryDistance =
+        [](int, SizeType local, float) {
+            return local == target
+                ? 0.0f
+                : 10.0f;
+        };
+    COMMON::QueryResultSet<float>
+        localBridge(vectors.data(), 1);
+    BOOST_REQUIRE(
+        index.SearchIndexWithRuntimeEdges(
+            localBridge, context, 128) ==
+        ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        localBridge.GetResult(0)->VID,
+        target);
+
+    hybridEdges[static_cast<size_t>(sibling)] =
+        target;
+    COMMON::QueryResultSet<float>
+        siblingEdge(vectors.data(), 1);
+    BKT::Index<float>::
+        RuntimeEdgeSearchStats stats;
+    BOOST_REQUIRE(
+        index.SearchIndexWithRuntimeEdges(
+            siblingEdge, context, 128,
+            &stats) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        siblingEdge.GetResult(0)->VID,
+        target);
+    BOOST_CHECK_GT(stats.m_hybridEdges, 0);
 }
 
 BOOST_AUTO_TEST_CASE(TaggedPureTailUpdate)

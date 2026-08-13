@@ -215,13 +215,29 @@ public:
 
         void ClearHeadNodeMeta();
 
-        void InitializeHeadNodeMeta(SizeType p_numSamples, int p_numQuantCols = 0);
+        void InitializeHeadNodeMeta(
+            SizeType p_numSamples,
+            int p_numQuantCols = 0);
+
+        void InitializeHeadNodeMeta(
+            SizeType p_numSamples,
+            int p_numQuantCols,
+            const Cache::HierWidthTable& p_hierWidths);
+
+        static bool TryComputeHeadNodeMetaStride(int p_numQuantCols, size_t& p_stride);
+
+        static bool TryComputeHeadNodeMetaStride(
+            int p_numQuantCols,
+            const Cache::HierWidthTable& p_hierWidths,
+            size_t& p_stride);
 
         bool HasHeadNodeMeta() const { return m_headNodeMetaStride > 0 && !m_headNodeMeta.empty(); }
 
         SizeType GetHeadNodeMetaSampleCount() const;
 
         size_t GetHeadNodeMetaStride() const { return m_headNodeMetaStride; }
+
+        Cache::HierWidthTable GetHeadNodeHierWidths() const;
 
         const std::vector<std::uint8_t>& GetHeadNodeMetaBlob() const { return m_headNodeMeta; }
 
@@ -272,6 +288,12 @@ public:
         // Replaces the previous uint32_t bitmask (which silently dropped nodes >= 32).
         bool HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, const std::vector<uint8_t>& p_routedNodeMask) const;
 
+        bool HeadNodeMatchesQuery(
+            SizeType p_sampleId,
+            const Cache::HierarchicalPostingMask& p_queryMask,
+            const std::vector<uint8_t>& p_routedNodeMask,
+            const Cache::HierWidthTable& p_hierWidths) const;
+
         // Lightweight tag-content gate for heads using the head's OWN-tag mask
         // (post V3 dual-mask: HierMask reflects the head VID's own tags only).
         // Use this only when you want "head centroid's own tag must match query"
@@ -281,12 +303,22 @@ public:
         // member), use HeadPostingHierMaskMayIntersect instead.
         bool HeadHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const;
 
+        bool HeadHierMaskMayIntersect(
+            SizeType p_sampleId,
+            const Cache::HierarchicalPostingMask& p_queryMask,
+            const Cache::HierWidthTable& p_hierWidths) const;
+
         // Posting-member-union mask intersect. Safe (no false negatives) head
         // pre-filter for routed graph search: kept iff the head's posting
         // MAY contain a query-matching vector. If posting mask is absent
         // (e.g. legacy/V2 indexes that only stored own-tag), fails open and
         // returns true so the caller doesn't drop the head spuriously.
         bool HeadPostingHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const;
+
+        bool HeadPostingHierMaskMayIntersect(
+            SizeType p_sampleId,
+            const Cache::HierarchicalPostingMask& p_queryMask,
+            const Cache::HierWidthTable& p_hierWidths) const;
 
         struct PostingScanStats {
             uint64_t m_readPostings = 0;
@@ -317,6 +349,9 @@ public:
             std::function<bool(int)> m_postingFilter;
             std::vector<uint32_t> m_queryTags;
             float m_filterSelectivity = 1.0f;
+            // Unmodified predicate selectivity for cost-based route selection.
+            // m_filterSelectivity may include adaptive-nprobe safety scaling.
+            float m_routeSelectivity = 1.0f;
             std::vector<SizeType> m_directPostingIDs;
             // Optional local head IDs whose centroid vectors must be merged with
             // a direct posting scan. Kept separate so generic sparse-tag callers
@@ -339,6 +374,7 @@ public:
                 m_postingFilter = nullptr;
                 m_queryTags.clear();
                 m_filterSelectivity = 1.0f;
+                m_routeSelectivity = 1.0f;
                 m_directPostingIDs.clear();
                 m_directHeadLocalIDs.clear();
                 m_searchHeadBundleNodes.clear();
