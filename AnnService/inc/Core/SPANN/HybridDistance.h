@@ -532,90 +532,101 @@ struct HybridPostingLayoutStats
     double m_averageBytes = 0.0;
     double m_uniqueRatio = 1.0;
     double m_enrichment = 1.0;
-    double m_headFixedCostUS = 0.0;
-    double m_headPerPostingCostUS = 0.0;
 };
 
-struct HybridRouteCostConfig
+constexpr size_t kMaxHybridRouteSamples = 256;
+
+struct HybridRouteDeformationEstimate
 {
-    double m_resultSafety = 2.0;
-    double m_ioFixedUS = 8.0;
-    double m_pageUS = 4.0;
-    double m_vectorUS = 0.04;
-    double m_bytesPerUS = 4000.0;
+    size_t m_samples = 0;
+    double m_attributeRMS = 0.0;
+    double m_nearVectorSpan = 0.0;
+    double m_deformation = 0.0;
+    bool m_valid = false;
 };
 
-struct HybridRouteEstimate
+inline HybridRouteDeformationEstimate
+EstimateHybridRouteDeformation(
+    float* p_vectorComponents,
+    const double* p_attributeDistances,
+    size_t p_sampleCount)
 {
-    int m_postings = 0;
-    double m_expectedMatchesPerPosting = 0.0;
-    double m_costUS = (std::numeric_limits<double>::infinity)();
-};
-
-inline HybridRouteEstimate EstimateHybridRouteCost(
-    int p_resultCount,
-    int p_basePostings,
-    int p_maxPostings,
-    double p_selectivity,
-    const HybridPostingLayoutStats& p_layout,
-    const HybridRouteCostConfig& p_cost)
-{
-    HybridRouteEstimate estimate;
-    const double selectivity = (std::max)(
-        1e-9, (std::min)(1.0, p_selectivity));
-    const double enrichment = (std::max)(1e-9, p_layout.m_enrichment);
-    const double records = (std::max)(1e-9, p_layout.m_averageRecords);
-    const double uniqueRatio = (std::max)(
-        1e-9, (std::min)(1.0, p_layout.m_uniqueRatio));
-    estimate.m_expectedMatchesPerPosting =
-        (std::min)(records, selectivity * enrichment * records * uniqueRatio);
-
-    const double safety = (std::max)(1.0, p_cost.m_resultSafety);
-    const long double requiredPostings = std::ceil(
-        static_cast<long double>(safety) *
-        static_cast<long double>(
-            (std::max)(1, p_resultCount)) /
-        static_cast<long double>(
-            estimate.m_expectedMatchesPerPosting));
-    std::uint64_t coveragePostings =
-        requiredPostings >=
-                static_cast<long double>(
-                    (std::numeric_limits<
-                        std::uint64_t>::max)())
-            ? (std::numeric_limits<
-                  std::uint64_t>::max)()
-            : static_cast<std::uint64_t>(
-                  requiredPostings);
-    std::uint64_t target = (std::max)(
-        static_cast<std::uint64_t>(
-            (std::max)(1, p_basePostings)),
-        coveragePostings);
-    if (p_maxPostings > 0) {
-        target = (std::min)(
-            target,
-            static_cast<std::uint64_t>(
-                p_maxPostings));
+    HybridRouteDeformationEstimate estimate;
+    if (p_vectorComponents == nullptr ||
+        p_attributeDistances == nullptr ||
+        p_sampleCount < 2 ||
+        p_sampleCount > kMaxHybridRouteSamples) {
+        return estimate;
     }
-    target = (std::min)(
-        target,
-        static_cast<std::uint64_t>(
-            (std::numeric_limits<int>::max)()));
-    estimate.m_postings =
-        static_cast<int>(target);
 
-    const double perPosting =
-        (std::max)(0.0, p_cost.m_ioFixedUS) +
-        (std::max)(0.0, p_layout.m_averagePages) *
-            (std::max)(0.0, p_cost.m_pageUS) +
-        (std::max)(0.0, p_layout.m_averageBytes) /
-            (std::max)(1e-9, p_cost.m_bytesPerUS) +
-        records * (std::max)(0.0, p_cost.m_vectorUS);
-    estimate.m_costUS =
-        (std::max)(0.0, p_layout.m_headFixedCostUS) +
-        static_cast<double>(estimate.m_postings) * perPosting;
-    estimate.m_costUS += static_cast<double>(estimate.m_postings) *
-        (std::max)(0.0, p_layout.m_headPerPostingCostUS);
+    long double attributeSquaredSum = 0.0L;
+    for (size_t sample = 0; sample < p_sampleCount; ++sample) {
+        if (!std::isfinite(p_vectorComponents[sample]) ||
+            !std::isfinite(p_attributeDistances[sample]) ||
+            p_attributeDistances[sample] < 0.0) {
+            return estimate;
+        }
+        const long double attribute =
+            static_cast<long double>(
+                p_attributeDistances[sample]);
+        attributeSquaredSum += attribute * attribute;
+    }
+
+    std::sort(
+        p_vectorComponents,
+        p_vectorComponents + p_sampleCount);
+    const size_t nearCount = (std::max)(
+        static_cast<size_t>(2),
+        (p_sampleCount + 1) / 2);
+    const size_t lowIndex =
+        (nearCount - 1) / 10;
+    const size_t highIndex = (std::max)(
+        lowIndex + 1,
+        (nearCount - 1) * 9 / 10);
+    const double low =
+        static_cast<double>(p_vectorComponents[lowIndex]);
+    const double high =
+        static_cast<double>(p_vectorComponents[highIndex]);
+    const double scale = (std::max)(
+        1.0, (std::max)(std::fabs(low), std::fabs(high)));
+    const double span = (std::max)(
+        high - low, scale * 1e-9);
+    const double attributeRMS = std::sqrt(
+        static_cast<double>(
+            attributeSquaredSum /
+            static_cast<long double>(p_sampleCount)));
+    const double deformation = attributeRMS / span;
+    if (!std::isfinite(attributeRMS) ||
+        !std::isfinite(deformation)) {
+        return estimate;
+    }
+
+    estimate.m_samples = p_sampleCount;
+    estimate.m_attributeRMS = attributeRMS;
+    estimate.m_nearVectorSpan = span;
+    estimate.m_deformation = deformation;
+    estimate.m_valid = true;
     return estimate;
+}
+
+inline bool ShouldUseHybridRoute(
+    double p_selectivity,
+    const HybridRouteDeformationEstimate& p_estimate,
+    double p_selectivityThreshold,
+    double p_deformationThreshold)
+{
+    return p_estimate.m_valid &&
+        std::isfinite(p_selectivity) &&
+        std::isfinite(p_selectivityThreshold) &&
+        std::isfinite(p_deformationThreshold) &&
+        p_selectivity >= 0.0 &&
+        p_selectivity <= 1.0 &&
+        p_selectivityThreshold >= 0.0 &&
+        p_selectivityThreshold <= 1.0 &&
+        p_deformationThreshold >= 0.0 &&
+        p_selectivity <= p_selectivityThreshold &&
+        p_estimate.m_deformation >=
+            p_deformationThreshold;
 }
 
 } // namespace SPANN

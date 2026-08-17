@@ -1679,10 +1679,13 @@ BOOST_AUTO_TEST_CASE(StaticHybridBuildRouteAndReload)
             set("BuildSSDIndex",
                 "HybridCandidateCount", "32");
             set("BuildSSDIndex",
-                "HybridCostHeadOriginalUS",
-                "1000000");
+                "HybridRouteSampleCount", "16");
             set("BuildSSDIndex",
-                "HybridCostHeadHybridUS", "0");
+                "HybridRouteSelectivityThreshold",
+                "1");
+            set("BuildSSDIndex",
+                "HybridRouteDeformationThreshold",
+                "0");
         };
 
     auto index = VectorIndex::CreateInstance(
@@ -2036,9 +2039,9 @@ BOOST_AUTO_TEST_CASE(StaticHybridBuildRouteAndReload)
             unfilteredHybridCosts) ==
         ErrorCode::Success);
     typed->GetOptions()
-        ->m_hybridCostHeadOriginalUS = 0;
+        ->m_hybridRouteSelectivityThreshold = 1;
     typed->GetOptions()
-        ->m_hybridCostHeadHybridUS = 1000000;
+        ->m_hybridRouteDeformationThreshold = 0;
     COMMON::QueryResultSet<float>
         unfilteredOriginalCosts(data, 10);
     BOOST_REQUIRE(
@@ -2066,11 +2069,11 @@ BOOST_AUTO_TEST_CASE(StaticHybridBuildRouteAndReload)
     const auto runFiltered =
         [&](bool useHybrid) {
             typed->GetOptions()
-                ->m_hybridCostHeadOriginalUS =
-                useHybrid ? 1000000.0f : 0.0f;
+                ->m_hybridRouteSelectivityThreshold =
+                useHybrid ? 1.0f : 0.0f;
             typed->GetOptions()
-                ->m_hybridCostHeadHybridUS =
-                useHybrid ? 0.0f : 1000000.0f;
+                ->m_hybridRouteDeformationThreshold =
+                0.0f;
             VectorIndex::ThreadLocalSearchContext
                 context;
             context.m_active = true;
@@ -2128,9 +2131,9 @@ BOOST_AUTO_TEST_CASE(StaticHybridBuildRouteAndReload)
     runFiltered(false);
 
     typed->GetOptions()
-        ->m_hybridCostHeadOriginalUS = 1000000;
+        ->m_hybridRouteSelectivityThreshold = 1;
     typed->GetOptions()
-        ->m_hybridCostHeadHybridUS = 0;
+        ->m_hybridRouteDeformationThreshold = 0;
     {
         VectorIndex::ThreadLocalSearchContext context;
         context.m_active = true;
@@ -2200,9 +2203,9 @@ BOOST_AUTO_TEST_CASE(StaticHybridBuildRouteAndReload)
                 ->VID);
     }
     reloadedTyped->GetOptions()
-        ->m_hybridCostHeadOriginalUS = 1000000;
+        ->m_hybridRouteSelectivityThreshold = 1;
     reloadedTyped->GetOptions()
-        ->m_hybridCostHeadHybridUS = 0;
+        ->m_hybridRouteDeformationThreshold = 0;
     {
         VectorIndex::ThreadLocalSearchContext context;
         context.m_active = true;
@@ -2747,14 +2750,13 @@ BOOST_AUTO_TEST_CASE(StaticHybridWorkspaceResetAndOptionDefaults)
     BOOST_CHECK(opt.m_hybridNumericWeights.empty());
     BOOST_CHECK_EQUAL(opt.m_hybridGraphDegree, 16);
     BOOST_CHECK_EQUAL(opt.m_hybridCandidateCount, 128);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostResultSafety, 2.0f);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostIOFixedUS, 8.0f);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostPageUS, 4.0f);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostBytesPerUS, 4000.0f);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostVectorUS, 0.04f);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostMaxPostings, 2048);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostHeadOriginalUS, 0.0f);
-    BOOST_CHECK_EQUAL(opt.m_hybridCostHeadHybridUS, 0.0f);
+    BOOST_CHECK_EQUAL(opt.m_hybridRouteSampleCount, 64);
+    BOOST_CHECK_EQUAL(
+        opt.m_hybridRouteSelectivityThreshold,
+        0.02f);
+    BOOST_CHECK_EQUAL(
+        opt.m_hybridRouteDeformationThreshold,
+        1.0f);
     BOOST_CHECK(!opt.m_logHybridRoute);
 
     SPANN::ExtraWorkSpace workspace;

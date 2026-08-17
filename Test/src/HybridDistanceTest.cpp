@@ -121,34 +121,48 @@ BOOST_AUTO_TEST_CASE(RejectsOutOfRangeDNFColumns)
     BOOST_CHECK(!dnf.Matches(tags, 1));
 }
 
-BOOST_AUTO_TEST_CASE(EstimatesCostFromYieldAndPhysicalLayout)
+BOOST_AUTO_TEST_CASE(EstimatesNprobeIndependentRouteDeformation)
 {
-    HybridPostingLayoutStats layout;
-    layout.m_averageRecords = 100.0;
-    layout.m_averagePages = 2.0;
-    layout.m_averageBytes = 8192.0;
-    layout.m_uniqueRatio = 0.5;
-    layout.m_enrichment = 4.0;
-    layout.m_headFixedCostUS = 5.0;
-    layout.m_headPerPostingCostUS = 0.5;
-
-    HybridRouteCostConfig cost;
-    cost.m_resultSafety = 2.0;
-    cost.m_ioFixedUS = 8.0;
-    cost.m_pageUS = 4.0;
-    cost.m_vectorUS = 0.04;
-    cost.m_bytesPerUS = 4096.0;
-
-    const auto estimate = EstimateHybridRouteCost(
-        10, 5, 100, 0.01, layout, cost);
+    std::array<float, 8> vectorComponents = {
+        8.0f, 4.0f, 2.0f, 7.0f,
+        1.0f, 6.0f, 3.0f, 5.0f};
+    const std::array<double, 8>
+        attributeDistances = {
+            2.0, 2.0, 2.0, 2.0,
+            2.0, 2.0, 2.0, 2.0};
+    const auto estimate =
+        EstimateHybridRouteDeformation(
+            vectorComponents.data(),
+            attributeDistances.data(),
+            vectorComponents.size());
+    BOOST_REQUIRE(estimate.m_valid);
+    BOOST_CHECK_EQUAL(estimate.m_samples, 8);
     BOOST_CHECK_CLOSE(
-        estimate.m_expectedMatchesPerPosting, 2.0, 0.001);
-    BOOST_CHECK_EQUAL(estimate.m_postings, 10);
-    BOOST_CHECK_CLOSE(estimate.m_costUS, 230.0, 0.001);
+        estimate.m_attributeRMS, 2.0, 0.001);
+    BOOST_CHECK_CLOSE(
+        estimate.m_nearVectorSpan, 2.0, 0.001);
+    BOOST_CHECK_CLOSE(
+        estimate.m_deformation, 1.0, 0.001);
 
-    const auto capped = EstimateHybridRouteCost(
-        10, 5, 2048, 1e-300, layout, cost);
-    BOOST_CHECK_EQUAL(capped.m_postings, 2048);
+    BOOST_CHECK(ShouldUseHybridRoute(
+        0.05, estimate, 0.1, 1.0));
+    BOOST_CHECK(!ShouldUseHybridRoute(
+        0.2, estimate, 0.1, 1.0));
+    BOOST_CHECK(!ShouldUseHybridRoute(
+        0.05, estimate, 0.1, 1.01));
+
+    std::array<float, 2> invalidVectors = {
+        1.0f, 2.0f};
+    const std::array<double, 2>
+        invalidAttributes = {
+            0.0,
+            (std::numeric_limits<double>::infinity)()};
+    BOOST_CHECK(
+        !EstimateHybridRouteDeformation(
+             invalidVectors.data(),
+             invalidAttributes.data(),
+             invalidVectors.size())
+             .m_valid);
 }
 
 BOOST_AUTO_TEST_CASE(FingerprintIsHeadOrderIndependentAndConfigSensitive)

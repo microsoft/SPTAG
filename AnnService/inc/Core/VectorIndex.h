@@ -349,7 +349,7 @@ public:
             std::function<bool(int)> m_postingFilter;
             std::vector<uint32_t> m_queryTags;
             float m_filterSelectivity = 1.0f;
-            // Unmodified predicate selectivity for cost-based route selection.
+            // Unmodified predicate selectivity for pre-search route selection.
             // m_filterSelectivity may include adaptive-nprobe safety scaling.
             float m_routeSelectivity = 1.0f;
             std::vector<SizeType> m_directPostingIDs;

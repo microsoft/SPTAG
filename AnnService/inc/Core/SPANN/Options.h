@@ -99,14 +99,9 @@ namespace SPTAG {
             std::string m_hybridNumericWeights;
             int m_hybridGraphDegree;
             int m_hybridCandidateCount;
-            float m_hybridCostResultSafety;
-            float m_hybridCostIOFixedUS;
-            float m_hybridCostPageUS;
-            float m_hybridCostBytesPerUS;
-            float m_hybridCostVectorUS;
-            int m_hybridCostMaxPostings;
-            float m_hybridCostHeadOriginalUS;
-            float m_hybridCostHeadHybridUS;
+            int m_hybridRouteSampleCount;
+            float m_hybridRouteSelectivityThreshold;
+            float m_hybridRouteDeformationThreshold;
             bool m_logHybridRoute;
             bool m_enableDataCompression;
             bool m_enableDictTraining;

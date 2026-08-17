@@ -56,6 +56,27 @@ constexpr std::int32_t kHeadNodeRoutingIndexVersion = 1;
 constexpr int kRequiredHybridBaseGraphDegree = 32;
 constexpr int kRequiredHybridGraphDegree = 16;
 
+bool ValidHybridRouteConfig(const Options& p_options)
+{
+    return
+        p_options.m_hybridRouteSampleCount >= 2 &&
+        p_options.m_hybridRouteSampleCount <=
+            static_cast<int>(
+                kMaxHybridRouteSamples) &&
+        std::isfinite(
+            p_options
+                .m_hybridRouteSelectivityThreshold) &&
+        p_options.m_hybridRouteSelectivityThreshold >=
+            0.0f &&
+        p_options.m_hybridRouteSelectivityThreshold <=
+            1.0f &&
+        std::isfinite(
+            p_options
+                .m_hybridRouteDeformationThreshold) &&
+        p_options.m_hybridRouteDeformationThreshold >=
+            0.0f;
+}
+
 bool ParseHybridGeneration(
     const std::string& p_value,
     std::uint64_t& p_generation)
@@ -1625,13 +1646,14 @@ ErrorCode Index<T>::LoadHeadHybridGraph() const
     auto* baseHead = dynamic_cast<BKT::Index<T>*>(
         m_loadedHeadBundleIndexes.front().get());
     if (baseHead == nullptr ||
+        baseHead->GetQuantizer() != nullptr ||
         baseHead->GetMutableGraph()
                 .m_iNeighborhoodSize !=
             kRequiredHybridBaseGraphDegree) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Hybrid reload requires the canonical degree-%d "
-            "BKT base graph.\n",
+            "Hybrid reload requires raw full-precision heads in the "
+            "canonical degree-%d BKT base graph.\n",
             kRequiredHybridBaseGraphDegree);
         return ErrorCode::Fail;
     }
@@ -1660,6 +1682,20 @@ ErrorCode Index<T>::LoadHeadHybridGraph() const
             "HybridGraphDegree must be %d, got %d.\n",
             kRequiredHybridGraphDegree, degree);
         return ErrorCode::Fail;
+    }
+    if (!ValidHybridRouteConfig(m_options)) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Invalid hybrid route sampling config "
+            "(samples=%d selectivity=%.6g deformation=%.6g).\n",
+            m_options.m_hybridRouteSampleCount,
+            static_cast<double>(
+                m_options
+                    .m_hybridRouteSelectivityThreshold),
+            static_cast<double>(
+                m_options
+                    .m_hybridRouteDeformationThreshold));
+        return ErrorCode::FailedParseValue;
     }
     if (candidateCount <= 0 ||
         !HybridDistanceConfig::Parse(
@@ -1839,33 +1875,10 @@ ErrorCode Index<T>::LoadHybridRoutingStats()
             "prefix in the primary posting.\n");
         return ErrorCode::Fail;
     }
-    const bool validCostConfig =
-        std::isfinite(
-            m_options.m_hybridCostResultSafety) &&
-        m_options.m_hybridCostResultSafety >= 1.0f &&
-        std::isfinite(
-            m_options.m_hybridCostIOFixedUS) &&
-        m_options.m_hybridCostIOFixedUS >= 0.0f &&
-        std::isfinite(
-            m_options.m_hybridCostPageUS) &&
-        m_options.m_hybridCostPageUS >= 0.0f &&
-        std::isfinite(
-            m_options.m_hybridCostBytesPerUS) &&
-        m_options.m_hybridCostBytesPerUS > 0.0f &&
-        std::isfinite(
-            m_options.m_hybridCostVectorUS) &&
-        m_options.m_hybridCostVectorUS >= 0.0f &&
-        std::isfinite(
-            m_options.m_hybridCostHeadOriginalUS) &&
-        m_options.m_hybridCostHeadOriginalUS >= 0.0f &&
-        std::isfinite(
-            m_options.m_hybridCostHeadHybridUS) &&
-        m_options.m_hybridCostHeadHybridUS >= 0.0f &&
-        m_options.m_hybridCostMaxPostings > 0;
-    if (!validCostConfig) {
+    if (!ValidHybridRouteConfig(m_options)) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Enabled hybrid routing has an invalid cost configuration.\n");
+            "Enabled hybrid routing has an invalid sampling configuration.\n");
         return ErrorCode::Fail;
     }
     std::string path = m_options.m_indexDirectory;
@@ -4067,15 +4080,46 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             postingTarget);
     }
 
+    // Route selection must happen before graph traversal and must not change
+    // postingTarget. nprobe therefore selects only a point on the chosen route.
+    const int graphResultNum = postingTarget;
+    COMMON::QueryResultSet<T>* p_queryResults;
+    if (p_query.GetResultNum() >= graphResultNum) {
+        p_queryResults =
+            (COMMON::QueryResultSet<T>*)&p_query;
+    }
+    else {
+        p_queryResults =
+            new COMMON::QueryResultSet<T>(
+                (const T*)p_query.GetTarget(),
+                graphResultNum);
+    }
+
     bool useHybridRoute = false;
-    HybridRouteEstimate originalRouteEstimate;
-    HybridRouteEstimate hybridRouteEstimate;
-    std::uint64_t hybridRouteMask = 0;
+    HybridRouteDeformationEstimate routeDeformation;
+    double routeSelectivityValue =
+        std::isfinite(routeSelectivity)
+            ? (std::max)(
+                  0.0,
+                  (std::min)(
+                      1.0,
+                      static_cast<double>(
+                          routeSelectivity)))
+            : 1.0;
+    double routeEstimateUS = 0.0;
     if (m_options.m_enableHybridDistance &&
         hasExactFilter &&
         m_extraSearcher != nullptr &&
         m_extraSearcher->HasHybridPurePostings() &&
         !m_hybridRoutingStats.Empty()) {
+        const auto routeStart =
+            m_options.m_logHybridRoute
+                ? std::chrono::high_resolution_clock::now()
+                : std::chrono::high_resolution_clock::
+                      time_point{};
+        if (routeSelectivityValue <=
+            m_options
+                .m_hybridRouteSelectivityThreshold) {
         std::vector<std::pair<int, std::uint32_t>>
             flatCategoricalValues;
         flatCategoricalValues.reserve(
@@ -4107,137 +4151,176 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             flatCategoricalValues.emplace_back(
                 column, queryTags[tag]);
         }
-        hybridRouteMask =
-            m_hybridRoutingStats.ConfiguredMask(
-                queryDNF, flatCategoricalValues);
 
-        HybridPostingLayoutStats originalLayout =
-            m_hybridRoutingStats.m_original.m_layout;
-        HybridPostingLayoutStats hybridLayout =
-            m_hybridRoutingStats.m_hybrid.m_layout;
-        originalLayout.m_enrichment =
-            m_hybridRoutingStats.Enrichment(
-                false, hybridRouteMask);
-        hybridLayout.m_enrichment =
-            m_hybridRoutingStats.Enrichment(
-                true, hybridRouteMask);
-        originalLayout.m_headFixedCostUS =
-            m_options.m_hybridCostHeadOriginalUS;
-        hybridLayout.m_headFixedCostUS =
-            m_options.m_hybridCostHeadHybridUS;
-
-        HybridRouteCostConfig routeCost;
-        routeCost.m_resultSafety =
-            m_options.m_hybridCostResultSafety;
-        routeCost.m_ioFixedUS =
-            m_options.m_hybridCostIOFixedUS;
-        routeCost.m_pageUS =
-            m_options.m_hybridCostPageUS;
-        routeCost.m_vectorUS =
-            m_options.m_hybridCostVectorUS;
-        routeCost.m_bytesPerUS =
-            m_options.m_hybridCostBytesPerUS;
-
-        SizeType postingCap =
-            (std::max)(
-                static_cast<SizeType>(1),
-                TotalHeadSampleCount());
-        if (!candidateNodes.empty()) {
-            postingCap = 0;
-            for (int nodeID : candidateNodes) {
-                postingCap +=
-                    m_headBundleNodes[
-                        static_cast<size_t>(nodeID)]
-                        .postingCount;
+        const ErrorCode hybridStatus =
+            LoadHeadHybridGraph();
+        if (hybridStatus != ErrorCode::Success ||
+            !ValidHybridRouteConfig(m_options) ||
+            m_hybridHeadGraph.m_nodes.size() != 1 ||
+            m_loadedHeadBundleIndexes.size() != 1 ||
+            m_loadedHeadBundleIndexes.front() == nullptr ||
+            m_loadedHeadBundleIndexes.front()
+                    ->GetQuantizer() != nullptr) {
+            if (p_queryResults !=
+                (COMMON::QueryResultSet<T>*)&p_query) {
+                delete p_queryResults;
             }
-            postingCap =
-                (std::max)(
-                    static_cast<SizeType>(1),
-                    postingCap);
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Hybrid route sampling cannot access the loaded head graph.\n");
+            return hybridStatus == ErrorCode::Success
+                ? ErrorCode::Fail
+                : hybridStatus;
         }
-        postingCap = (std::min)(
-            postingCap,
-            static_cast<SizeType>(
-                m_options
-                    .m_hybridCostMaxPostings));
-        const int maxPostingCap =
-            postingCap >
-                    static_cast<SizeType>(
-                        (std::numeric_limits<int>::max)())
-                ? (std::numeric_limits<int>::max)()
-                : static_cast<int>(postingCap);
-        const double selectivity =
-            std::isfinite(routeSelectivity)
-                ? (std::max)(
-                      1e-9,
+
+        const auto& hybridNode =
+            m_hybridHeadGraph.m_nodes.front();
+        const auto& headIndex =
+            m_loadedHeadBundleIndexes.front();
+        const SizeType headCount =
+            hybridNode.m_headCount;
+        if (headCount !=
+            headIndex->GetNumSamples()) {
+            if (p_queryResults !=
+                (COMMON::QueryResultSet<T>*)&p_query) {
+                delete p_queryResults;
+            }
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Hybrid route head count mismatch (%d/%d).\n",
+                static_cast<int>(headCount),
+                static_cast<int>(
+                    headIndex->GetNumSamples()));
+            return ErrorCode::Fail;
+        }
+        const size_t sampleCount =
+            headCount > 0
+                ? static_cast<size_t>(
                       (std::min)(
-                          1.0,
-                          static_cast<double>(
-                              routeSelectivity)))
-                : 1.0;
-        originalRouteEstimate =
-            EstimateHybridRouteCost(
-                p_query.GetResultNum(),
-                nprobeBase,
-                maxPostingCap,
-                selectivity,
-                originalLayout,
-                routeCost);
-        hybridRouteEstimate =
-            EstimateHybridRouteCost(
-                p_query.GetResultNum(),
-                nprobeBase,
-                maxPostingCap,
-                selectivity,
-                hybridLayout,
-                routeCost);
-        useHybridRoute =
-            hybridRouteEstimate.m_costUS <
-            originalRouteEstimate.m_costUS;
-        postingTarget = useHybridRoute
-            ? hybridRouteEstimate.m_postings
-            : originalRouteEstimate.m_postings;
+                          headCount,
+                          static_cast<SizeType>(
+                              m_options
+                                  .m_hybridRouteSampleCount)))
+                : 0;
+        std::array<float, kMaxHybridRouteSamples>
+            vectorComponents{};
+        std::array<double, kMaxHybridRouteSamples>
+            attributeDistances{};
+        HybridQueryDistanceTransform
+            vectorDistanceTransform;
+        if (m_options.m_distCalcMethod ==
+            DistCalcMethod::Cosine) {
+            vectorDistanceTransform =
+                HybridQueryDistanceTransform::ForCosine(
+                    static_cast<const T*>(
+                        p_queryResults
+                            ->GetQuantizedTarget()),
+                    GetFeatureDim());
+        }
+
+        if (sampleCount >= 2) {
+            const std::uint64_t offset =
+                m_hybridRoutingStats
+                    .m_generationFingerprint %
+                static_cast<std::uint64_t>(
+                    headCount);
+            for (size_t sample = 0;
+                 sample < sampleCount;
+                 ++sample) {
+                const std::uint64_t center =
+                    ((2ULL * sample + 1ULL) *
+                     static_cast<std::uint64_t>(
+                         headCount)) /
+                    (2ULL * sampleCount);
+                const SizeType localHead =
+                    static_cast<SizeType>(
+                        (offset + center) %
+                        static_cast<std::uint64_t>(
+                            headCount));
+                const void* headVector =
+                    headIndex->GetSample(localHead);
+                const std::uint32_t* attributes =
+                    hybridNode.Attributes(
+                        localHead,
+                        m_hybridHeadGraph
+                            .m_numTagColumns);
+                if (headVector == nullptr ||
+                    attributes == nullptr) {
+                    if (p_queryResults !=
+                        (COMMON::QueryResultSet<T>*)&p_query) {
+                        delete p_queryResults;
+                    }
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Hybrid route sample %d has no vector or attributes.\n",
+                        static_cast<int>(localHead));
+                    return ErrorCode::Fail;
+                }
+
+                const float vectorDistance =
+                    headIndex->ComputeDistance(
+                        p_queryResults
+                            ->GetQuantizedTarget(),
+                        headVector);
+                vectorComponents[sample] =
+                    m_hybridDistance.m_vectorWeight *
+                    vectorDistanceTransform.Apply(
+                        vectorDistance);
+                attributeDistances[sample] =
+                    m_hybridDistance
+                        .PredicateDistance(
+                            attributes,
+                            m_hybridHeadGraph
+                                .m_numTagColumns,
+                            queryDNF,
+                            flatCategoricalValues);
+            }
+            routeDeformation =
+                EstimateHybridRouteDeformation(
+                    vectorComponents.data(),
+                    attributeDistances.data(),
+                    sampleCount);
+        }
+
+        useHybridRoute = ShouldUseHybridRoute(
+            routeSelectivityValue,
+            routeDeformation,
+            m_options
+                .m_hybridRouteSelectivityThreshold,
+            m_options
+                .m_hybridRouteDeformationThreshold);
+        }
 
         if (m_options.m_logHybridRoute) {
+            routeEstimateUS =
+                std::chrono::duration<double, std::micro>(
+                    std::chrono::high_resolution_clock::
+                        now() -
+                    routeStart)
+                    .count();
             SPTAGLIB_LOG(
                 Helper::LogLevel::LL_Info,
-                "HybridRoute: sel=%.6g mask=0x%llx route=%s "
-                "original={N=%d,Y=%.3f,C=%.3fus,E=%.3f,R=%.2f,P=%.2f,U=%.3f} "
-                "hybrid={N=%d,Y=%.3f,C=%.3fus,E=%.3f,R=%.2f,P=%.2f,U=%.3f}\n",
-                selectivity,
-                static_cast<unsigned long long>(
-                    hybridRouteMask),
+                "HybridRoute: sel=%.6g/%.6g samples=%zu "
+                "attrRMS=%.6g vectorSpan=%.6g "
+                "deformation=%.6g/%.6g route=%s "
+                "postingTarget=%d estimate=%.3fus\n",
+                routeSelectivityValue,
+                static_cast<double>(
+                    m_options
+                        .m_hybridRouteSelectivityThreshold),
+                routeDeformation.m_samples,
+                routeDeformation.m_attributeRMS,
+                routeDeformation.m_nearVectorSpan,
+                routeDeformation.m_deformation,
+                static_cast<double>(
+                    m_options
+                        .m_hybridRouteDeformationThreshold),
                 useHybridRoute ? "hybrid"
                                : "original",
-                originalRouteEstimate.m_postings,
-                originalRouteEstimate
-                    .m_expectedMatchesPerPosting,
-                originalRouteEstimate.m_costUS,
-                originalLayout.m_enrichment,
-                originalLayout.m_averageRecords,
-                originalLayout.m_averagePages,
-                originalLayout.m_uniqueRatio,
-                hybridRouteEstimate.m_postings,
-                hybridRouteEstimate
-                    .m_expectedMatchesPerPosting,
-                hybridRouteEstimate.m_costUS,
-                hybridLayout.m_enrichment,
-                hybridLayout.m_averageRecords,
-                hybridLayout.m_averagePages,
-                hybridLayout.m_uniqueRatio);
+                postingTarget,
+                routeEstimateUS);
         }
     }
-
-    // Graph search must return at least postingTarget candidates
-    // (PS will filter some out, so request more)
-    int graphResultNum = postingTarget;
-
-    COMMON::QueryResultSet<T> *p_queryResults;
-    if (p_query.GetResultNum() >= graphResultNum)
-        p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
-    else
-        p_queryResults =
-            new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), graphResultNum);
 
     ErrorCode ret;
     bool usedHeadBundleSearch = false;

@@ -66,21 +66,26 @@ D_hybrid = w_v D_vector
 ```
 
 Unfiltered queries always navigate the original degree-32 graph and scan the
-full contiguous pure+tail posting. Filtered queries use the persisted cost
-model to choose either hybrid navigation plus the pure prefix, or original
-navigation plus the full posting. No second posting, overlap bitmap, sparse
-exact-set reconstruction, or single-attribute partition exists. Exact
-record-level flat or DNF filtering remains authoritative on either route:
+full contiguous pure+tail posting. Before filtered graph search, the router
+computes pure-vector and predicate distances to a deterministic sample of head
+vectors. It chooses hybrid navigation plus the pure prefix only when the
+predicate is selective and its attribute penalty is large relative to the
+near-sample vector-distance span:
 
 ```text
-Y_r = min(R_r, s E_r R_r U_r)
-N_r = max(N_base, ceil(alpha K / Y_r))
-C_r = H_r + N_r (T_io + P_r T_page + B_r / BW + R_r T_vector)
+Phi(q, P) = RMS_i(D_attribute(P, h_i))
+            / (Q90(D_vector(q, h_near)) - Q10(D_vector(q, h_near)) + epsilon)
+
+Hybrid iff selectivity(P) <= HybridRouteSelectivityThreshold
+           and Phi(q, P) >= HybridRouteDeformationThreshold
 ```
 
-`HybridCostMaxPostings` caps `N_r` for resource safety; it is not a selectivity
-threshold. Exact record-level flat or DNF filtering remains authoritative on
-either route. All weights and cost coefficients are native INI parameters.
+`HybridRouteSampleCount` defaults to 64 and performs no graph traversal.
+The selected graph runs exactly once, and nprobe changes only the operating
+point on that route. No second posting, overlap bitmap, sparse exact-set
+reconstruction, or single-attribute partition exists. Exact record-level flat
+or DNF filtering remains authoritative on either route. All routing thresholds
+and distance weights are native INI parameters.
 
 ## SIFT1B Raw STM1 Recommendation
 
