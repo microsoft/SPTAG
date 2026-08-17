@@ -66,6 +66,17 @@ public:
 
     virtual ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const = 0;
 
+    // The predicate controls result admission only. Graph/tree traversal remains
+    // unconstrained so sparse admissible sets can still be reached.
+    virtual ErrorCode SearchIndexWithResultFilter(
+        QueryResult& p_query,
+        std::function<bool(SizeType)> p_resultFilter,
+        int p_maxCheck = 0,
+        bool p_searchDeleted = false) const
+    {
+        return ErrorCode::Undefined;
+    }
+
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
 
     virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;

@@ -92,6 +92,12 @@ namespace SPTAG {
             std::string m_orderedPageStartAttrs;
             bool m_enableHybridDistance;
             std::string m_hybridGenerationFingerprint;
+            bool m_enableLimitedTagPosting;
+            std::string m_limitedTagGenerationFingerprint;
+            std::string m_limitedTagSupportFile;
+            int m_limitedTagSlotsPerHead;
+            int m_limitedTagVoteHeadCount;
+            int m_limitedTagMinHeadCount;
             float m_hybridVectorWeight;
             std::string m_hybridCategoricalCols;
             std::string m_hybridCategoricalWeights;

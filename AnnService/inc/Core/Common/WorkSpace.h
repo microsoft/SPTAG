@@ -329,6 +329,24 @@ namespace SPTAG
                 m_relaxedMono = false;
             }
 
+            void PrepareResultCheckStatus()
+            {
+                if (!m_resultCheckInitialized ||
+                    resultCheckStatus.MaxCheck() <
+                        m_iMaxCheck)
+                {
+                    resultCheckStatus.Init(
+                        (std::max)(16, m_iMaxCheck),
+                        nodeCheckStatus
+                            .HashTableExponent());
+                    m_resultCheckInitialized = true;
+                }
+                else
+                {
+                    resultCheckStatus.clear();
+                }
+            }
+
             void ResetResult(int maxCheck, int resultNum)
             {
                 m_Results.clear(max(maxCheck / 16, resultNum));
@@ -340,6 +358,15 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);
+            }
+
+            inline bool CheckResultAndSet(SizeType idx)
+            {
+                if (!m_resultCheckInitialized)
+                {
+                    PrepareResultCheckStatus();
+                }
+                return resultCheckStatus.CheckAndSet(idx);
             }
 
             inline bool Contains(SizeType idx) const
@@ -355,6 +382,8 @@ namespace SPTAG
             static void Reset() {}
 
             OptHashPosVector nodeCheckStatus;
+            OptHashPosVector resultCheckStatus;
+            bool m_resultCheckInitialized = false;
 
             // counter for dynamic pivoting
             int m_iNumOfContinuousNoBetterPropagation = 0;

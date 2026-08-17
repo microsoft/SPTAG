@@ -8,6 +8,7 @@
 #include "inc/Core/KDT/Index.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
+#include "inc/Core/SPANN/LimitedTagSupport.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/IQuantizer.h"
@@ -36,6 +37,7 @@
 #include <thread>
 #include <ctime>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 using namespace SPTAG;
@@ -2662,6 +2664,699 @@ BOOST_AUTO_TEST_CASE(StaticDistanceOrderSerialization)
     BOOST_CHECK_EQUAL(offset, 5);
 }
 
+BOOST_AUTO_TEST_CASE(LimitedTagSupportPersistenceValidation)
+{
+    const std::string path =
+        "limited_tag_support_validation.bin";
+    std::filesystem::remove(path);
+    SPANN::LimitedTagSupport support;
+    BOOST_REQUIRE(support.Initialize(
+        4, 2, 2, 2,
+        0x123456789abcdef0ULL));
+    BOOST_REQUIRE(support.SetHeadTags(
+        0, {10U, 20U}));
+    BOOST_REQUIRE(support.SetHeadTags(
+        1, {10U, 30U}));
+    BOOST_REQUIRE(support.SetHeadTags(
+        2, {20U, 30U}));
+    BOOST_REQUIRE(support.SetHeadTags(
+        3, {10U}));
+    BOOST_CHECK(!support.SetHeadTags(
+        3, {10U, 10U}));
+    std::string error;
+    BOOST_REQUIRE(support.Save(path, &error));
+
+    SPANN::LimitedTagSupport loaded;
+    BOOST_REQUIRE(loaded.Load(
+        path, 4, 2, 2, 2,
+        0x123456789abcdef0ULL, &error));
+    BOOST_CHECK_EQUAL(
+        loaded.OwnTag(0), 10U);
+    BOOST_CHECK(loaded.Supports(0, 10U));
+    BOOST_CHECK(loaded.Supports(0, 20U));
+    BOOST_CHECK(!loaded.Supports(0, 30U));
+
+    const auto rejects =
+        [&](SizeType heads, int slots,
+            int votes, int minimum,
+            std::uint64_t generation) {
+            SPANN::LimitedTagSupport rejected;
+            std::string rejectedError;
+            return !rejected.Load(
+                path, heads, slots, votes,
+                minimum, generation,
+                &rejectedError);
+        };
+    BOOST_CHECK(rejects(
+        5, 2, 2, 2,
+        0x123456789abcdef0ULL));
+    BOOST_CHECK(rejects(
+        4, 3, 2, 2,
+        0x123456789abcdef0ULL));
+    BOOST_CHECK(rejects(
+        4, 2, 1, 2,
+        0x123456789abcdef0ULL));
+    BOOST_CHECK(rejects(
+        4, 2, 2, 3,
+        0x123456789abcdef0ULL));
+    BOOST_CHECK(rejects(
+        4, 2, 2, 2,
+        0x123456789abcdef1ULL));
+
+    {
+        std::fstream output(
+            path,
+            std::ios::binary |
+                std::ios::in |
+                std::ios::out);
+        BOOST_REQUIRE(output.good());
+        output.seekp(
+            7 * sizeof(std::uint32_t),
+            std::ios::beg);
+        const std::uint32_t invalidTagCount =
+            (std::numeric_limits<
+                std::uint32_t>::max)();
+        output.write(
+            reinterpret_cast<const char*>(
+                &invalidTagCount),
+            sizeof(invalidTagCount));
+        BOOST_REQUIRE(output.good());
+    }
+    SPANN::LimitedTagSupport invalidTagCount;
+    BOOST_CHECK(!invalidTagCount.Load(
+        path, 4, 2, 2, 2,
+        0x123456789abcdef0ULL, &error));
+    BOOST_REQUIRE(support.Save(path, &error));
+
+    {
+        std::fstream output(
+            path,
+            std::ios::binary |
+                std::ios::in |
+                std::ios::out);
+        BOOST_REQUIRE(output.good());
+        std::uint32_t invalidMagic = 0;
+        output.write(
+            reinterpret_cast<const char*>(
+                &invalidMagic),
+            sizeof(invalidMagic));
+        BOOST_REQUIRE(output.good());
+    }
+    SPANN::LimitedTagSupport invalidMagic;
+    BOOST_CHECK(!invalidMagic.Load(
+        path, 4, 2, 2, 2,
+        0x123456789abcdef0ULL, &error));
+    std::filesystem::remove(path);
+}
+
+BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
+{
+    constexpr SizeType baseCount = 256;
+    constexpr DimensionType dimension = 128;
+    constexpr int distinctTags = 4;
+    const std::string indexDirectory =
+        "static_limited_tag_index";
+    std::filesystem::remove_all(indexDirectory);
+    std::filesystem::create_directories(
+        indexDirectory);
+
+    ByteArray bytes = ByteArray::Alloc(
+        sizeof(float) *
+        static_cast<size_t>(baseCount) *
+        dimension);
+    auto* data = reinterpret_cast<float*>(
+        bytes.Data());
+    std::vector<std::uint32_t> tags(
+        static_cast<size_t>(baseCount));
+    for (SizeType row = 0; row < baseCount; ++row) {
+        std::uint32_t mixed =
+            static_cast<std::uint32_t>(row) +
+            0x9e3779b9u;
+        mixed ^= mixed >> 16;
+        mixed *= 0x7feb352du;
+        mixed ^= mixed >> 15;
+        mixed *= 0x846ca68bu;
+        mixed ^= mixed >> 16;
+        tags[static_cast<size_t>(row)] =
+            mixed % distinctTags;
+        for (DimensionType dim = 0;
+             dim < dimension; ++dim) {
+            data[static_cast<size_t>(row) *
+                     dimension +
+                 dim] =
+                static_cast<float>(
+                    (row * (dim + 5) +
+                     dim * 29) %
+                    263) /
+                263.0f;
+        }
+    }
+    auto vectors =
+        std::make_shared<BasicVectorSet>(
+            bytes, VectorValueType::Float,
+            dimension, baseCount);
+
+    const auto configure =
+        [&](const std::shared_ptr<VectorIndex>&
+                target) {
+            const auto set =
+                [&](const char* section,
+                    const char* key,
+                    const std::string& value) {
+                    BOOST_REQUIRE(
+                        target->SetParameter(
+                            key, value.c_str(),
+                            section) ==
+                        ErrorCode::Success);
+                };
+            set("Base", "DistCalcMethod", "L2");
+            set("Base", "IndexAlgoType", "BKT");
+            set("Base", "ValueType", "Float");
+            set("Base", "Dim",
+                std::to_string(dimension));
+            set("Base", "IndexDirectory",
+                indexDirectory);
+            set("SelectHead", "isExecute", "true");
+            set("SelectHead", "SelectHeadType", "BKT");
+            set("SelectHead", "Ratio", "0.25");
+            set("SelectHead", "BKTLambdaFactor", "-1");
+            set("SelectHead", "SelectThreshold", "20");
+            set("SelectHead", "SplitFactor", "4");
+            set("SelectHead", "SplitThreshold", "40");
+            set("SelectHead", "NumberOfThreads", "1");
+            set("BuildHead", "isExecute", "true");
+            set("BuildHead", "NeighborhoodSize", "32");
+            set("BuildHead", "RefineIterations", "2");
+            set("BuildHead", "MaxCheck", "1024");
+            set("BuildHead",
+                "MaxCheckForRefineGraph", "1024");
+            set("BuildHead", "BKTLambdaFactor", "-1");
+            set("BuildHead", "NumberOfThreads", "1");
+            set("BuildSSDIndex", "isExecute", "true");
+            set("BuildSSDIndex", "BuildSsdIndex", "true");
+            set("BuildSSDIndex", "Storage", "STATIC");
+            set("BuildSSDIndex", "InternalResultNum", "32");
+            set("BuildSSDIndex",
+                "SearchInternalResultNum", "16");
+            set("BuildSSDIndex", "NumberOfThreads", "2");
+            set("BuildSSDIndex", "MaxCheck", "4096");
+            set("BuildSSDIndex", "PostingPageLimit", "1");
+            set("BuildSSDIndex",
+                "SearchPostingPageLimit", "1");
+            set("BuildSSDIndex", "SSDIndexFileNum", "1");
+            set("BuildSSDIndex", "ReplicaCount", "8");
+            set("BuildSSDIndex", "RNGFactor", "100");
+            set("BuildSSDIndex", "TailReplicaCount", "2");
+            set("BuildSSDIndex",
+                "EnableUnfilterTail", "true");
+            set("BuildSSDIndex",
+                "UnfilterTailBufferLength", "-1");
+            set("BuildSSDIndex", "CrossEdges", "0");
+            set("BuildSSDIndex", "ExcludeHead", "true");
+            set("BuildSSDIndex", "NumTagsPerVec", "1");
+            set("BuildSSDIndex",
+                "StaticACLTagCols", "1");
+            set("BuildSSDIndex",
+                "EnableHybridDistance", "false");
+            set("BuildSSDIndex",
+                "EnableLimitedTagPosting", "true");
+            set("BuildSSDIndex",
+                "LimitedTagSlotsPerHead", "2");
+            set("BuildSSDIndex",
+                "LimitedTagVoteHeadCount", "2");
+            set("BuildSSDIndex",
+                "LimitedTagMinHeadCount", "8");
+        };
+
+    const auto rejectConfiguration =
+        [&](const char* key, const char* value) {
+           auto rejected =
+               VectorIndex::CreateInstance(
+                   IndexAlgoType::SPANN,
+                   VectorValueType::Float);
+           BOOST_REQUIRE(rejected != nullptr);
+           configure(rejected);
+           BOOST_REQUIRE(
+               rejected->SetParameter(
+                   key, value,
+                   "BuildSSDIndex") ==
+               ErrorCode::Success);
+           auto* rejectedSPANN =
+               dynamic_cast<SPANN::ISPANNIndex*>(
+                   rejected.get());
+           BOOST_REQUIRE(rejectedSPANN != nullptr);
+           rejectedSPANN->SetVectorTags(
+               tags.data(), baseCount, 1);
+           BOOST_CHECK(
+               rejected->BuildIndex(
+                   vectors, nullptr, true, false,
+                   false) ==
+               ErrorCode::FailedParseValue);
+        };
+    rejectConfiguration(
+        "EnableHybridDistance", "true");
+    rejectConfiguration(
+        "LimitedTagSlotsPerHead", "3");
+
+    auto index = VectorIndex::CreateInstance(
+        IndexAlgoType::SPANN,
+        VectorValueType::Float);
+    BOOST_REQUIRE(index != nullptr);
+    configure(index);
+    auto* spann =
+        dynamic_cast<SPANN::ISPANNIndex*>(
+            index.get());
+    BOOST_REQUIRE(spann != nullptr);
+    spann->SetVectorTags(
+        tags.data(), baseCount, 1);
+    BOOST_REQUIRE(
+        index->BuildIndex(
+            vectors, nullptr, true, false,
+            false) == ErrorCode::Success);
+    BOOST_REQUIRE(
+        index->SaveIndex(indexDirectory) ==
+        ErrorCode::Success);
+
+    auto* typed =
+        dynamic_cast<SPANN::Index<float>*>(
+            index.get());
+    BOOST_REQUIRE(typed != nullptr);
+    BOOST_REQUIRE(typed->GetDiskIndex() != nullptr);
+    const int recordsPerBuildPage =
+        PageSize /
+        static_cast<int>(
+            sizeof(SizeType) +
+            sizeof(std::uint32_t) +
+            sizeof(float) * dimension);
+    BOOST_CHECK_GT(
+        typed->GetDiskIndex()
+            ->GetPostingAvgRecords(true),
+        static_cast<double>(
+            recordsPerBuildPage));
+    const SizeType headCount =
+        spann->GetMemoryIndex()->GetNumSamples();
+    std::uint64_t generation = 0;
+    BOOST_REQUIRE(
+        Helper::Convert::ConvertStringTo<
+            std::uint64_t>(
+            typed->GetOptions()
+                ->m_limitedTagGenerationFingerprint
+                .c_str(),
+            generation));
+    SPANN::LimitedTagSupport support;
+    std::string supportError;
+    const std::string supportPath =
+        indexDirectory +
+        "/limited_tag_support.bin";
+    BOOST_REQUIRE(
+        support.Load(
+            supportPath, headCount, 2, 2, 8,
+            generation, &supportError));
+    COMMON::Dataset<std::uint64_t> headVectorIDs;
+    BOOST_REQUIRE(
+        headVectorIDs.Load(
+            indexDirectory +
+                "/SPTAGHeadVectorIDs.bin",
+            1048576, 2147483647) ==
+        ErrorCode::Success);
+    BOOST_REQUIRE_EQUAL(
+        headVectorIDs.R(), headCount);
+    std::unordered_map<std::uint32_t, int>
+        coverage;
+    for (SizeType head = 0;
+         head < headCount; ++head) {
+        const auto headTags =
+            support.HeadTags(head);
+        BOOST_REQUIRE_EQUAL(headTags.size(), 2);
+        const SizeType sourceVID =
+            static_cast<SizeType>(
+                *headVectorIDs[head]);
+        BOOST_REQUIRE(
+            sourceVID >= 0 &&
+            sourceVID < baseCount);
+        BOOST_CHECK_EQUAL(
+            headTags.front(),
+            tags[static_cast<size_t>(
+                sourceVID)]);
+        BOOST_CHECK(
+            support.Supports(
+                head,
+                tags[static_cast<size_t>(
+                    sourceVID)]));
+        for (std::uint32_t tag : headTags)
+            ++coverage[tag];
+    }
+    for (std::uint32_t tag = 0;
+         tag < distinctTags; ++tag) {
+        BOOST_CHECK_GE(coverage[tag], 8);
+    }
+    BOOST_CHECK(
+        !std::filesystem::exists(
+            indexDirectory +
+            "/SPTAGFullList.bin.hybrid.stats"));
+    BOOST_CHECK(
+        !std::filesystem::exists(
+            indexDirectory +
+            "/HeadIndex/head_cross_edges.bin"));
+
+    const auto searchFiltered =
+        [&](const std::shared_ptr<VectorIndex>& target,
+            std::uint32_t tag) {
+            const SizeType queryVID =
+                static_cast<SizeType>(tag);
+            VectorIndex::ThreadLocalSearchContext context;
+            context.m_active = true;
+            context.m_queryTags = {tag};
+            context.m_filterSelectivity =
+                1.0f / distinctTags;
+            context.m_routeSelectivity =
+                context.m_filterSelectivity;
+            VectorIndex::ThreadLocalSearchContextGuard guard(
+                std::move(context));
+            COMMON::QueryResultSet<float> result(
+                data +
+                    static_cast<size_t>(queryVID) *
+                        dimension,
+                10);
+            BOOST_REQUIRE(
+                target->SearchIndex(result) ==
+                ErrorCode::Success);
+            std::vector<SizeType> ids;
+            for (int rank = 0;
+                 rank < result.GetResultNum();
+                 ++rank) {
+                const BasicResult* item =
+                    result.GetResult(rank);
+                if (item == nullptr ||
+                    item->VID < 0)
+                    break;
+                BOOST_CHECK_EQUAL(
+                    tags[static_cast<size_t>(
+                        item->VID)],
+                    tag);
+                ids.push_back(item->VID);
+            }
+            BOOST_CHECK(!ids.empty());
+            return ids;
+        };
+
+    const auto verifyHeadSources =
+        [&](const std::shared_ptr<VectorIndex>& target) {
+           for (SizeType head = 0;
+                head < headCount; ++head) {
+               const SizeType sourceVID =
+                   static_cast<SizeType>(
+                       *headVectorIDs[head]);
+               const std::uint32_t tag =
+                   tags[static_cast<size_t>(
+                       sourceVID)];
+               VectorIndex::ThreadLocalSearchContext
+                   context;
+               context.m_active = true;
+               context.m_queryTags = {tag};
+               context.m_filterSelectivity =
+                   1.0f / distinctTags;
+               context.m_routeSelectivity =
+                   context.m_filterSelectivity;
+               VectorIndex::ThreadLocalSearchContextGuard
+                   guard(std::move(context));
+               COMMON::QueryResultSet<float> result(
+                   data +
+                       static_cast<size_t>(
+                           sourceVID) *
+                           dimension,
+                   10);
+               BOOST_REQUIRE(
+                   target->SearchIndex(result) ==
+                   ErrorCode::Success);
+               bool foundSource = false;
+               for (int rank = 0;
+                    rank < result.GetResultNum();
+                    ++rank) {
+                   const BasicResult* item =
+                       result.GetResult(rank);
+                   if (item == nullptr ||
+                       item->VID < 0) {
+                       break;
+                   }
+                   BOOST_CHECK_EQUAL(
+                       tags[static_cast<size_t>(
+                           item->VID)],
+                       tag);
+                   foundSource |=
+                       item->VID == sourceVID;
+               }
+               BOOST_CHECK(foundSource);
+           }
+        };
+    const auto searchCompound =
+        [&](const std::shared_ptr<VectorIndex>& target,
+           bool useDNF) {
+           const std::uint32_t first =
+               tags[0];
+           const std::uint32_t second =
+               (first + 1U) %
+               distinctTags;
+           VectorIndex::ThreadLocalSearchContext
+               context;
+           context.m_active = true;
+           context.m_queryTags = {
+               first, second};
+           context.m_filterSelectivity =
+               2.0f / distinctTags;
+           context.m_routeSelectivity =
+               context.m_filterSelectivity;
+           if (useDNF) {
+               Cache::DNFClause firstClause;
+               firstClause.lits.push_back(
+                   {0, first,
+                    Cache::DNF_EQ, 0});
+               Cache::DNFClause secondClause;
+               secondClause.lits.push_back(
+                   {0, second,
+                    Cache::DNF_EQ, 0});
+               context.m_dnf.clauses = {
+                   firstClause, secondClause};
+           }
+           VectorIndex::ThreadLocalSearchContextGuard
+               guard(std::move(context));
+           COMMON::QueryResultSet<float> result(
+               data, 10);
+           BOOST_REQUIRE(
+               target->SearchIndex(result) ==
+               ErrorCode::Success);
+           int resultCount = 0;
+           for (int rank = 0;
+                rank < result.GetResultNum();
+                ++rank) {
+               const BasicResult* item =
+                   result.GetResult(rank);
+               if (item == nullptr ||
+                   item->VID < 0) {
+                   break;
+               }
+               const std::uint32_t resultTag =
+                   tags[static_cast<size_t>(
+                       item->VID)];
+               BOOST_CHECK(
+                   resultTag == first ||
+                   resultTag == second);
+               ++resultCount;
+           }
+           BOOST_CHECK_GT(resultCount, 0);
+        };
+    std::vector<SizeType> allPostingIDs;
+    allPostingIDs.reserve(
+        static_cast<size_t>(headCount));
+    for (SizeType head = 0; head < headCount;
+         ++head) {
+        allPostingIDs.push_back(head);
+    }
+    const auto verifyDirectHeadSources =
+        [&](const std::shared_ptr<VectorIndex>& target,
+            bool useDNF) {
+            for (SizeType head = 0;
+                 head < headCount; ++head) {
+                const SizeType sourceVID =
+                    static_cast<SizeType>(
+                        *headVectorIDs[head]);
+                const std::uint32_t tag =
+                    tags[static_cast<size_t>(
+                        sourceVID)];
+                VectorIndex::ThreadLocalSearchContext
+                    context;
+                context.m_active = true;
+                context.m_directPostingIDs =
+                    allPostingIDs;
+                if (useDNF) {
+                    Cache::DNFClause clause;
+                    clause.lits.push_back(
+                        {0, tag, Cache::DNF_EQ, 0});
+                    context.m_dnf.clauses = {clause};
+                } else {
+                    context.m_queryTags = {tag};
+                }
+                VectorIndex::ThreadLocalSearchContextGuard
+                    guard(std::move(context));
+                COMMON::QueryResultSet<float> result(
+                    data +
+                        static_cast<size_t>(
+                            sourceVID) *
+                            dimension,
+                    10);
+                BOOST_REQUIRE(
+                    target->SearchIndex(result) ==
+                    ErrorCode::Success);
+                bool foundSource = false;
+                for (int rank = 0;
+                     rank < result.GetResultNum();
+                     ++rank) {
+                    const BasicResult* item =
+                        result.GetResult(rank);
+                    if (item == nullptr ||
+                        item->VID < 0) {
+                        break;
+                    }
+                    BOOST_CHECK_EQUAL(
+                        tags[static_cast<size_t>(
+                            item->VID)],
+                        tag);
+                    foundSource |=
+                        item->VID == sourceVID;
+                }
+                BOOST_CHECK(foundSource);
+            }
+        };
+
+    verifyHeadSources(index);
+    verifyDirectHeadSources(index, false);
+    verifyDirectHeadSources(index, true);
+    searchCompound(index, false);
+    searchCompound(index, true);
+    const auto beforeReload =
+        searchFiltered(index, 3);
+    COMMON::QueryResultSet<float> unfilteredBefore(
+        data, 10);
+    BOOST_REQUIRE(
+        index->SearchIndex(unfilteredBefore) ==
+        ErrorCode::Success);
+    std::array<SizeType, 10> unfilteredIDs{};
+    for (int rank = 0; rank < 10; ++rank)
+        unfilteredIDs[static_cast<size_t>(rank)] =
+            unfilteredBefore.GetResult(rank)->VID;
+
+    index.reset();
+    std::shared_ptr<VectorIndex> reloaded;
+    BOOST_REQUIRE(
+        VectorIndex::LoadIndex(
+            indexDirectory, reloaded) ==
+        ErrorCode::Success);
+    verifyHeadSources(reloaded);
+    verifyDirectHeadSources(reloaded, false);
+    verifyDirectHeadSources(reloaded, true);
+    searchCompound(reloaded, false);
+    searchCompound(reloaded, true);
+    const auto afterReload =
+        searchFiltered(reloaded, 3);
+    BOOST_CHECK_EQUAL_COLLECTIONS(
+        beforeReload.begin(), beforeReload.end(),
+        afterReload.begin(), afterReload.end());
+    COMMON::QueryResultSet<float> unfilteredAfter(
+        data, 10);
+    BOOST_REQUIRE(
+        reloaded->SearchIndex(unfilteredAfter) ==
+        ErrorCode::Success);
+    for (int rank = 0; rank < 10; ++rank) {
+        BOOST_CHECK_EQUAL(
+            unfilteredAfter.GetResult(rank)->VID,
+            unfilteredIDs[
+                static_cast<size_t>(rank)]);
+    }
+    reloaded.reset();
+
+    const std::string loaderPath =
+        indexDirectory + "/indexloader.ini";
+    std::ifstream loaderInput(loaderPath);
+    BOOST_REQUIRE(loaderInput.good());
+    const std::string loaderConfig(
+        (std::istreambuf_iterator<char>(
+             loaderInput)),
+        std::istreambuf_iterator<char>());
+    loaderInput.close();
+    std::string disabledConfig = loaderConfig;
+    const std::string limitedKey =
+        "EnableLimitedTagPosting=";
+    const size_t limitedBegin =
+        disabledConfig.find(limitedKey);
+    BOOST_REQUIRE(
+        limitedBegin != std::string::npos);
+    const size_t limitedValueBegin =
+        limitedBegin + limitedKey.size();
+    const size_t limitedEnd =
+        disabledConfig.find(
+            '\n', limitedValueBegin);
+    disabledConfig.replace(
+        limitedValueBegin,
+        limitedEnd == std::string::npos
+            ? std::string::npos
+            : limitedEnd - limitedValueBegin,
+        "false");
+    {
+        std::ofstream disabledLoader(
+            loaderPath, std::ios::trunc);
+        BOOST_REQUIRE(disabledLoader.good());
+        disabledLoader << disabledConfig;
+        BOOST_REQUIRE(disabledLoader.good());
+    }
+    std::shared_ptr<VectorIndex>
+        disabledLimitedMode;
+    BOOST_CHECK(
+        VectorIndex::LoadIndex(
+            indexDirectory,
+            disabledLimitedMode) ==
+        ErrorCode::Fail);
+    {
+        std::ofstream restoredLoader(
+            loaderPath, std::ios::trunc);
+        BOOST_REQUIRE(restoredLoader.good());
+        restoredLoader << loaderConfig;
+        BOOST_REQUIRE(restoredLoader.good());
+    }
+
+    const std::string backupPath =
+        supportPath + ".backup";
+    std::filesystem::copy_file(
+        supportPath, backupPath,
+        std::filesystem::copy_options::
+            overwrite_existing);
+    {
+        std::fstream corrupt(
+            supportPath,
+            std::ios::binary |
+                std::ios::in |
+                std::ios::out);
+        BOOST_REQUIRE(corrupt.good());
+        corrupt.seekg(-1, std::ios::end);
+        char byte = 0;
+        corrupt.read(&byte, 1);
+        corrupt.clear();
+        corrupt.seekp(-1, std::ios::end);
+        byte ^= 0x5a;
+        corrupt.write(&byte, 1);
+        BOOST_REQUIRE(corrupt.good());
+    }
+    std::shared_ptr<VectorIndex> rejected;
+    BOOST_CHECK(
+        VectorIndex::LoadIndex(
+            indexDirectory, rejected) ==
+        ErrorCode::Fail);
+    std::filesystem::copy_file(
+        backupPath, supportPath,
+        std::filesystem::copy_options::
+            overwrite_existing);
+    std::filesystem::remove_all(indexDirectory);
+}
+
 BOOST_AUTO_TEST_CASE(StaticHybridSinglePostingPreservesOriginalUnion)
 {
     const auto edge =
@@ -2705,7 +3400,7 @@ BOOST_AUTO_TEST_CASE(StaticHybridSinglePostingPreservesOriginalUnion)
     const std::vector<int> originalPostingSizes = {3, 3};
     SPANN::ExtraStaticSearcher<float> searcher;
     BOOST_REQUIRE(
-        searcher.MergeHybridPureWithOriginalPosting(
+        searcher.MergeConstrainedPureWithOriginalPosting(
             hybrid, postingSizes,
             hybridPureSizes, original,
             originalPostingSizes));
@@ -2978,6 +3673,28 @@ BOOST_AUTO_TEST_CASE(BKTHybridCollapsedSiblingAdmissionAndEdges)
         siblingEdge.GetResult(0)->VID,
         target);
     BOOST_CHECK_GT(stats.m_crossEdges, 0);
+
+    SizeType* targetEdges = graph[target];
+    std::fill_n(
+        targetEdges, localEdges,
+        static_cast<SizeType>(-1));
+    targetEdges[0] = representative;
+    COMMON::QueryResultSet<float>
+        filteredCollapsed(
+            vectors.data() +
+                static_cast<size_t>(target) *
+                    dimension,
+            1);
+    BOOST_REQUIRE(
+        index.SearchIndexWithResultFilter(
+            filteredCollapsed,
+            [sibling](SizeType id) {
+                return id == sibling;
+            },
+            16) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        filteredCollapsed.GetResult(0)->VID,
+        sibling);
 }
 
 BOOST_AUTO_TEST_CASE(TaggedPureTailUpdate)

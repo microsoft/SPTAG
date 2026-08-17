@@ -3119,19 +3119,26 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         if (indexType == TenantIndexType::SPANN)
         {
             bool hybridDistanceEnabled = false;
+            bool limitedTagPostingEnabled = false;
             for (const auto& parameter :
                  m_extraSSDBuildParams) {
-                if (!SPTAG::Helper::StrUtils::
+                if (SPTAG::Helper::StrUtils::
                         StrEqualIgnoreCase(
                             parameter.first.c_str(),
                             "EnableHybridDistance")) {
-                    continue;
+                    SPTAG::Helper::Convert::
+                        ConvertStringTo<bool>(
+                            parameter.second.c_str(),
+                            hybridDistanceEnabled);
+                } else if (SPTAG::Helper::StrUtils::
+                               StrEqualIgnoreCase(
+                                   parameter.first.c_str(),
+                                   "EnableLimitedTagPosting")) {
+                    SPTAG::Helper::Convert::
+                        ConvertStringTo<bool>(
+                            parameter.second.c_str(),
+                            limitedTagPostingEnabled);
                 }
-                SPTAG::Helper::Convert::
-                    ConvertStringTo<bool>(
-                        parameter.second.c_str(),
-                        hybridDistanceEnabled);
-                break;
             }
             const char* skipPivotEnv = std::getenv("SPTAG_DISABLE_PIVOT_ESTIMATOR");
             const bool skipPivot = skipPivotEnv != nullptr &&
@@ -3175,6 +3182,24 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                     "head/posting node over all %d vectors; attribute pivot "
                     "partitioning is disabled\n",
                     tenantId, tenantVecCount);
+            } else if (limitedTagPostingEnabled) {
+                m_tenantPivotLevels[tenantId] = -1;
+                m_tenantPivotNodeCounts[tenantId] = 1;
+                m_tenantNodePivotTags[tenantId] = {
+                    std::vector<std::uint32_t>()};
+                auto& tagToNodes =
+                    m_tenantTagToNodes[tenantId];
+                tagToNodes.clear();
+                for (std::uint32_t tag :
+                     tenantLocalTags) {
+                    tagToNodes[tag] = {0};
+                }
+                fprintf(
+                    stderr,
+                    "[INFO] Tenant %d: limited-tag posting uses one global "
+                    "head graph with self-plus-one support; attribute pivot "
+                    "partitioning is disabled\n",
+                    tenantId);
             } else if (!skipPivot && !tenantLocalTags.empty()) {
                 // Routing/bundle planning must consider only the CATEGORICAL tag
                 // columns. Numeric attributes are inlined as the last

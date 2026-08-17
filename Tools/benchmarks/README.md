@@ -87,6 +87,36 @@ reconstruction, or single-attribute partition exists. Exact record-level flat
 or DNF filtering remains authoritative on either route. All routing thresholds
 and distance weights are native INI parameters.
 
+## Limited-Tag Static Postings
+
+`build_spann_attr_sift1m_zipf200_limited_tag.ini` builds the single-attribute
+limited-tag experiment. It keeps one canonical BKT head graph and does not
+create attribute subsets, hybrid edges, or cross edges. Each head persists
+exactly two support values in generation-bound `limited_tag_support.bin`:
+
+```text
+support[head][0] = source vector attribute
+support[head][1] = top-1 external attribute
+```
+
+Non-head vectors are assigned only to heads supporting their attribute, using
+the normal BKT candidate search and RNG pruning for up to eight replicas. The
+single STM1 posting remains `H | (O \ H)`: filtered queries scan `H`, while
+unfiltered queries navigate the original graph and scan the complete union.
+At load, the validated support sidecar builds only a compact tag-to-head lookup.
+If a predicate matches no more heads than native `MaxCheck`, search computes
+those head distances exactly; broader predicates use result admission on the
+global BKT. This lookup is not a second graph or per-tag ANN index.
+
+Generate the reproducible Zipf-200 attribute and build with:
+
+```bash
+python3 Tools/benchmarks/generate_sift1m_zipf_attribute.py \
+  --output-dir /datadisk/yfcc_fast/sptag_sift1m_zipf200
+Tools/benchmarks/run_spann_attr_build.sh \
+  Tools/benchmarks/build_spann_attr_sift1m_zipf200_limited_tag.ini
+```
+
 ## SIFT1B Raw STM1 Recommendation
 
 The SIFT1B recommendation uses raw UInt8 vectors in postings, four ACL

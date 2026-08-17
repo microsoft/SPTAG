@@ -515,6 +515,10 @@ namespace SPTAG {
                 std::uint64_t /*p_generationFingerprint*/)
             {
             }
+            virtual void SetLimitedTagGenerationFingerprint(
+                std::uint64_t /*p_generationFingerprint*/)
+            {
+            }
             virtual void SetNodeVectorAssignments(
                 const std::vector<std::vector<SizeType>>& /*p_assignments*/)
             {

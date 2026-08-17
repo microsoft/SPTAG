@@ -28,6 +28,7 @@
 #include "IExtraSearcher.h"
 #include "HybridHeadGraph.h"
 #include "HybridRoutingStats.h"
+#include "LimitedTagSupport.h"
 #include "Options.h"
 
 #include <functional>
@@ -121,6 +122,7 @@ namespace SPTAG
             mutable HybridHeadGraph m_hybridHeadGraph;
             mutable HybridDistanceConfig m_hybridDistance;
             mutable HybridRoutingStats m_hybridRoutingStats;
+            mutable LimitedTagSupport m_limitedTagSupport;
             mutable std::atomic<bool> m_headHybridGraphLoaded{false};
             mutable std::mutex m_headHybridGraphMutex;
             mutable std::shared_timed_mutex m_headTopologyLock;
@@ -340,6 +342,8 @@ namespace SPTAG
                 DimensionType p_crossEdgeCount) const;
             ErrorCode LoadHeadHybridGraph() const;
             ErrorCode LoadHybridRoutingStats();
+            ErrorCode LoadLimitedTagSupport(
+                const std::string& p_baseDir);
             ErrorCode LoadHeadCrossEdges() const;
             ErrorCode EnsureHeadHybridGraph();
             ErrorCode EnsureStaticTailCrossEdges();
@@ -361,7 +365,9 @@ namespace SPTAG
                 COMMON::QueryResultSet<T>* p_queryResults,
                 const std::vector<int>& p_candidateNodes,
                 int p_graphResultNum,
-                int& p_scannedOut) const;
+                int& p_scannedOut,
+                const std::function<bool(SizeType)>&
+                    p_globalResultFilter = {}) const;
 
             ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr);
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;

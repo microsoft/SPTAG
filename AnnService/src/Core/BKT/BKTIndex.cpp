@@ -304,7 +304,8 @@ template <bool EnableCrossEdges,
 void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space,
                       std::function<bool(const ByteArray &)> filterFunc,
                       const CrossGraphSearchContext* p_crossContext,
-                      CrossGraphSearchStats* p_crossStats) const
+                      CrossGraphSearchStats* p_crossStats,
+                      std::function<bool(SizeType)> p_resultFilter) const
 {
     std::shared_lock<std::shared_timed_mutex> treeLock;
     std::vector<std::shared_lock<std::shared_timed_mutex>> crossTreeLocks;
@@ -534,6 +535,150 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                 static_cast<size_t>(p_localId) <
                     nodeContext.m_localToGlobal->size();
         };
+    const auto admitFilteredResult =
+        [&](SizeType p_key,
+            const Index<T>* p_index,
+            SizeType p_local,
+            SizeType p_result,
+            float p_distance) {
+            if (!p_resultFilter || p_result < 0 ||
+                p_space.CheckResultAndSet(p_key)) {
+                return false;
+            }
+            return p_resultFilter(p_result) &&
+                notDeleted(
+                    p_index->m_deletedID, p_local) &&
+                checkFilter(
+                    p_index->m_pMetadata, p_local,
+                    filterFunc) &&
+                isDup(
+                    p_query, p_result, p_distance);
+        };
+    const auto admitCollapsedResults =
+        [&](int p_nodeID,
+            const Index<T>* p_index,
+            const std::vector<SizeType>*
+                p_localToGlobal,
+            SizeType p_representative,
+            float p_representativeDistance) {
+            const DimensionType checkPosition =
+                p_index->m_pGraph
+                    .m_iNeighborhoodSize -
+                1;
+            const SizeType checkNode =
+                p_index->m_pGraph[
+                    p_representative][
+                    checkPosition];
+            if (checkNode >= -1) return;
+
+            const bool useHybridCollapsed =
+                EnableCrossEdges &&
+                p_crossContext->m_useHybridDistance;
+            const COMMON::BKTNode& treeNode =
+                p_index->m_pTrees[
+                    -2 - checkNode];
+            SizeType treeIndex =
+                -treeNode.childStart;
+            SizeType collapsedLocal =
+                p_representative;
+            do
+            {
+                SizeType collapsedResult =
+                    collapsedLocal;
+                if constexpr (EnableCrossEdges)
+                {
+                    if (collapsedLocal < 0 ||
+                        p_localToGlobal == nullptr ||
+                        static_cast<size_t>(
+                            collapsedLocal) >=
+                            p_localToGlobal->size())
+                    {
+                        break;
+                    }
+                    collapsedResult =
+                        (*p_localToGlobal)[
+                            static_cast<size_t>(
+                                collapsedLocal)];
+                }
+
+                float collapsedDistance =
+                    p_representativeDistance;
+                if constexpr (EnableCrossEdges)
+                {
+                    if (p_crossContext
+                            ->m_useHybridDistance)
+                    {
+                        const float vectorDistance =
+                            p_index
+                                ->m_fComputeDistance(
+                                    p_query
+                                        .GetQuantizedTarget(),
+                                    p_index->m_pSamples[
+                                        collapsedLocal],
+                                    GetFeatureDim());
+                        collapsedDistance =
+                            p_crossContext
+                                ->m_queryDistance(
+                                    p_nodeID,
+                                    collapsedLocal,
+                                    vectorDistance);
+                    }
+                }
+
+                bool admitted = false;
+                if (p_resultFilter)
+                {
+                    SizeType collapsedKey =
+                        collapsedLocal;
+                    if constexpr (EnableCrossEdges)
+                    {
+                        if (!encodeQueryLocator(
+                                p_nodeID,
+                                collapsedLocal,
+                                collapsedKey))
+                        {
+                            collapsedKey = -1;
+                        }
+                    }
+                    if (collapsedKey >= 0)
+                    {
+                        admitted =
+                            admitFilteredResult(
+                                collapsedKey,
+                                p_index,
+                                collapsedLocal,
+                                collapsedResult,
+                                collapsedDistance);
+                    }
+                }
+                else if (
+                    collapsedResult >= 0 &&
+                    notDeleted(
+                        p_index->m_deletedID,
+                        collapsedLocal) &&
+                    checkFilter(
+                        p_index->m_pMetadata,
+                        collapsedLocal,
+                        filterFunc))
+                {
+                    admitted = isDup(
+                        p_query,
+                        collapsedResult,
+                        collapsedDistance);
+                }
+                if (admitted &&
+                    !useHybridCollapsed)
+                {
+                    break;
+                }
+                if (treeIndex <= 0) break;
+                collapsedLocal =
+                    p_index->m_pTrees[
+                        treeIndex].centerid;
+            } while (
+                treeIndex++ <
+                treeNode.childEnd);
+        };
     const auto finishSearch = [&]() {
         if constexpr (EnableCrossEdges)
         {
@@ -611,72 +756,18 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
         {
             if (checkNode < -1)
             {
-                const auto addCollapsedResults = [&]()
-                {
-                    const COMMON::BKTNode& tnode =
-                        currentIndex->m_pTrees[-2 - checkNode];
-                    SizeType i = -tnode.childStart;
-                    SizeType collapsedLocal = currentLocal;
-                    do
-                    {
-                        SizeType collapsedResult = collapsedLocal;
-                        if constexpr (EnableCrossEdges)
-                        {
-                            if (collapsedLocal < 0 ||
-                                static_cast<size_t>(collapsedLocal) >=
-                                    currentLocalToGlobal->size())
-                            {
-                                break;
-                            }
-                            collapsedResult =
-                                (*currentLocalToGlobal)[
-                                    static_cast<size_t>(collapsedLocal)];
-                        }
-                        float collapsedDistance =
-                            gnode.distance;
-                        if constexpr (EnableCrossEdges)
-                        {
-                            if (p_crossContext
-                                    ->m_useHybridDistance)
-                            {
-                                const float vectorDistance =
-                                    currentIndex
-                                        ->m_fComputeDistance(
-                                            p_query
-                                                .GetQuantizedTarget(),
-                                            currentIndex
-                                                ->m_pSamples[
-                                                    collapsedLocal],
-                                            GetFeatureDim());
-                                collapsedDistance =
-                                    p_crossContext
-                                        ->m_queryDistance(
-                                            currentNode,
-                                            collapsedLocal,
-                                            vectorDistance);
-                            }
-                        }
-                        if (collapsedResult >= 0 &&
-                            notDeleted(
-                                currentIndex->m_deletedID,
-                                collapsedLocal) &&
-                            checkFilter(
-                                currentIndex->m_pMetadata,
-                                collapsedLocal,
-                                filterFunc) &&
-                            isDup(
-                                p_query,
-                                collapsedResult,
-                                collapsedDistance))
-                        {
-                            if (!hybridCollapsed) break;
-                        }
-                        if (i <= 0) break;
-                        collapsedLocal =
-                            currentIndex->m_pTrees[i].centerid;
-                    } while (i++ < tnode.childEnd);
-                };
-                addCollapsedResults();
+                admitCollapsedResults(
+                    currentNode, currentIndex,
+                    currentLocalToGlobal,
+                    currentLocal,
+                    gnode.distance);
+            }
+            else if (p_resultFilter)
+            {
+                admitFilteredResult(
+                    gnode.node, currentIndex,
+                    currentLocal, resultNode,
+                    gnode.distance);
             }
             else if (notDeleted(
                          currentIndex->m_deletedID,
@@ -692,8 +783,20 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
         else if (notDeleted(
                      currentIndex->m_deletedID,
                      currentLocal) &&
-                 (gnode.distance > p_space.m_Results.worst() ||
-                  p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck))
+                 ((gnode.distance >
+                       p_space.m_Results.worst() &&
+                   (!p_resultFilter ||
+                    p_query.worstDist() < MaxDist)) ||
+                  p_space.m_iNumberOfCheckedLeaves >
+                      p_space.m_iMaxCheck))
+        {
+            finishSearch();
+            return;
+        }
+        if (p_resultFilter &&
+            p_query.worstDist() == MaxDist &&
+            p_space.m_iNumberOfCheckedLeaves >
+                p_space.m_iMaxCheck)
         {
             finishSearch();
             return;
@@ -825,6 +928,69 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
                           distance)
                     : distance;
                 ++p_space.m_iNumberOfCheckedLeaves;
+                if (p_resultFilter)
+                {
+                    const DimensionType
+                        targetCheckPosition =
+                            targetIndex->m_pGraph
+                                .m_iNeighborhoodSize -
+                            1;
+                    const SizeType targetCheckNode =
+                        targetIndex->m_pGraph[
+                            targetLocal][
+                            targetCheckPosition];
+                    if (targetCheckNode < -1)
+                    {
+                        const std::vector<SizeType>*
+                            targetLocalToGlobal =
+                                nullptr;
+                        if constexpr (
+                            EnableCrossEdges)
+                        {
+                            targetLocalToGlobal =
+                                p_crossContext
+                                    ->m_nodes[
+                                        static_cast<
+                                            size_t>(
+                                            targetNode)]
+                                    .m_localToGlobal;
+                        }
+                        admitCollapsedResults(
+                            targetNode,
+                            targetIndex,
+                            targetLocalToGlobal,
+                            targetLocal,
+                            routeDistance);
+                    }
+                    else
+                    {
+                        SizeType targetResult =
+                            targetLocal;
+                        if constexpr (
+                            EnableCrossEdges)
+                        {
+                            const auto&
+                                targetContext =
+                                    p_crossContext
+                                        ->m_nodes[
+                                            static_cast<
+                                                size_t>(
+                                                targetNode)];
+                            targetResult =
+                                (*targetContext
+                                      .m_localToGlobal)[
+                                    static_cast<
+                                        size_t>(
+                                        targetLocal)];
+                        }
+                        admitFilteredResult(
+                            targetKey,
+                            targetIndex,
+                            targetLocal,
+                            targetResult,
+                            routeDistance);
+                    }
+                }
                 if (p_space.m_Results.insert(
                         routeDistance))
                 {
@@ -994,7 +1160,8 @@ bool CheckFilter(const std::shared_ptr<MetadataSet> &metadata, SizeType node,
 
 template <typename T>
 void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted,
-                           bool p_searchDuplicated, std::function<bool(const ByteArray &)> filterFunc) const
+                           bool p_searchDuplicated, std::function<bool(const ByteArray &)> filterFunc,
+                           std::function<bool(SizeType)> p_resultFilter) const
 {
     if (m_pQuantizer && !p_query.HasQuantizedTarget())
     {
@@ -1011,35 +1178,35 @@ void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace
     {
     case 0b000:
         Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(
-            p_query, p_space, filterFunc);
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b001:
         Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(
-            p_query, p_space, filterFunc);
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b010:
         Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(
-            p_query, p_space, filterFunc);
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b011:
         Search<false, StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(
-            p_query, p_space, filterFunc);
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b100:
-        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space,
-                                                                                                  filterFunc);
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b101:
-        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space,
-                                                                                                 filterFunc);
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b110:
-        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space,
-                                                                                                  filterFunc);
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     case 0b111:
-        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space,
-                                                                                                 filterFunc);
+        Search<false, StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(
+            p_query, p_space, filterFunc, nullptr, nullptr, p_resultFilter);
         break;
     default:
         std::ostringstream oss;
@@ -1213,6 +1380,41 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
         {
             SizeType result = p_query.GetResult(i)->VID;
             p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+        }
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::SearchIndexWithResultFilter(
+    QueryResult& p_query,
+    std::function<bool(SizeType)> p_resultFilter,
+    int p_maxCheck,
+    bool p_searchDeleted) const
+{
+    if (!m_bReady)
+        return ErrorCode::EmptyIndex;
+    if (!p_resultFilter)
+        return SearchIndex(p_query, p_searchDeleted);
+
+    auto workSpace = RentWorkSpace(
+        p_query.GetResultNum(), nullptr,
+        p_maxCheck > 0 ? p_maxCheck : m_iMaxCheck);
+    workSpace->PrepareResultCheckStatus();
+    SearchIndex(
+        *((COMMON::QueryResultSet<T>*)&p_query), *workSpace,
+        p_searchDeleted, true, nullptr, p_resultFilter);
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
+    if (p_query.WithMeta() && nullptr != m_pMetadata)
+    {
+        for (int i = 0; i < p_query.GetResultNum(); ++i)
+        {
+            SizeType result = p_query.GetResult(i)->VID;
+            p_query.SetMetadata(
+                i, (result < 0)
+                       ? ByteArray::c_empty
+                       : m_pMetadata->GetMetadataCopy(result));
         }
     }
     return ErrorCode::Success;
