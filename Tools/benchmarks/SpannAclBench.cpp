@@ -32,6 +32,7 @@ struct Options
     std::vector<std::string> searchSweepInis;
     std::string valueType = "Float";
     int tagColumn = -1;
+    int orTagCount = 0;
     std::vector<int> dnfAndColumns;
     int tenant = 0;
     int topk = 10;
@@ -62,6 +63,7 @@ void Usage(const char* p_program)
               << " --index <index-dir> --queries <query.npy>"
               << " (--truth <truth.npy> | --truth-dir <directory>)"
               << " [--query-tags <tags.npy> --tag-column <0..N-1>]"
+              << " [--query-tags <tags.npy> --or-tag-count <N>]"
               << " [--dnf-and-cols <col[,col...]>]"
               << " [--search-ini <native-search.ini>]"
               << " [--search-sweep-ini <native-search.ini>]..."
@@ -152,6 +154,11 @@ bool ParseArgs(int p_argc, char** p_argv, Options& p_options)
             p_options.valueType = value;
         } else if (std::strcmp(arg, "--tag-column") == 0) {
             if (!ParseInt(value, p_options.tagColumn)) return false;
+        } else if (std::strcmp(arg, "--or-tag-count") == 0) {
+            if (!ParseInt(value, p_options.orTagCount) ||
+                p_options.orTagCount <= 0) {
+                return false;
+            }
         } else if (std::strcmp(arg, "--dnf-and-cols") == 0) {
             if (!ParseColumnList(value, p_options.dnfAndColumns)) return false;
         } else if (std::strcmp(arg, "--tenant") == 0) {
@@ -173,19 +180,25 @@ bool ParseArgs(int p_argc, char** p_argv, Options& p_options)
     const bool basicOptions = (p_options.valueType == "Float" || p_options.valueType == "UInt8") &&
         !p_options.indexDir.empty() && !p_options.queryFile.empty() &&
         (p_options.allAclLevels ? hasAllLevelTruth : hasSingleTruth);
-    if (!basicOptions || (p_options.tagColumn >= 0 && !p_options.dnfAndColumns.empty())) {
+    const int filterModes =
+        (p_options.tagColumn >= 0 ? 1 : 0) +
+        (p_options.orTagCount > 0 ? 1 : 0) +
+        (!p_options.dnfAndColumns.empty() ? 1 : 0);
+    if (!basicOptions || filterModes > 1) {
         return false;
     }
     if (p_options.allAclLevels) {
         return !p_options.directSearch && p_options.tagColumn < 0 &&
-            p_options.dnfAndColumns.empty() && !p_options.queryTagsFile.empty();
+            p_options.orTagCount == 0 &&
+            p_options.dnfAndColumns.empty() &&
+            !p_options.queryTagsFile.empty();
     }
-    return ((p_options.tagColumn < 0 && p_options.dnfAndColumns.empty() &&
+    return ((filterModes == 0 &&
              p_options.queryTagsFile.empty()) ||
-            ((p_options.tagColumn >= 0 || !p_options.dnfAndColumns.empty()) &&
+            (filterModes == 1 &&
              !p_options.queryTagsFile.empty())) &&
         (!p_options.directSearch ||
-         (p_options.tagColumn < 0 && p_options.dnfAndColumns.empty()));
+         filterModes == 0);
 }
 
 bool ReadNpyHeader(std::ifstream& p_input, NpyHeader& p_header)
@@ -310,13 +323,17 @@ int main(int argc, char** argv)
     std::size_t queryCount = 0, dimension = 0;
     std::size_t tagCount = 0, tagCols = 0;
     const bool requiresQueryTags =
-        options.allAclLevels || options.tagColumn >= 0 || !options.dnfAndColumns.empty();
+        options.allAclLevels || options.tagColumn >= 0 ||
+        options.orTagCount > 0 ||
+        !options.dnfAndColumns.empty();
     if (!ReadNpyMatrix(options.queryFile, "<f4", queries, queryCount, dimension) ||
         (requiresQueryTags &&
          (!ReadNpyMatrix(options.queryTagsFile, "<u4", queryTags, tagCount, tagCols) ||
           tagCount != queryCount ||
           (options.allAclLevels && tagCols < 4) ||
           (options.tagColumn >= 0 && static_cast<std::size_t>(options.tagColumn) >= tagCols) ||
+          (options.orTagCount > 0 &&
+           static_cast<std::size_t>(options.orTagCount) > tagCols) ||
           std::any_of(options.dnfAndColumns.begin(), options.dnfAndColumns.end(),
                       [tagCols](int column) { return static_cast<std::size_t>(column) >= tagCols; })))) {
         std::cerr << "Invalid query, truth, or tag npy input\n";
@@ -385,6 +402,7 @@ int main(int argc, char** argv)
     {
         const char* level;
         int tagColumn;
+        int orTagCount;
         const std::vector<int>* dnfAndColumns;
         const TruthMatrix* truth;
     };
@@ -392,16 +410,19 @@ int main(int argc, char** argv)
     std::vector<Scenario> scenarios;
     if (options.allAclLevels) {
         scenarios = {
-            {"unfilter", -1, nullptr, &truthMatrices[0]},
-            {"org", 0, nullptr, &truthMatrices[1]},
-            {"dept", 1, nullptr, &truthMatrices[2]},
-            {"team", 2, nullptr, &truthMatrices[3]},
-            {"project", 3, nullptr, &truthMatrices[4]},
+            {"unfilter", -1, 0, nullptr, &truthMatrices[0]},
+            {"org", 0, 0, nullptr, &truthMatrices[1]},
+            {"dept", 1, 0, nullptr, &truthMatrices[2]},
+            {"team", 2, 0, nullptr, &truthMatrices[3]},
+            {"project", 3, 0, nullptr, &truthMatrices[4]},
         };
     } else {
         scenarios.push_back(
-            {options.tagColumn < 0 ? "unfilter" : "custom",
+            {options.orTagCount > 0
+                 ? "or"
+                 : (options.tagColumn < 0 ? "unfilter" : "custom"),
              options.tagColumn,
+             options.orTagCount,
              &options.dnfAndColumns,
              &truthMatrices.front()});
     }
@@ -423,6 +444,20 @@ int main(int argc, char** argv)
                         dimension * sizeof(float), false);
                 if (options.directSearch) {
                     return manager.Search(queryBytes, options.tenant, options.topk);
+                }
+                if (scenario.orTagCount > 0) {
+                    auto* tags = queryTags.data() +
+                        p_queryIndex * tagCols;
+                    const ByteArray tagBytes(
+                        reinterpret_cast<std::uint8_t*>(tags),
+                        static_cast<std::size_t>(
+                            scenario.orTagCount) *
+                            sizeof(std::uint32_t),
+                        false);
+                    return manager.SearchWithACL(
+                        queryBytes, options.tenant,
+                        options.topk, tagBytes,
+                        scenario.orTagCount);
                 }
                 if (scenario.dnfAndColumns != nullptr && !scenario.dnfAndColumns->empty()) {
                     constexpr std::uint32_t kDNF3Magic = 0x444E4633U;
@@ -533,6 +568,7 @@ int main(int argc, char** argv)
                       << "\"search_ini\":\"" << activeSearchIni << "\","
                       << "\"search_api\":\"" << (options.directSearch ? "Search" : "SearchWithACL") << "\","
                       << "\"filter_column\":" << scenario.tagColumn << ","
+                      << "\"or_tag_count\":" << scenario.orTagCount << ","
                       << "\"dnf_and_columns\":"
                       << (scenario.dnfAndColumns == nullptr ? 0 : scenario.dnfAndColumns->size()) << ","
                       << "\"recall\":" << recall << ","
