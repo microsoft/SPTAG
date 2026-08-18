@@ -27,6 +27,11 @@ public:
     static constexpr std::uint32_t EmptyTag =
         (std::numeric_limits<std::uint32_t>::max)();
 
+    static constexpr bool IsSupportedSlotCount(int p_slots)
+    {
+        return p_slots == 2 || p_slots == 4;
+    }
+
 #pragma pack(push, 1)
     struct Header
     {

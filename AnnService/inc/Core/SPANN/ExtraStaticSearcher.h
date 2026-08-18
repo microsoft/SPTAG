@@ -1205,7 +1205,8 @@ namespace SPTAG
                     m_staticBuildTags.size() !=
                         static_cast<size_t>(p_fullCount) ||
                     p_opt.m_batches != 1 ||
-                    p_opt.m_limitedTagSlotsPerHead != 4 ||
+                    !LimitedTagSupport::IsSupportedSlotCount(
+                        p_opt.m_limitedTagSlotsPerHead) ||
                     p_opt.m_limitedTagVoteHeadCount <= 0 ||
                     p_opt.m_limitedTagMinHeadCount <= 0 ||
                     p_opt.m_replicaCount <= 0 ||
@@ -1215,8 +1216,8 @@ namespace SPTAG
                     SPTAGLIB_LOG(
                         Helper::LogLevel::LL_Error,
                         "Limited-tag placement requires one-column raw metadata, "
-                        "unquantized BKT heads, one batch, exactly four tag slots "
-                        "(self plus three external tags), and valid support/RNG parameters.\n");
+                        "unquantized BKT heads, one batch, two or four tag slots "
+                        "(self plus one or three external tags), and valid support/RNG parameters.\n");
                     return false;
                 }
 

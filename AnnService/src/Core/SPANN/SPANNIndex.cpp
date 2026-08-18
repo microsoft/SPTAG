@@ -2009,11 +2009,12 @@ ErrorCode Index<T>::LoadLimitedTagSupport(
         m_extraSearcher == nullptr ||
         !m_extraSearcher->HasHybridPurePostings() ||
         m_index == nullptr ||
-        m_options.m_limitedTagSlotsPerHead < 2 ||
+        !LimitedTagSupport::IsSupportedSlotCount(
+            m_options.m_limitedTagSlotsPerHead) ||
         m_options.m_limitedTagSupportFile.empty()) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Enabled limited-tag mode has no valid self-plus-one constrained "
+            "Enabled limited-tag mode has no valid 2/4-slot constrained "
             "static posting layout.\n");
         return ErrorCode::Fail;
     }
@@ -6439,7 +6440,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
          m_options.m_storage != Storage::STATIC ||
          m_options.m_numTagsPerVec != 1 ||
          !m_options.m_excludehead ||
-         m_options.m_limitedTagSlotsPerHead != 4 ||
+         !LimitedTagSupport::IsSupportedSlotCount(
+             m_options.m_limitedTagSlotsPerHead) ||
          m_options.m_limitedTagVoteHeadCount <= 0 ||
          m_options.m_limitedTagMinHeadCount <= 0 ||
          m_options.m_replicaCount <= 0 ||
@@ -6457,7 +6459,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
             "Limited-tag posting requires raw one-column STATIC BKT, "
-            "ExcludeHead=true, exactly four support slots (self plus three external), "
+            "ExcludeHead=true, two or four support slots "
+            "(self plus one or three external), "
             "positive replica/tail/support parameters, "
             "one batch/file, and no compression, rearrangement, ordered pages, "
             "or posting quantizer.\n");

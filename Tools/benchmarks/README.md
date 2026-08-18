@@ -91,13 +91,19 @@ and distance weights are native INI parameters.
 
 `build_spann_attr_sift1m_zipf200_limited_tag.ini` builds the single-attribute
 limited-tag experiment. It keeps one canonical BKT head graph and does not
-create attribute subsets, hybrid edges, or cross edges. Each head persists
-exactly four support values in generation-bound `limited_tag_support.bin`:
+create attribute subsets, hybrid edges, or cross edges. Native
+`[BuildSSDIndex] LimitedTagSlotsPerHead` accepts `2` (the default) or `4`.
+Each head persists exactly that many support values in generation-bound
+`limited_tag_support.bin`:
 
 ```text
 support[head][0] = source vector attribute
-support[head][1..3] = top-3 external attributes
+support[head][1..N-1] = top-(N-1) external attributes, N in {2, 4}
 ```
+
+The canonical INI sets `LimitedTagSlotsPerHead=2` explicitly. Use
+`build_spann_attr_sift1m_zipf200_limited_tag4.ini` for the isolated four-slot
+experiment.
 
 Non-head vectors are assigned only to heads supporting their attribute, using
 the normal BKT candidate search and RNG pruning for up to eight replicas. The

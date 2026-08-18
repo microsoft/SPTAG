@@ -2881,12 +2881,105 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
             set("BuildSSDIndex",
                 "EnableLimitedTagPosting", "true");
             set("BuildSSDIndex",
-                "LimitedTagSlotsPerHead", "4");
-            set("BuildSSDIndex",
                 "LimitedTagVoteHeadCount", "2");
             set("BuildSSDIndex",
                 "LimitedTagMinHeadCount", "8");
         };
+
+    const auto verifyDefaultTwoSlots = [&]() {
+        auto defaultIndex =
+            VectorIndex::CreateInstance(
+                IndexAlgoType::SPANN,
+                VectorValueType::Float);
+        BOOST_REQUIRE(defaultIndex != nullptr);
+        configure(defaultIndex);
+        auto* defaultSPANN =
+            dynamic_cast<SPANN::ISPANNIndex*>(
+                defaultIndex.get());
+        auto* defaultTyped =
+            dynamic_cast<SPANN::Index<float>*>(
+                defaultIndex.get());
+        BOOST_REQUIRE(defaultSPANN != nullptr);
+        BOOST_REQUIRE(defaultTyped != nullptr);
+        BOOST_CHECK_EQUAL(
+            defaultTyped->GetOptions()
+                ->m_limitedTagSlotsPerHead,
+            2);
+        defaultSPANN->SetVectorTags(
+            tags.data(), baseCount, 1);
+        BOOST_REQUIRE(
+            defaultIndex->BuildIndex(
+                vectors, nullptr, true, false,
+                false) == ErrorCode::Success);
+        BOOST_REQUIRE(
+            defaultIndex->SaveIndex(
+                indexDirectory) ==
+            ErrorCode::Success);
+
+        const SizeType defaultHeadCount =
+            defaultSPANN->GetMemoryIndex()
+                ->GetNumSamples();
+        std::uint64_t defaultGeneration = 0;
+        BOOST_REQUIRE(
+            Helper::Convert::ConvertStringTo<
+                std::uint64_t>(
+                defaultTyped->GetOptions()
+                    ->m_limitedTagGenerationFingerprint
+                    .c_str(),
+                defaultGeneration));
+        SPANN::LimitedTagSupport defaultSupport;
+        std::string defaultSupportError;
+        BOOST_REQUIRE(
+            defaultSupport.Load(
+                indexDirectory +
+                    "/limited_tag_support.bin",
+                defaultHeadCount, 2, 2, 8,
+                defaultGeneration,
+                &defaultSupportError));
+        for (SizeType head = 0;
+             head < defaultHeadCount; ++head) {
+            BOOST_CHECK_EQUAL(
+                defaultSupport.HeadTags(head).size(),
+                2);
+        }
+
+        std::ifstream defaultLoader(
+            indexDirectory +
+                "/indexloader.ini");
+        BOOST_REQUIRE(defaultLoader.good());
+        const std::string defaultConfig(
+            (std::istreambuf_iterator<char>(
+                 defaultLoader)),
+            std::istreambuf_iterator<char>());
+        BOOST_CHECK(
+            defaultConfig.find(
+                "LimitedTagSlotsPerHead=2") !=
+            std::string::npos);
+        defaultLoader.close();
+        defaultIndex.reset();
+
+        std::shared_ptr<VectorIndex>
+            reloadedDefault;
+        BOOST_REQUIRE(
+            VectorIndex::LoadIndex(
+                indexDirectory,
+                reloadedDefault) ==
+            ErrorCode::Success);
+        auto* reloadedTyped =
+            dynamic_cast<SPANN::Index<float>*>(
+                reloadedDefault.get());
+        BOOST_REQUIRE(reloadedTyped != nullptr);
+        BOOST_CHECK_EQUAL(
+            reloadedTyped->GetOptions()
+                ->m_limitedTagSlotsPerHead,
+            2);
+        reloadedDefault.reset();
+        std::filesystem::remove_all(
+            indexDirectory);
+        std::filesystem::create_directories(
+            indexDirectory);
+    };
+    verifyDefaultTwoSlots();
 
     const auto rejectConfiguration =
         [&](const char* key, const char* value) {
@@ -2916,6 +3009,8 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
     rejectConfiguration(
         "EnableHybridDistance", "true");
     rejectConfiguration(
+        "LimitedTagSlotsPerHead", "1");
+    rejectConfiguration(
         "LimitedTagSlotsPerHead", "3");
     rejectConfiguration(
         "LimitedTagSlotsPerHead", "5");
@@ -2925,6 +3020,11 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
         VectorValueType::Float);
     BOOST_REQUIRE(index != nullptr);
     configure(index);
+    BOOST_REQUIRE(
+        index->SetParameter(
+            "LimitedTagSlotsPerHead", "4",
+            "BuildSSDIndex") ==
+        ErrorCode::Success);
     auto* spann =
         dynamic_cast<SPANN::ISPANNIndex*>(
             index.get());
