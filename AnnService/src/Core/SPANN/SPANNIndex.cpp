@@ -4909,13 +4909,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // route. The full route may match only in the tail, while legacy flat
         // tags are column-agnostic and cannot safely use a column-specific mask.
         workSpace->m_postingFilter =
-            m_options.m_enableHybridDistance &&
-                    hasExactFilter &&
-                    (!useHybridRoute ||
-                     queryDNF == nullptr ||
-                     queryDNF->Empty())
+            useLimitedTagPure
                 ? nullptr
-                : postingFilter;
+                : (m_options.m_enableHybridDistance &&
+                           hasExactFilter &&
+                           (!useHybridRoute ||
+                            queryDNF == nullptr ||
+                            queryDNF->Empty())
+                       ? nullptr
+                       : postingFilter);
         // Propagate inline tag filter (for per-vector exact tag check in posting scan)
         workSpace->m_queryTags = queryTags;
         workSpace->m_numQueryTags = numQueryTags;

@@ -7159,7 +7159,9 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                     dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
                 auto* searchOptions =
                     spannInternalIdx != nullptr ? spannInternalIdx->GetOptions() : nullptr;
-                if (searchOptions != nullptr && searchOptions->m_enableHierPostingFilter) {
+                if (searchOptions != nullptr &&
+                    searchOptions->m_enableHierPostingFilter &&
+                    !searchOptions->m_enableLimitedTagPosting) {
                 const int quantCols = memoryIndex->GetHeadNodeNumQuantCols();
                 const SPTAG::Cache::NumQuantParam* qp =
                     (numMeta != nullptr && !numMeta->params.empty()) ? numMeta->params.data() : nullptr;
