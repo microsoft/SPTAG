@@ -1205,7 +1205,7 @@ namespace SPTAG
                     m_staticBuildTags.size() !=
                         static_cast<size_t>(p_fullCount) ||
                     p_opt.m_batches != 1 ||
-                    p_opt.m_limitedTagSlotsPerHead != 2 ||
+                    p_opt.m_limitedTagSlotsPerHead != 4 ||
                     p_opt.m_limitedTagVoteHeadCount <= 0 ||
                     p_opt.m_limitedTagMinHeadCount <= 0 ||
                     p_opt.m_replicaCount <= 0 ||
@@ -1215,8 +1215,8 @@ namespace SPTAG
                     SPTAGLIB_LOG(
                         Helper::LogLevel::LL_Error,
                         "Limited-tag placement requires one-column raw metadata, "
-                        "unquantized BKT heads, one batch, exactly two tag slots "
-                        "(self plus one external tag), and valid support/RNG parameters.\n");
+                        "unquantized BKT heads, one batch, exactly four tag slots "
+                        "(self plus three external tags), and valid support/RNG parameters.\n");
                     return false;
                 }
 
@@ -1490,6 +1490,17 @@ namespace SPTAG
                 std::sort(
                     observedTags.begin(),
                     observedTags.end());
+                const size_t supportTarget =
+                    static_cast<size_t>(
+                        p_opt.m_limitedTagSlotsPerHead);
+                if (observedTags.size() < supportTarget) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Limited-tag placement needs at least %zu distinct tags "
+                        "to fill every head (got %zu).\n",
+                        supportTarget, observedTags.size());
+                    return false;
+                }
                 std::uint64_t centroidFallbackSupports = 0;
                 if (observedTags.size() > 1) {
                     const int fallbackResultCount =
@@ -1503,16 +1514,24 @@ namespace SPTAG
                             headSupport[
                                 static_cast<size_t>(
                                     head)];
-                        if (choices.size() > 1)
+                        if (choices.size() >= supportTarget)
                             continue;
                         const std::uint32_t ownTag =
                             headOwnTags[
                                 static_cast<size_t>(
                                     head)];
-                        SizeType bestHead = MaxSize;
-                        std::uint32_t bestTag =
-                            LimitedTagSupport::EmptyTag;
-                        float bestDistance = MaxDist;
+                        const auto alreadySupports =
+                            [&choices](std::uint32_t p_tag) {
+                                return std::any_of(
+                                    choices.begin(),
+                                    choices.end(),
+                                    [p_tag](
+                                        const SupportChoice&
+                                            p_choice) {
+                                        return p_choice.m_tag ==
+                                            p_tag;
+                                    });
+                            };
                         COMMON::QueryResultSet<ValueType>
                             neighbors(
                                 static_cast<const ValueType*>(
@@ -1541,17 +1560,25 @@ namespace SPTAG
                                     headOwnTags[
                                         static_cast<size_t>(
                                             result->VID)];
-                                if (tag == ownTag)
+                                if (tag == ownTag ||
+                                    alreadySupports(tag))
                                     continue;
-                                bestHead = result->VID;
-                                bestTag = tag;
-                                bestDistance =
-                                    result->Dist;
-                                break;
+                                choices.push_back({
+                                    tag, result->Dist,
+                                    false});
+                                ++coverage[tag];
+                                ++centroidFallbackSupports;
+                                if (choices.size() >=
+                                    supportTarget) {
+                                    break;
+                                }
                             }
                         }
-                        if (bestTag ==
-                            LimitedTagSupport::EmptyTag) {
+                        if (choices.size() <
+                            supportTarget) {
+                            std::unordered_map<
+                                std::uint32_t, float>
+                                closestByTag;
                             for (SizeType candidate = 0;
                                  candidate < headCount;
                                  ++candidate) {
@@ -1563,42 +1590,78 @@ namespace SPTAG
                                     tag == ownTag) {
                                     continue;
                                 }
+                                if (alreadySupports(tag))
+                                    continue;
                                 const float distance =
                                     p_headIndex
-                                        ->ComputeDistance(
+                                       ->ComputeDistance(
                                             p_headIndex
                                                 ->GetSample(
                                                     head),
                                             p_headIndex
                                                 ->GetSample(
                                                     candidate));
-                                if (distance <
-                                        bestDistance ||
-                                    (distance ==
-                                         bestDistance &&
-                                     candidate <
-                                         bestHead)) {
-                                    bestHead = candidate;
-                                    bestTag = tag;
-                                    bestDistance =
+                                const auto found =
+                                    closestByTag.find(tag);
+                                if (found ==
+                                        closestByTag.end() ||
+                                    distance <
+                                        found->second) {
+                                    closestByTag[tag] =
                                         distance;
                                 }
                             }
+                            std::vector<SupportChoice>
+                                fallbackChoices;
+                            fallbackChoices.reserve(
+                                closestByTag.size());
+                            for (const auto& candidate :
+                                 closestByTag) {
+                                fallbackChoices.push_back({
+                                    candidate.first,
+                                    candidate.second,
+                                    false});
+                            }
+                            std::sort(
+                                fallbackChoices.begin(),
+                                fallbackChoices.end(),
+                                [](const SupportChoice&
+                                       p_left,
+                                   const SupportChoice&
+                                       p_right) {
+                                    if (p_left.m_distance !=
+                                        p_right.m_distance) {
+                                        return p_left
+                                                  .m_distance <
+                                            p_right
+                                               .m_distance;
+                                    }
+                                    return p_left.m_tag <
+                                        p_right.m_tag;
+                                });
+                            for (const auto& candidate :
+                                 fallbackChoices) {
+                                if (choices.size() >=
+                                    supportTarget) {
+                                    break;
+                                }
+                                choices.push_back(
+                                    candidate);
+                                ++coverage[
+                                    candidate.m_tag];
+                                ++centroidFallbackSupports;
+                            }
                         }
-                        if (bestTag ==
-                            LimitedTagSupport::EmptyTag) {
+                        if (choices.size() !=
+                            supportTarget) {
                             SPTAGLIB_LOG(
                                 Helper::LogLevel::LL_Error,
-                                "Limited-tag head %d has no external "
-                                "attribute candidate.\n",
-                                head);
+                                "Limited-tag head %d has only %zu/%zu "
+                                "distinct support tags.\n",
+                                head, choices.size(),
+                                supportTarget);
                             return false;
                         }
-                        choices.push_back({
-                            bestTag, bestDistance,
-                            false});
-                        ++coverage[bestTag];
-                        ++centroidFallbackSupports;
                     }
                 }
                 for (auto& entry : tagCandidates) {
@@ -2082,13 +2145,14 @@ namespace SPTAG
                 SPTAGLIB_LOG(
                     Helper::LogLevel::LL_Info,
                     "Limited-tag support selected %zu tags over %d heads "
-                    "(self+top-1 external, slots<=%d coverage>=%d); "
+                    "(self+top-%d external, slots=%d coverage>=%d); "
                     "retained all %llu RNG assignments "
                     "(voteChecks=%llu placementChecks=%llu "
                     "exactFallbacks=%llu/%llu "
-                    "emptyVoteCentroidFallbacks=%llu).\n",
+                    "headNeighborFallbackSupports=%llu).\n",
                     observedTags.size(),
                     static_cast<int>(headCount),
+                    p_opt.m_limitedTagSlotsPerHead - 1,
                     p_opt.m_limitedTagSlotsPerHead,
                     p_opt.m_limitedTagMinHeadCount,
                     static_cast<unsigned long long>(

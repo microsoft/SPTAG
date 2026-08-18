@@ -88,7 +88,7 @@ DefineSSDParameter(m_hybridGenerationFingerprint, std::string, std::string("0"),
 DefineSSDParameter(m_enableLimitedTagPosting, bool, false, "EnableLimitedTagPosting")
 DefineSSDParameter(m_limitedTagGenerationFingerprint, std::string, std::string("0"), "LimitedTagGenerationFingerprint")
 DefineSSDParameter(m_limitedTagSupportFile, std::string, std::string("limited_tag_support.bin"), "LimitedTagSupportFile")
-DefineSSDParameter(m_limitedTagSlotsPerHead, int, 2, "LimitedTagSlotsPerHead")
+DefineSSDParameter(m_limitedTagSlotsPerHead, int, 4, "LimitedTagSlotsPerHead")
 DefineSSDParameter(m_limitedTagVoteHeadCount, int, 2, "LimitedTagVoteHeadCount")
 DefineSSDParameter(m_limitedTagMinHeadCount, int, 8, "LimitedTagMinHeadCount")
 DefineSSDParameter(m_hybridVectorWeight, float, 1.0f, "HybridVectorWeight")

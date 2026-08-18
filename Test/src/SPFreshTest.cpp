@@ -2881,7 +2881,7 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
             set("BuildSSDIndex",
                 "EnableLimitedTagPosting", "true");
             set("BuildSSDIndex",
-                "LimitedTagSlotsPerHead", "2");
+                "LimitedTagSlotsPerHead", "4");
             set("BuildSSDIndex",
                 "LimitedTagVoteHeadCount", "2");
             set("BuildSSDIndex",
@@ -2917,6 +2917,8 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
         "EnableHybridDistance", "true");
     rejectConfiguration(
         "LimitedTagSlotsPerHead", "3");
+    rejectConfiguration(
+        "LimitedTagSlotsPerHead", "5");
 
     auto index = VectorIndex::CreateInstance(
         IndexAlgoType::SPANN,
@@ -2970,7 +2972,7 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
         "/limited_tag_support.bin";
     BOOST_REQUIRE(
         support.Load(
-            supportPath, headCount, 2, 2, 8,
+            supportPath, headCount, 4, 2, 8,
             generation, &supportError));
     COMMON::Dataset<std::uint64_t> headVectorIDs;
     BOOST_REQUIRE(
@@ -2987,7 +2989,7 @@ BOOST_AUTO_TEST_CASE(StaticLimitedTagBuildSearchReloadAndCorruption)
          head < headCount; ++head) {
         const auto headTags =
             support.HeadTags(head);
-        BOOST_REQUIRE_EQUAL(headTags.size(), 2);
+        BOOST_REQUIRE_EQUAL(headTags.size(), 4);
         const SizeType sourceVID =
             static_cast<SizeType>(
                 *headVectorIDs[head]);
