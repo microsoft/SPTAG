@@ -29,6 +29,7 @@
 #include "HybridHeadGraph.h"
 #include "HybridRoutingStats.h"
 #include "LimitedTagSupport.h"
+#include "SecondLevelHeadPostings.h"
 #include "Options.h"
 
 #include <functional>
@@ -123,6 +124,8 @@ namespace SPTAG
             mutable HybridDistanceConfig m_hybridDistance;
             mutable HybridRoutingStats m_hybridRoutingStats;
             mutable LimitedTagSupport m_limitedTagSupport;
+            std::shared_ptr<VectorIndex> m_secondLevelIndex;
+            SecondLevelHeadPostings m_secondLevelPostings;
             mutable std::atomic<bool> m_headHybridGraphLoaded{false};
             mutable std::mutex m_headHybridGraphMutex;
             mutable std::shared_timed_mutex m_headTopologyLock;
@@ -344,6 +347,19 @@ namespace SPTAG
             ErrorCode LoadHybridRoutingStats();
             ErrorCode LoadLimitedTagSupport(
                 const std::string& p_baseDir);
+            ErrorCode BuildSecondLevelHeadPostings();
+            ErrorCode LoadSecondLevelIndex(
+                const std::string& p_baseDir);
+            ErrorCode SearchSecondLevelHeads(
+                COMMON::QueryResultSet<T>* p_queryResults,
+                int p_graphResultNum,
+                const Cache::PostingBitmask&
+                    p_querySignature,
+                const std::function<bool(SizeType)>&
+                    p_headAdmission,
+                std::uint64_t
+                    p_matchingHeadReferences,
+                int& p_scannedOut) const;
             ErrorCode LoadHeadCrossEdges() const;
             ErrorCode EnsureHeadHybridGraph();
             ErrorCode EnsureStaticTailCrossEdges();
@@ -478,9 +494,20 @@ namespace SPTAG
             };
 
             bool CheckHeadIndexType();
-            void SelectHeadAdjustOptions(int p_vectorCount);
-            int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<int>& p_selected);
-            void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount, std::vector<int>& p_selected);
+            void SelectHeadAdjustOptions(Options& p_options, int p_vectorCount);
+            int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<SizeType>& p_selected);
+            void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount,
+                                       const Options& p_options, std::vector<SizeType>& p_selected,
+                                       const std::vector<SizeType>* p_candidateIndices = nullptr);
+
+            template <typename InternalDataType>
+            bool SelectHeadsFromData(COMMON::Dataset<InternalDataType>& p_data,
+                                     Options& p_options,
+                                     const std::vector<int>* p_perVectorTags,
+                                     std::vector<SizeType>& p_selected,
+                                     const char* p_stage,
+                                     bool p_fallbackToFirst,
+                                     const std::vector<SizeType>* p_candidateIndices = nullptr);
 
             template <typename InternalDataType>
             bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);

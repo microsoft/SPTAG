@@ -78,6 +78,16 @@ namespace SPTAG {
             double m_dualPoolExtraRatio;
             std::string m_uExtraIDFile;
             bool m_parallelBKTBuild;
+            bool m_selectSecondLevel;
+            double m_secondLevelRatio;
+            std::string m_secondLevelHeadVectorFile;
+            std::string m_secondLevelHeadIDFile;
+            int m_secondLevelReplicaCount;
+            std::string m_secondLevelHeadIndexFolder;
+            std::string m_secondLevelPostingFile;
+            std::string m_secondLevelGenerationFingerprint;
+            float m_secondLevelRouteSelectivityThreshold;
+            int m_secondLevelMaxCheck;
 
             // Section 3: for build head
             bool m_buildHead;

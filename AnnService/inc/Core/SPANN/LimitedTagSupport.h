@@ -163,6 +163,20 @@ public:
         return TagAt(p_head, 0);
     }
 
+    const std::uint32_t* HeadTagData(
+        SizeType p_head) const
+    {
+        if (p_head < 0 ||
+            static_cast<std::uint32_t>(p_head) >=
+                m_header.m_headCount)
+        {
+            return nullptr;
+        }
+        return m_tags.data() +
+            static_cast<size_t>(p_head) *
+                m_header.m_slotsPerHead;
+    }
+
     std::vector<std::uint32_t> HeadTags(SizeType p_head) const
     {
         std::vector<std::uint32_t> tags;
@@ -402,6 +416,11 @@ public:
     std::uint64_t GenerationFingerprint() const
     {
         return m_header.m_generationFingerprint;
+    }
+
+    std::uint64_t ContentFingerprint() const
+    {
+        return m_header.m_bodyFingerprint;
     }
 
     const std::unordered_map<

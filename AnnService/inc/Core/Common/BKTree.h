@@ -602,7 +602,7 @@ break;
 
             template <typename T>
             void BuildTrees(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, 
-                std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, 
+                const std::vector<SizeType>* indices = nullptr, const std::vector<SizeType>* reverseIndices = nullptr,
                 bool dynamicK = false, IAbortOperation* abort = nullptr)
             {
                 struct  BKTStackItem {
@@ -703,7 +703,7 @@ break;
             // serial BuildTrees (results are applied in deterministic node order).
             template <typename T>
             void BuildTreesParallel(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads,
-                std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr,
+                const std::vector<SizeType>* indices = nullptr, const std::vector<SizeType>* reverseIndices = nullptr,
                 bool dynamicK = false, IAbortOperation* abort = nullptr)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using PARALLEL BKTree build with %d threads.\n", numOfThreads);

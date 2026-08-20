@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cmath>
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -26,6 +27,8 @@
 #include <queue>
 #include <random>
 #include <shared_mutex>
+#include <stdexcept>
+#include <system_error>
 #include <thread>
 #include <unordered_set>
 
@@ -46,6 +49,23 @@ EdgeCompare Selection::g_edgeComparer;
 // Per-thread native head-search timings, read by SearchIndex phase telemetry.
 thread_local double g_bktSeedMs = 0.0;
 thread_local double g_pqGraphMs = 0.0;
+
+struct SecondLevelSearchProfile
+{
+    double m_graphMs = 0.0;
+    double m_mergeMs = 0.0;
+    double m_tagMs = 0.0;
+    double m_vectorMs = 0.0;
+    double m_sortMs = 0.0;
+    std::uint64_t m_upperScanned = 0;
+    std::uint64_t m_uniqueScanned = 0;
+    std::uint64_t m_assignments = 0;
+    int m_upperProbe = 0;
+    int m_maxCheck = 0;
+    int m_iterations = 0;
+};
+
+thread_local SecondLevelSearchProfile g_secondLevelProfile;
 
 namespace
 {
@@ -77,6 +97,22 @@ bool ValidHybridRouteConfig(const Options& p_options)
             0.0f;
 }
 
+bool ValidSecondLevelRouteConfig(
+    const Options& p_options)
+{
+    return
+        std::isfinite(
+            p_options
+                .m_secondLevelRouteSelectivityThreshold) &&
+        p_options
+                .m_secondLevelRouteSelectivityThreshold >=
+            0.0f &&
+        p_options
+                .m_secondLevelRouteSelectivityThreshold <=
+            1.0f &&
+        p_options.m_secondLevelMaxCheck > 0;
+}
+
 bool ParseHybridGeneration(
     const std::string& p_value,
     std::uint64_t& p_generation)
@@ -87,6 +123,114 @@ bool ParseHybridGeneration(
             std::uint64_t>(
             p_value.c_str(), p_generation) &&
         p_generation != 0;
+}
+
+bool LoadSecondLevelHeadIDs(
+    const std::string& p_path,
+    SizeType p_expectedCount,
+    std::vector<std::uint64_t>& p_ids,
+    std::string* p_error = nullptr)
+{
+    p_ids.clear();
+    std::ifstream input(
+        p_path, std::ios::binary | std::ios::ate);
+    if (!input)
+    {
+        if (p_error != nullptr)
+            *p_error =
+                "cannot open second-level head-ID file";
+        return false;
+    }
+
+    const std::streamoff fileBytes = input.tellg();
+    input.seekg(0);
+    SizeType count = 0;
+    DimensionType dimension = 0;
+    input.read(
+        reinterpret_cast<char*>(&count),
+        sizeof(count));
+    input.read(
+        reinterpret_cast<char*>(&dimension),
+        sizeof(dimension));
+    if (!input || count <= 0 ||
+        count != p_expectedCount ||
+        dimension != 1)
+    {
+        if (p_error != nullptr)
+            *p_error =
+                "invalid second-level head-ID header";
+        return false;
+    }
+    const std::uint64_t expectedBytes =
+        sizeof(count) + sizeof(dimension) +
+        static_cast<std::uint64_t>(count) *
+            sizeof(std::uint64_t);
+    if (fileBytes !=
+        static_cast<std::streamoff>(expectedBytes))
+    {
+        if (p_error != nullptr)
+            *p_error =
+                "second-level head-ID file size mismatch";
+        return false;
+    }
+
+    try
+    {
+        p_ids.resize(static_cast<size_t>(count));
+    }
+    catch (const std::bad_alloc&)
+    {
+        if (p_error != nullptr)
+            *p_error =
+                "cannot allocate second-level head-ID body";
+        return false;
+    }
+    catch (const std::length_error&)
+    {
+        if (p_error != nullptr)
+            *p_error =
+                "second-level head-ID count exceeds vector limits";
+        return false;
+    }
+    input.read(
+        reinterpret_cast<char*>(p_ids.data()),
+        static_cast<std::streamsize>(
+            p_ids.size() * sizeof(std::uint64_t)));
+    if (!input)
+    {
+        p_ids.clear();
+        if (p_error != nullptr)
+            *p_error =
+                "cannot read second-level head-ID body";
+        return false;
+    }
+    return true;
+}
+
+std::uint64_t FingerprintFirstLevelHeadIDs(
+    const COMMON::Dataset<std::uint64_t>& p_ids)
+{
+    std::uint64_t fingerprint =
+        SecondLevelHeadPostings::BeginIDFingerprint();
+    for (int row = 0; row < p_ids.R(); ++row)
+    {
+        fingerprint =
+            SecondLevelHeadPostings::AddIDFingerprint(
+                fingerprint, *p_ids[row]);
+    }
+    return fingerprint;
+}
+
+inline void PrefetchL1(const void* p_address)
+{
+    if (p_address == nullptr) return;
+#if defined(_MSC_VER)
+    _mm_prefetch(
+        reinterpret_cast<const char*>(p_address),
+        _MM_HINT_T0);
+#elif defined(__GNUC__) || defined(__clang__)
+    __builtin_prefetch(p_address, 0, 3);
+#endif
 }
 
 std::uint64_t NewHybridBuildGeneration(
@@ -317,6 +461,137 @@ std::string JoinPath(const std::string& baseDir, const std::string& relativePath
     return root + relativePath;
 }
 
+bool IsSafeArtifactName(const std::string& p_name)
+{
+    if (p_name.empty()) return false;
+    const std::filesystem::path path(p_name);
+    return !path.is_absolute() &&
+        !path.has_root_path() &&
+        !path.has_parent_path() &&
+        path.filename() == path &&
+        path != "." &&
+        path != "..";
+}
+
+bool ArtifactNamesEqual(
+    const std::string& p_left,
+    const std::string& p_right)
+{
+    const std::string left =
+        std::filesystem::path(p_left)
+            .lexically_normal()
+            .generic_string();
+    const std::string right =
+        std::filesystem::path(p_right)
+            .lexically_normal()
+            .generic_string();
+    return Helper::StrUtils::StrEqualIgnoreCase(
+        left.c_str(), right.c_str());
+}
+
+bool ValidSecondLevelArtifactLayout(
+    const Options& p_options)
+{
+    const std::array<std::string, 3> files = {
+        p_options.m_secondLevelHeadVectorFile,
+        p_options.m_secondLevelHeadIDFile,
+        p_options.m_secondLevelPostingFile};
+    if (!IsSafeArtifactName(files[0]) ||
+        !IsSafeArtifactName(files[1]) ||
+        !IsSafeArtifactName(files[2]) ||
+        !IsSafeArtifactName(
+            p_options
+                .m_secondLevelHeadIndexFolder))
+    {
+        return false;
+    }
+
+    std::vector<std::string> publishedNames;
+    publishedNames.reserve(files.size() * 2);
+    for (const std::string& file : files)
+    {
+        publishedNames.push_back(file);
+        publishedNames.push_back(
+            file + ".tmp");
+    }
+    for (size_t left = 0;
+         left < publishedNames.size(); ++left)
+    {
+        for (size_t right = left + 1;
+             right < publishedNames.size();
+             ++right)
+        {
+            if (ArtifactNamesEqual(
+                    publishedNames[left],
+                    publishedNames[right]))
+                return false;
+        }
+        if (ArtifactNamesEqual(
+                p_options
+                    .m_secondLevelHeadIndexFolder,
+                publishedNames[left]))
+            return false;
+    }
+
+    std::vector<std::string> reserved = {
+        p_options.m_headVectorFile,
+        p_options.m_headIDFile,
+        p_options.m_headIndexFolder,
+        p_options.m_deleteIDFile,
+        p_options.m_ssdIndex,
+        p_options.m_limitedTagSupportFile,
+        p_options.m_fullDeletedIDFile,
+        p_options.m_KVFile,
+        p_options.m_ssdMappingFile,
+        p_options.m_ssdInfoFile,
+        p_options.m_checksumFile,
+        p_options.m_postingPureCountsFile,
+        p_options.m_headRoleFile,
+        p_options.m_primaryHeadCSRFile,
+        p_options.m_updateVectorFile,
+        "indexloader.ini",
+        "head_select_state.bin",
+        "page_signatures.bin",
+        "ordered_page_starts.bin",
+        "pipepq_pivots.bin",
+        "inpost_quant.bin",
+        "inpost_rbq.bin",
+        "inpost_opq.bin",
+        "inpost_pipepq.bin",
+        "tail_rewrite_pagebudget.done",
+        "opq_slim.bin",
+        "opq_slim.idx",
+        "opq_slim_postings.done",
+        "opq_slim_compacted.done"};
+    for (const std::string& artifact :
+         reserved)
+    {
+        if (artifact.empty()) continue;
+        const std::array<std::string, 2>
+            reservedNames = {
+                artifact,
+                artifact + ".tmp"};
+        for (const std::string& reservedName :
+             reservedNames)
+        {
+            if (ArtifactNamesEqual(
+                    p_options
+                        .m_secondLevelHeadIndexFolder,
+                    reservedName))
+                return false;
+            for (const std::string& published :
+                 publishedNames)
+            {
+                if (ArtifactNamesEqual(
+                        published,
+                        reservedName))
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool CopyFileAtomically(const std::string& sourcePath, const std::string& targetPath)
 {
     if (sourcePath == targetPath) return true;
@@ -451,8 +726,17 @@ template <typename InternalDataType>
 bool WriteSelectedHeadFiles(const COMMON::Dataset<InternalDataType>& data,
                             const std::vector<SizeType>& selected,
                             const std::string& vectorFilePath,
-                            const std::string& idFilePath)
+                            const std::string& idFilePath,
+                            const std::vector<SizeType>* persistedIDs = nullptr)
 {
+    if (persistedIDs != nullptr &&
+        persistedIDs->size() != selected.size())
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Selected head vector/ID counts do not match.\n");
+        return false;
+    }
     std::shared_ptr<Helper::DiskIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
     if (output == nullptr || outputIDs == nullptr ||
         !output->Initialize(vectorFilePath.c_str(), std::ios::binary | std::ios::out) ||
@@ -485,9 +769,16 @@ bool WriteSelectedHeadFiles(const COMMON::Dataset<InternalDataType>& data,
         return false;
     }
 
-    for (SizeType vid : selected)
+    for (size_t index = 0;
+         index < selected.size(); ++index)
     {
-        uint64_t storedVid = static_cast<uint64_t>(vid);
+        const SizeType vid = selected[index];
+        const SizeType persistedID =
+            persistedIDs == nullptr
+                ? vid
+                : (*persistedIDs)[index];
+        uint64_t storedVid =
+            static_cast<uint64_t>(persistedID);
         if (outputIDs->WriteBinary(sizeof(storedVid), reinterpret_cast<char*>(&storedVid)) != sizeof(storedVid) ||
             output->WriteBinary(sizeof(InternalDataType) * data.C(), reinterpret_cast<const char*>(data[vid])) !=
                 sizeof(InternalDataType) * data.C())
@@ -2056,6 +2347,1316 @@ ErrorCode Index<T>::LoadLimitedTagSupport(
 }
 
 template <typename T>
+ErrorCode Index<T>::BuildSecondLevelHeadPostings()
+{
+    m_secondLevelPostings.Reset();
+    if (!m_options.m_selectSecondLevel)
+        return ErrorCode::Success;
+    if (!ValidSecondLevelArtifactLayout(
+            m_options))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot build an unsafe or colliding second-level artifact layout.\n");
+        return ErrorCode::Fail;
+    }
+    if (m_index == nullptr ||
+        m_secondLevelIndex == nullptr ||
+        m_vectorTranslateMap.R() !=
+            m_index->GetNumSamples() ||
+        m_limitedTagSupport.HeadCount() !=
+            m_index->GetNumSamples() ||
+        m_limitedTagSupport.ContentFingerprint() == 0 ||
+        m_index->GetNumSamples() <= 0 ||
+        m_secondLevelIndex->GetNumSamples() <= 0)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot build second-level postings without both head indexes "
+            "and the complete H1 ID map.\n");
+        return ErrorCode::Fail;
+    }
+
+    std::vector<std::uint64_t> secondToFirst;
+    std::string error;
+    const std::string secondIDPath =
+        m_options.m_indexDirectory + FolderSep +
+        m_options.m_secondLevelHeadIDFile;
+    if (!LoadSecondLevelHeadIDs(
+            secondIDPath,
+            m_secondLevelIndex->GetNumSamples(),
+            secondToFirst, &error) ||
+        secondToFirst.size() !=
+            static_cast<size_t>(
+                m_secondLevelIndex->GetNumSamples()))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load H2-to-H1 map %s: %s\n",
+            secondIDPath.c_str(), error.c_str());
+        return ErrorCode::Fail;
+    }
+
+    const SizeType firstCount =
+        m_index->GetNumSamples();
+    const SizeType secondCount =
+        m_secondLevelIndex->GetNumSamples();
+    std::vector<SizeType> firstToSecond(
+        static_cast<size_t>(firstCount), -1);
+    for (SizeType second = 0;
+         second < secondCount; ++second)
+    {
+        const std::uint64_t first =
+            secondToFirst[
+                static_cast<size_t>(second)];
+        if (first >=
+                static_cast<std::uint64_t>(
+                    firstCount) ||
+            firstToSecond[
+                static_cast<size_t>(first)] != -1)
+        {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "H2-to-H1 map contains an invalid or duplicate H1 ordinal.\n");
+            return ErrorCode::Fail;
+        }
+        firstToSecond[
+            static_cast<size_t>(first)] = second;
+
+        const void* firstVector =
+            m_index->GetSample(
+                static_cast<SizeType>(first));
+        const void* secondVector =
+            m_secondLevelIndex->GetSample(second);
+        if (firstVector == nullptr ||
+            secondVector == nullptr ||
+            std::memcmp(
+                firstVector, secondVector,
+                static_cast<size_t>(
+                    m_options.m_dim) *
+                    sizeof(T)) != 0)
+        {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "H2 graph node %d is not an exact copy of H1 head %llu.\n",
+                static_cast<int>(second),
+                static_cast<unsigned long long>(
+                    first));
+            return ErrorCode::Fail;
+        }
+    }
+
+    const int effectiveReplicas =
+        (std::min)(
+            m_options.m_secondLevelReplicaCount,
+            static_cast<int>(secondCount));
+    const std::uint64_t assignmentCount =
+        static_cast<std::uint64_t>(firstCount) *
+        static_cast<std::uint64_t>(
+            effectiveReplicas);
+    if (effectiveReplicas <= 0 ||
+        assignmentCount >
+            (std::numeric_limits<size_t>::max)())
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level assignment size is invalid.\n");
+        return ErrorCode::Fail;
+    }
+
+    using Member =
+        SecondLevelHeadPostings::Member;
+    std::vector<Member> members;
+    if (assignmentCount >
+        static_cast<std::uint64_t>(
+            members.max_size()))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level assignment storage exceeds the addressable vector size.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    try
+    {
+        members.resize(
+            static_cast<size_t>(assignmentCount));
+    }
+    catch (const std::bad_alloc&)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot allocate second-level assignment storage.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    std::atomic<std::int64_t> nextFirst(0);
+    std::atomic<bool> failed(false);
+    std::atomic<bool> workerAllocationFailed(false);
+    const int workerCount = (std::max)(
+        1, (std::min)(
+               m_options.m_iSSDNumberOfThreads,
+               static_cast<int>(firstCount)));
+    const int candidateCount =
+        (std::min)(
+            static_cast<int>(secondCount),
+            (std::max)(
+                effectiveReplicas,
+                m_options.m_internalResultNum));
+    std::vector<std::thread> workers;
+    const auto joinWorkers =
+        [](std::vector<std::thread>& threads) {
+            for (auto& thread : threads)
+            {
+                if (thread.joinable())
+                    thread.join();
+            }
+        };
+    const auto assignHeads = [&]() {
+        std::vector<SizeType> selected;
+        selected.reserve(
+            static_cast<size_t>(
+                effectiveReplicas));
+        constexpr std::int64_t
+            kAssignmentBatch = 256;
+        while (!failed.load(
+            std::memory_order_relaxed))
+        {
+            const std::int64_t begin64 =
+                nextFirst.fetch_add(
+                    kAssignmentBatch,
+                    std::memory_order_relaxed);
+            if (begin64 >=
+                static_cast<std::int64_t>(
+                    firstCount))
+                return;
+            const SizeType begin =
+                static_cast<SizeType>(begin64);
+            const SizeType end =
+                static_cast<SizeType>(
+                    begin64 +
+                    (std::min)(
+                        kAssignmentBatch,
+                        static_cast<std::int64_t>(
+                            firstCount) -
+                            begin64));
+            for (SizeType first = begin;
+                 first < end; ++first)
+            {
+                const SizeType self =
+                    firstToSecond[
+                        static_cast<size_t>(
+                            first)];
+                COMMON::QueryResultSet<T> query(
+                    reinterpret_cast<const T*>(
+                        m_index->GetSample(first)),
+                    candidateCount);
+                if (query.GetTarget() == nullptr ||
+                    m_secondLevelIndex
+                            ->SearchIndex(query) !=
+                        ErrorCode::Success)
+                {
+                    failed.store(
+                        true,
+                        std::memory_order_relaxed);
+                    return;
+                }
+
+                selected.clear();
+                if (self >= 0)
+                    selected.push_back(self);
+                for (int result = 0;
+                     result < candidateCount &&
+                     selected.size() <
+                         static_cast<size_t>(
+                             effectiveReplicas);
+                     ++result)
+                {
+                    const BasicResult* candidate =
+                        query.GetResult(result);
+                    if (candidate == nullptr ||
+                        candidate->VID < 0 ||
+                        candidate->VID >=
+                            secondCount)
+                        continue;
+                    if (std::find(
+                            selected.begin(),
+                            selected.end(),
+                            candidate->VID) !=
+                        selected.end())
+                        continue;
+
+                    bool rngAccepted = true;
+                    for (SizeType accepted : selected)
+                    {
+                        const float neighborDistance =
+                            m_secondLevelIndex
+                                 ->ComputeDistance(
+                                     m_secondLevelIndex
+                                         ->GetSample(
+                                             candidate
+                                                 ->VID),
+                                     m_secondLevelIndex
+                                         ->GetSample(
+                                             accepted));
+                        if (m_options.m_rngFactor *
+                                 neighborDistance <
+                            candidate->Dist)
+                        {
+                            rngAccepted = false;
+                            break;
+                        }
+                    }
+                    if (rngAccepted)
+                        selected.push_back(
+                            candidate->VID);
+                }
+                // Preserve RNG diversity first, then fill rejected replica
+                // slots with the nearest unused H2 nodes.
+                for (int result = 0;
+                     result < candidateCount &&
+                     selected.size() <
+                         static_cast<size_t>(
+                             effectiveReplicas);
+                     ++result)
+                {
+                    const BasicResult* candidate =
+                        query.GetResult(result);
+                    if (candidate != nullptr &&
+                        candidate->VID >= 0 &&
+                        candidate->VID <
+                            secondCount &&
+                        std::find(
+                            selected.begin(),
+                            selected.end(),
+                            candidate->VID) ==
+                            selected.end())
+                    {
+                        selected.push_back(
+                            candidate->VID);
+                    }
+                }
+                if (selected.size() !=
+                    static_cast<size_t>(
+                        effectiveReplicas))
+                {
+                    failed.store(
+                        true,
+                        std::memory_order_relaxed);
+                    return;
+                }
+
+                const size_t row =
+                    static_cast<size_t>(first) *
+                    static_cast<size_t>(
+                        effectiveReplicas);
+                for (int replica = 0;
+                     replica < effectiveReplicas;
+                     ++replica)
+                {
+                    members[
+                        row +
+                        static_cast<size_t>(
+                            replica)] =
+                        static_cast<Member>(
+                            selected[
+                                 static_cast<size_t>(
+                                     replica)]);
+                }
+            }
+        }
+    };
+    const auto recordWorkerAllocationFailure =
+        [&]() {
+            workerAllocationFailed.store(
+                true, std::memory_order_relaxed);
+            failed.store(
+                true, std::memory_order_relaxed);
+        };
+    try
+    {
+        workers.reserve(
+            static_cast<size_t>(workerCount));
+        for (int worker = 0;
+             worker < workerCount; ++worker)
+        {
+            (void)worker;
+            workers.emplace_back([&]() {
+                try
+                {
+                    assignHeads();
+                }
+                catch (const std::bad_alloc&)
+                {
+                    recordWorkerAllocationFailure();
+                }
+                catch (const std::length_error&)
+                {
+                    recordWorkerAllocationFailure();
+                }
+            });
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        failed.store(true, std::memory_order_relaxed);
+        joinWorkers(workers);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot allocate H1-to-H2 assignment workers.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    catch (const std::length_error&)
+    {
+        failed.store(true, std::memory_order_relaxed);
+        joinWorkers(workers);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "H1-to-H2 assignment worker count exceeds vector limits.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    catch (const std::system_error& error)
+    {
+        failed.store(true, std::memory_order_relaxed);
+        joinWorkers(workers);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot start H1-to-H2 assignment workers: %s.\n",
+            error.what());
+        return ErrorCode::Fail;
+    }
+    joinWorkers(workers);
+    if (workerAllocationFailed.load(
+            std::memory_order_relaxed))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "H1-to-H2 assignment worker ran out of memory.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    if (failed.load(std::memory_order_relaxed))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "H1-to-H2 graph assignment failed.\n");
+        return ErrorCode::Fail;
+    }
+
+    std::vector<std::uint64_t> offsets;
+    try
+    {
+        offsets.assign(
+            static_cast<size_t>(secondCount) + 1,
+            0);
+    }
+    catch (const std::bad_alloc&)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot allocate second-level posting offsets.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    for (Member second : members)
+    {
+        if (second >=
+            static_cast<Member>(secondCount))
+            return ErrorCode::Fail;
+        ++offsets[
+            static_cast<size_t>(second) + 1];
+    }
+    for (SizeType second = 0;
+         second < secondCount; ++second)
+    {
+        offsets[
+            static_cast<size_t>(second) + 1] +=
+            offsets[static_cast<size_t>(second)];
+    }
+
+    std::vector<std::uint64_t> cursors;
+    try
+    {
+        cursors = offsets;
+    }
+    catch (const std::bad_alloc&)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot allocate second-level posting cursors.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+
+    constexpr Member kFinalMember =
+        static_cast<Member>(1U << 31);
+    for (size_t source = 0;
+         source < members.size(); ++source)
+    {
+        if ((members[source] & kFinalMember) != 0)
+            continue;
+
+        Member currentSecond = members[source];
+        Member currentFirst =
+            static_cast<Member>(
+                source /
+                static_cast<size_t>(
+                    effectiveReplicas));
+        size_t steps = 0;
+        while (true)
+        {
+            if (currentSecond >=
+                    static_cast<Member>(
+                        secondCount) ||
+                steps++ >= members.size())
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Cannot permute second-level assignments into CSR order.\n");
+                return ErrorCode::Fail;
+            }
+            const size_t secondIndex =
+                static_cast<size_t>(
+                    currentSecond);
+            if (cursors[secondIndex] >=
+                offsets[secondIndex + 1])
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Second-level CSR cursor exceeded its posting range.\n");
+                return ErrorCode::Fail;
+            }
+            const size_t destination =
+                static_cast<size_t>(
+                    cursors[secondIndex]++);
+            if (destination >= members.size() ||
+                (members[destination] &
+                    kFinalMember) != 0)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Second-level CSR permutation is inconsistent.\n");
+                return ErrorCode::Fail;
+            }
+
+            const Member displacedSecond =
+                members[destination];
+            members[destination] =
+                currentFirst | kFinalMember;
+            if (destination == source)
+                break;
+
+            currentSecond = displacedSecond;
+            currentFirst =
+                static_cast<Member>(
+                    destination /
+                    static_cast<size_t>(
+                        effectiveReplicas));
+        }
+    }
+    for (Member& member : members)
+        member &= ~kFinalMember;
+
+    using Signature =
+        SecondLevelHeadPostings::Signature;
+    std::vector<Signature> signatures;
+    try
+    {
+        signatures.resize(
+            static_cast<size_t>(secondCount));
+    }
+    catch (const std::bad_alloc&)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot allocate second-level posting signatures.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    catch (const std::length_error&)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level posting signature count exceeds vector limits.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+
+    std::atomic<std::int64_t> nextSecond(0);
+    std::vector<std::thread> sortWorkers;
+    const auto buildSignatures = [&]() {
+        while (!failed.load(
+            std::memory_order_relaxed))
+        {
+            const std::int64_t second64 =
+                nextSecond.fetch_add(
+                    1, std::memory_order_relaxed);
+            if (second64 >=
+                static_cast<std::int64_t>(
+                    secondCount))
+                return;
+            const SizeType second =
+                static_cast<SizeType>(second64);
+            const size_t begin =
+                static_cast<size_t>(
+                    offsets[
+                        static_cast<size_t>(
+                            second)]);
+            const size_t end =
+                static_cast<size_t>(
+                    offsets[
+                        static_cast<size_t>(
+                            second) + 1]);
+            std::sort(
+                members.begin() + begin,
+                members.begin() + end);
+
+            Signature signature;
+            signature.Clear();
+            bool hasTag = false;
+            for (size_t offset = begin;
+                 offset < end; ++offset)
+            {
+                const SizeType first =
+                    static_cast<SizeType>(
+                        members[offset]);
+                for (int slot = 0;
+                     slot <
+                         m_limitedTagSupport
+                             .SlotsPerHead();
+                     ++slot)
+                {
+                    const std::uint32_t tag =
+                        m_limitedTagSupport.TagAt(
+                            first, slot);
+                    if (tag ==
+                        LimitedTagSupport::EmptyTag)
+                    {
+                        continue;
+                    }
+                    signature.Insert(tag);
+                    hasTag = true;
+                }
+            }
+            if (!hasTag)
+            {
+                failed.store(
+                    true,
+                    std::memory_order_relaxed);
+                return;
+            }
+            signatures[
+                static_cast<size_t>(
+                    second)] = signature;
+        }
+    };
+    try
+    {
+        sortWorkers.reserve(
+            static_cast<size_t>(workerCount));
+        for (int worker = 0;
+             worker < workerCount; ++worker)
+        {
+            sortWorkers.emplace_back([&]() {
+                try
+                {
+                    buildSignatures();
+                }
+                catch (const std::bad_alloc&)
+                {
+                    recordWorkerAllocationFailure();
+                }
+                catch (const std::length_error&)
+                {
+                    recordWorkerAllocationFailure();
+                }
+            });
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        failed.store(true, std::memory_order_relaxed);
+        joinWorkers(sortWorkers);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot allocate second-level signature workers.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    catch (const std::length_error&)
+    {
+        failed.store(true, std::memory_order_relaxed);
+        joinWorkers(sortWorkers);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level signature worker count exceeds vector limits.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    catch (const std::system_error& error)
+    {
+        failed.store(true, std::memory_order_relaxed);
+        joinWorkers(sortWorkers);
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot start second-level signature workers: %s.\n",
+            error.what());
+        return ErrorCode::Fail;
+    }
+    joinWorkers(sortWorkers);
+    if (workerAllocationFailed.load(
+            std::memory_order_relaxed))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level signature worker ran out of memory.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    if (failed.load(std::memory_order_relaxed))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot build a complete second-level posting signature.\n");
+        return ErrorCode::Fail;
+    }
+
+    const std::uint64_t firstIDFingerprint =
+        FingerprintFirstLevelHeadIDs(
+            m_vectorTranslateMap);
+    if (!m_secondLevelPostings.Initialize(
+            firstCount, secondCount,
+            m_options.m_secondLevelReplicaCount,
+            firstIDFingerprint,
+            m_limitedTagSupport
+                .ContentFingerprint(),
+            secondToFirst, std::move(offsets),
+            std::move(members),
+            std::move(signatures), &error))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot initialize second-level postings: %s\n",
+            error.c_str());
+        return ErrorCode::Fail;
+    }
+
+    const std::string postingPath =
+        m_options.m_indexDirectory + FolderSep +
+        m_options.m_secondLevelPostingFile;
+    if (!m_secondLevelPostings.Save(
+            postingPath, &error))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot save second-level postings %s: %s\n",
+            postingPath.c_str(), error.c_str());
+        return ErrorCode::Fail;
+    }
+    m_options.m_secondLevelGenerationFingerprint =
+        std::to_string(
+            m_secondLevelPostings
+                .GenerationFingerprint());
+    SPTAGLIB_LOG(
+        Helper::LogLevel::LL_Info,
+        "Built second-level ID-only postings with 256-bit signatures: "
+        "H1=%d H2=%d replicas=%d members=%llu.\n",
+        static_cast<int>(firstCount),
+        static_cast<int>(secondCount),
+        effectiveReplicas,
+        static_cast<unsigned long long>(
+            assignmentCount));
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::LoadSecondLevelIndex(
+    const std::string& p_baseDir)
+{
+    m_secondLevelIndex.reset();
+    m_secondLevelPostings.Reset();
+    if (!m_options.m_selectSecondLevel)
+        return ErrorCode::Success;
+    if (!ValidSecondLevelArtifactLayout(
+            m_options))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load an unsafe or colliding second-level artifact layout.\n");
+        return ErrorCode::Fail;
+    }
+    if (m_index == nullptr ||
+        m_vectorTranslateMap.R() !=
+            m_index->GetNumSamples() ||
+        m_limitedTagSupport.HeadCount() !=
+            m_index->GetNumSamples() ||
+        m_limitedTagSupport.ContentFingerprint() == 0)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load second-level routing before H1 is available.\n");
+        return ErrorCode::Fail;
+    }
+
+    const std::string secondIndexPath =
+        p_baseDir + FolderSep +
+        m_options.m_secondLevelHeadIndexFolder;
+    if (VectorIndex::LoadIndex(
+            secondIndexPath,
+            m_secondLevelIndex) !=
+            ErrorCode::Success ||
+        m_secondLevelIndex == nullptr)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load second-level head index %s.\n",
+            secondIndexPath.c_str());
+        return ErrorCode::Fail;
+    }
+    m_secondLevelIndex->SetParameter(
+        "NumberOfThreads",
+        std::to_string(
+            m_options.m_iSSDNumberOfThreads));
+    m_secondLevelIndex->SetParameter(
+        "MaxCheck",
+        std::to_string(m_options.m_maxCheck));
+    m_secondLevelIndex->SetParameter(
+        "HashTableExponent",
+        std::to_string(m_options.m_hashExp));
+    m_secondLevelIndex->UpdateIndex();
+
+    if (m_secondLevelIndex->GetIndexAlgoType() !=
+            m_options.m_indexAlgoType ||
+        m_secondLevelIndex->GetVectorValueType() !=
+            m_index->GetVectorValueType() ||
+        m_secondLevelIndex->GetDistCalcMethod() !=
+            m_index->GetDistCalcMethod() ||
+        m_secondLevelIndex->GetFeatureDim() !=
+            m_index->GetFeatureDim())
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level graph does not match the H1 graph type.\n");
+        return ErrorCode::Fail;
+    }
+
+    std::vector<std::uint64_t> secondToFirst;
+    std::string error;
+    const std::string secondIDPath =
+        p_baseDir + FolderSep +
+        m_options.m_secondLevelHeadIDFile;
+    if (!LoadSecondLevelHeadIDs(
+            secondIDPath,
+            m_secondLevelIndex->GetNumSamples(),
+            secondToFirst, &error) ||
+        secondToFirst.size() !=
+            static_cast<size_t>(
+                m_secondLevelIndex->GetNumSamples()))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot validate H2-to-H1 map %s: %s\n",
+            secondIDPath.c_str(), error.c_str());
+        return ErrorCode::Fail;
+    }
+
+    for (SizeType second = 0;
+         second <
+             m_secondLevelIndex->GetNumSamples();
+         ++second)
+    {
+        const std::uint64_t first =
+            secondToFirst[
+                static_cast<size_t>(second)];
+        if (first >=
+                static_cast<std::uint64_t>(
+                    m_index->GetNumSamples()) ||
+            m_index->GetSample(
+                static_cast<SizeType>(first)) ==
+                nullptr ||
+            m_secondLevelIndex->GetSample(second) ==
+                nullptr ||
+            std::memcmp(
+                m_index->GetSample(
+                    static_cast<SizeType>(first)),
+                m_secondLevelIndex->GetSample(second),
+                static_cast<size_t>(
+                    m_options.m_dim) *
+                    sizeof(T)) != 0)
+        {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Second-level graph vector copy validation failed.\n");
+            return ErrorCode::Fail;
+        }
+    }
+
+    std::uint64_t generation = 0;
+    if (!Helper::Convert::ConvertStringTo<
+            std::uint64_t>(
+            m_options
+                .m_secondLevelGenerationFingerprint
+                .c_str(),
+            generation) ||
+        generation == 0)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level routing has no valid persisted generation.\n");
+        return ErrorCode::Fail;
+    }
+    const std::uint64_t firstIDFingerprint =
+        FingerprintFirstLevelHeadIDs(
+            m_vectorTranslateMap);
+    const std::string postingPath =
+        p_baseDir + FolderSep +
+        m_options.m_secondLevelPostingFile;
+    if (!m_secondLevelPostings.Load(
+            postingPath,
+            m_index->GetNumSamples(),
+            m_secondLevelIndex->GetNumSamples(),
+            m_options.m_secondLevelReplicaCount,
+            firstIDFingerprint,
+            m_limitedTagSupport
+                .ContentFingerprint(),
+            generation,
+            secondToFirst, &error))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Cannot load second-level postings %s: %s\n",
+            postingPath.c_str(), error.c_str());
+        return ErrorCode::Fail;
+    }
+    SPTAGLIB_LOG(
+        Helper::LogLevel::LL_Info,
+        "Loaded second-level graph and signed ID-only postings "
+        "(H1=%d H2=%d replicas=%d).\n",
+        static_cast<int>(
+            m_secondLevelPostings
+                .FirstLevelHeadCount()),
+        static_cast<int>(
+            m_secondLevelPostings
+                .SecondLevelHeadCount()),
+        m_secondLevelPostings.ReplicaCount());
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::SearchSecondLevelHeads(
+    COMMON::QueryResultSet<T>* p_queryResults,
+    int p_graphResultNum,
+    const Cache::PostingBitmask&
+        p_querySignature,
+    const std::function<bool(SizeType)>&
+        p_headAdmission,
+    std::uint64_t p_matchingHeadReferences,
+    int& p_scannedOut) const
+{
+    p_scannedOut = 0;
+    g_secondLevelProfile = SecondLevelSearchProfile();
+    if (p_queryResults == nullptr ||
+        p_graphResultNum <= 0 ||
+        p_querySignature.Popcount() <= 0 ||
+        !p_headAdmission ||
+        m_index == nullptr ||
+        m_secondLevelIndex == nullptr ||
+        !m_secondLevelPostings.Loaded())
+        return ErrorCode::Fail;
+
+    const int secondCount =
+        static_cast<int>(
+            m_secondLevelPostings
+                .SecondLevelHeadCount());
+    const std::uint64_t memberCount =
+        m_secondLevelPostings.MemberCount();
+    const std::uint64_t averagePosting =
+        memberCount /
+            static_cast<std::uint64_t>(
+                secondCount) +
+        (memberCount %
+                 static_cast<std::uint64_t>(
+                     secondCount) !=
+             0
+             ? 1
+             : 0);
+    const std::uint64_t firstLevelHeadCount =
+        static_cast<std::uint64_t>(
+            m_secondLevelPostings
+                .FirstLevelHeadCount());
+    const std::uint64_t oneMatchReferenceLimit =
+        averagePosting == 0
+            ? 0
+            : firstLevelHeadCount /
+                  averagePosting +
+                  (firstLevelHeadCount %
+                           averagePosting !=
+                       0
+                       ? 1
+                       : 0);
+    const bool sparsePostingYield =
+        p_matchingHeadReferences > 0 &&
+        p_matchingHeadReferences <
+            oneMatchReferenceLimit;
+    const int initialMultiplier =
+        sparsePostingYield
+            ? (std::max)(
+                  1,
+                  m_secondLevelPostings
+                      .ReplicaCount())
+            : 1;
+    const long long requestedUpperProbe =
+        static_cast<long long>(
+            p_graphResultNum) *
+        static_cast<long long>(
+            initialMultiplier);
+    int upperProbe = (std::min)(
+        secondCount,
+        static_cast<int>((std::min)(
+            static_cast<long long>(
+                secondCount),
+            (std::max)(
+                1LL,
+                requestedUpperProbe))));
+    const int maxUpperProbe = (std::min)(
+        secondCount,
+        (std::max)(
+            upperProbe,
+            sparsePostingYield
+                ? upperProbe
+                : (upperProbe > (std::numeric_limits<int>::max)() / 2
+                ? (std::numeric_limits<int>::max)()
+                : upperProbe * 2)));
+    const std::uint64_t expectedExpansion =
+        averagePosting >
+                (std::numeric_limits<
+                    std::uint64_t>::max)() /
+                    static_cast<std::uint64_t>(
+                        maxUpperProbe)
+            ? (std::numeric_limits<
+                  std::uint64_t>::max)()
+            : averagePosting *
+                  static_cast<std::uint64_t>(
+                      maxUpperProbe);
+    const std::uint64_t scaledExpansion =
+        expectedExpansion >
+                (std::numeric_limits<
+                    std::uint64_t>::max)() /
+                    8ULL
+            ? (std::numeric_limits<
+                  std::uint64_t>::max)()
+            : expectedExpansion * 8ULL;
+    const std::uint64_t expansionBudget =
+        (std::min)(
+            memberCount,
+            (std::max)(
+                std::uint64_t{65536},
+                scaledExpansion));
+
+    using Member =
+        SecondLevelHeadPostings::Member;
+    struct PostingCursor
+    {
+        const Member* m_begin;
+        const Member* m_end;
+    };
+    const auto postingMatches =
+        [this, &p_querySignature](
+            SizeType p_secondLevelHead) {
+            const auto* signature =
+                m_secondLevelPostings
+                    .SignatureAt(
+                        p_secondLevelHead);
+            return signature != nullptr &&
+                signature->MayIntersect(
+                    p_querySignature);
+        };
+
+    std::uint64_t upperScanned = 0;
+    std::uint64_t finalUniqueScanned = 0;
+    const bool profile = m_options.m_logPhaseTime;
+    while (true)
+    {
+        ++g_secondLevelProfile.m_iterations;
+        g_secondLevelProfile.m_upperProbe = upperProbe;
+        COMMON::QueryResultSet<T> upperResults(
+            p_queryResults->GetTarget(),
+            upperProbe);
+        const int proportionalMaxCheck =
+            upperProbe >
+                    (std::numeric_limits<int>::max)() /
+                        2
+                ? (std::numeric_limits<int>::max)()
+                : upperProbe * 2;
+        const int secondLevelMaxCheck =
+            (std::max)(
+                m_options.m_secondLevelMaxCheck,
+                proportionalMaxCheck);
+        g_secondLevelProfile.m_maxCheck =
+            secondLevelMaxCheck;
+        const auto graphStart = profile
+            ? std::chrono::high_resolution_clock::now()
+            : std::chrono::high_resolution_clock::time_point{};
+        if (m_secondLevelIndex
+                ->SearchIndexWithResultFilter(
+                    upperResults,
+                    postingMatches,
+                    secondLevelMaxCheck) !=
+            ErrorCode::Success)
+            return ErrorCode::Fail;
+        if (profile)
+        {
+            g_secondLevelProfile.m_graphMs +=
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::high_resolution_clock::now() -
+                    graphStart)
+                    .count();
+        }
+        upperScanned += static_cast<std::uint64_t>(
+            (std::max)(
+                0, upperResults.GetScanned()));
+
+        const auto expansionStart = profile
+            ? std::chrono::high_resolution_clock::now()
+            : std::chrono::high_resolution_clock::time_point{};
+        const double tagMsBefore =
+            g_secondLevelProfile.m_tagMs;
+        const double vectorMsBefore =
+            g_secondLevelProfile.m_vectorMs;
+        std::vector<PostingCursor> cursors;
+        cursors.reserve(
+            static_cast<size_t>(upperProbe));
+        std::uint64_t expandedAssignments = 0;
+        for (int result = 0;
+             result < upperProbe; ++result)
+        {
+            const BasicResult* upper =
+                upperResults.GetResult(result);
+            if (upper == nullptr ||
+                upper->VID < 0 ||
+                upper->VID >= secondCount)
+                continue;
+            if (!postingMatches(upper->VID))
+                return ErrorCode::Fail;
+            const auto* begin =
+                m_secondLevelPostings.Begin(
+                    upper->VID);
+            const auto* end =
+                m_secondLevelPostings.End(
+                    upper->VID);
+            if (begin == nullptr || end == nullptr ||
+                begin > end)
+                return ErrorCode::Fail;
+            const std::uint64_t rowSize =
+                static_cast<std::uint64_t>(
+                    end - begin);
+            if (rowSize >
+                expansionBudget -
+                    expandedAssignments)
+            {
+                return ErrorCode::MemoryOverFlow;
+            }
+            expandedAssignments += rowSize;
+            if (begin != end)
+                cursors.push_back({begin, end});
+        }
+        g_secondLevelProfile.m_assignments +=
+            expandedAssignments;
+
+        p_queryResults->Reset();
+        std::vector<SizeType> candidateBatch;
+        std::vector<SizeType> matchingBatch;
+        constexpr size_t kScanBatch = 64;
+        candidateBatch.reserve(kScanBatch);
+        matchingBatch.reserve(kScanBatch);
+        size_t matchingCount = 0;
+        std::uint64_t uniqueScanned = 0;
+        const size_t vectorBytes =
+            static_cast<size_t>(
+                m_options.m_dim) *
+            sizeof(T);
+        const auto flushBatch = [&]() -> bool {
+            const auto tagStart = profile
+                ? std::chrono::high_resolution_clock::now()
+                : std::chrono::high_resolution_clock::time_point{};
+            for (SizeType candidate :
+                 candidateBatch)
+            {
+                PrefetchL1(
+                    m_limitedTagSupport.HeadTagData(
+                        candidate));
+            }
+            matchingBatch.clear();
+            for (SizeType candidate :
+                 candidateBatch)
+            {
+                if (p_headAdmission(candidate))
+                    matchingBatch.push_back(
+                        candidate);
+            }
+            matchingCount += matchingBatch.size();
+            if (profile)
+            {
+                g_secondLevelProfile.m_tagMs +=
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::high_resolution_clock::now() -
+                        tagStart)
+                        .count();
+            }
+            const auto vectorStart = profile
+                ? std::chrono::high_resolution_clock::now()
+                : std::chrono::high_resolution_clock::time_point{};
+            for (SizeType candidate :
+                 matchingBatch)
+            {
+                const auto* sample =
+                    reinterpret_cast<const char*>(
+                        m_index->GetSample(
+                            candidate));
+                PrefetchL1(sample);
+                if (sample != nullptr &&
+                    vectorBytes > 64)
+                    PrefetchL1(sample + 64);
+            }
+            for (SizeType candidate :
+                 matchingBatch)
+            {
+                const void* sample =
+                    m_index->GetSample(
+                        candidate);
+                if (sample == nullptr)
+                    return false;
+                p_queryResults->AddPoint(
+                    candidate,
+                    m_index->ComputeDistance(
+                        p_queryResults
+                            ->GetQuantizedTarget(),
+                        sample));
+            }
+            if (profile)
+            {
+                g_secondLevelProfile.m_vectorMs +=
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::high_resolution_clock::now() -
+                        vectorStart)
+                        .count();
+            }
+            candidateBatch.clear();
+            return true;
+        };
+
+        static thread_local std::vector<std::uint64_t>
+            seenFirstLevelHeads;
+        const size_t seenWordCount =
+            (static_cast<size_t>(
+                 m_secondLevelPostings
+                     .FirstLevelHeadCount()) +
+             63) /
+            64;
+        if (seenFirstLevelHeads.size() !=
+            seenWordCount)
+        {
+            seenFirstLevelHeads.assign(
+                seenWordCount, 0);
+        }
+        else
+        {
+            std::fill(
+                seenFirstLevelHeads.begin(),
+                seenFirstLevelHeads.end(), 0);
+        }
+        bool filledSparsePostingTarget = false;
+        for (const PostingCursor& cursor : cursors)
+        {
+            for (const Member* current =
+                     cursor.m_begin;
+                 current != cursor.m_end;
+                 ++current)
+            {
+                const Member candidate = *current;
+                const size_t word =
+                    static_cast<size_t>(candidate) >>
+                    6;
+                if (word >= seenFirstLevelHeads.size())
+                    return ErrorCode::Fail;
+                const std::uint64_t mask =
+                    std::uint64_t{1}
+                    << (candidate & 63U);
+                if ((seenFirstLevelHeads[word] &
+                     mask) != 0)
+                    continue;
+                seenFirstLevelHeads[word] |= mask;
+                candidateBatch.push_back(
+                    static_cast<SizeType>(
+                        candidate));
+                ++uniqueScanned;
+                if (candidateBatch.size() ==
+                    kScanBatch)
+                {
+                    if (!flushBatch())
+                        return ErrorCode::Fail;
+                    if (sparsePostingYield &&
+                        matchingCount >=
+                            static_cast<size_t>(
+                                p_graphResultNum))
+                    {
+                        filledSparsePostingTarget =
+                            true;
+                        break;
+                    }
+                }
+            }
+            if (filledSparsePostingTarget) break;
+        }
+        if (!filledSparsePostingTarget &&
+            !candidateBatch.empty() &&
+            !flushBatch())
+            return ErrorCode::Fail;
+
+        finalUniqueScanned = uniqueScanned;
+        if (profile)
+        {
+            const double expansionMs =
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::high_resolution_clock::now() -
+                    expansionStart)
+                    .count();
+            g_secondLevelProfile.m_mergeMs +=
+                expansionMs -
+                (g_secondLevelProfile.m_tagMs -
+                 tagMsBefore) -
+                (g_secondLevelProfile.m_vectorMs -
+                 vectorMsBefore);
+        }
+        if (matchingCount >=
+                static_cast<size_t>(
+                    p_graphResultNum) ||
+            upperProbe >= maxUpperProbe)
+            break;
+        upperProbe = static_cast<int>(
+            (std::min)(
+                static_cast<long long>(
+                    maxUpperProbe),
+                static_cast<long long>(
+                    upperProbe) * 2LL));
+    }
+
+    const auto sortStart = profile
+        ? std::chrono::high_resolution_clock::now()
+        : std::chrono::high_resolution_clock::time_point{};
+    p_queryResults->SortResult();
+    if (profile)
+    {
+        g_secondLevelProfile.m_sortMs =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::high_resolution_clock::now() -
+                sortStart)
+                .count();
+    }
+    g_secondLevelProfile.m_upperScanned = upperScanned;
+    g_secondLevelProfile.m_uniqueScanned =
+        finalUniqueScanned;
+    p_scannedOut = static_cast<int>(
+        (std::min)(
+            static_cast<std::uint64_t>(
+                (std::numeric_limits<int>::max)()),
+            upperScanned +
+                finalUniqueScanned));
+    p_queryResults->SetScanned(p_scannedOut);
+    return ErrorCode::Success;
+}
+
+template <typename T>
 ErrorCode Index<T>::EnsureHeadHybridGraph()
 {
     bool enabled = false;
@@ -3206,6 +4807,40 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
             "to preserve persisted head VIDs.\n");
         return ErrorCode::FailedParseValue;
     }
+    std::uint64_t secondLevelGeneration = 0;
+    if (!ValidSecondLevelRouteConfig(m_options))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "SecondLevelRouteSelectivityThreshold must be in [0,1] and "
+            "SecondLevelMaxCheck must be positive.\n");
+        return ErrorCode::FailedParseValue;
+    }
+    if (m_options.m_selectSecondLevel &&
+        (!m_options.m_enableLimitedTagPosting ||
+         !std::isfinite(
+             m_options.m_secondLevelRatio) ||
+         m_options.m_secondLevelRatio <= 0.0 ||
+         m_options.m_secondLevelRatio >= 1.0 ||
+         m_options.m_secondLevelReplicaCount <= 0 ||
+         m_options.m_secondLevelHeadVectorFile.empty() ||
+         m_options.m_secondLevelHeadIDFile.empty() ||
+         m_options.m_secondLevelHeadIndexFolder.empty() ||
+         m_options.m_secondLevelPostingFile.empty() ||
+         !Helper::Convert::ConvertStringTo<
+             std::uint64_t>(
+             m_options
+                 .m_secondLevelGenerationFingerprint
+                 .c_str(),
+             secondLevelGeneration) ||
+         secondLevelGeneration == 0))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Enabled second-level routing has an invalid persisted "
+            "configuration or generation.\n");
+        return ErrorCode::FailedParseValue;
+    }
 
     const std::string metadataRootSidecar = JoinPath(
         JoinPath(m_options.m_indexDirectory, m_options.m_headIndexFolder),
@@ -3233,12 +4868,13 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
 
 template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray> &p_indexBlobs)
 {
-    if (m_options.m_enableHybridDistance) {
+    if (m_options.m_enableHybridDistance ||
+        m_options.m_selectSecondLevel) {
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Error,
-            "Hybrid routing does not support blob/memory index loading; "
-            "load the persisted directory so graph, posting, and stats "
-            "sidecars can be validated together.\n");
+            "Hybrid and second-level routing do not support blob/memory "
+            "index loading; load the persisted directory so graph and "
+            "posting sidecars can be validated together.\n");
         return ErrorCode::Fail;
     }
     /** Need to modify **/
@@ -3398,6 +5034,9 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
     if (SetupMetadataOnlyHeadStore(bundleBaseDir) != ErrorCode::Success)
         return ErrorCode::Fail;
     if (LoadLimitedTagSupport(bundleBaseDir) !=
+        ErrorCode::Success)
+        return ErrorCode::Fail;
+    if (LoadSecondLevelIndex(bundleBaseDir) !=
         ErrorCode::Success)
         return ErrorCode::Fail;
 
@@ -3772,15 +5411,18 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     const auto limitedSupportMatchesPredicate =
         [this, queryDNF, queryTags,
          numQueryTags](SizeType p_head) {
-            if (p_head < 0) return false;
+            const std::uint32_t* supportedTags =
+                m_limitedTagSupport.HeadTagData(
+                    p_head);
+            if (supportedTags == nullptr)
+                return false;
             for (int slot = 0;
                  slot <
                      m_limitedTagSupport
                          .SlotsPerHead();
                  ++slot) {
                 const std::uint32_t tag =
-                    m_limitedTagSupport.TagAt(
-                        p_head, slot);
+                    supportedTags[slot];
                 if (tag ==
                     LimitedTagSupport::EmptyTag) {
                     continue;
@@ -4534,7 +6176,19 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     const bool useLimitedTagPure =
         m_options.m_enableLimitedTagPosting &&
         hasExactFilter;
-    std::vector<SizeType> limitedMatchingHeads;
+    const bool useSecondLevelBySelectivity =
+        useLimitedTagPure &&
+        m_options.m_selectSecondLevel &&
+        std::isfinite(routeSelectivity) &&
+        routeSelectivity >= 0.0f &&
+        routeSelectivity <
+            m_options
+                .m_secondLevelRouteSelectivityThreshold;
+    Cache::PostingBitmask
+        secondLevelQuerySignature;
+    secondLevelQuerySignature.Clear();
+    std::vector<const std::vector<SizeType>*>
+        limitedMatchingHeadLists;
     if (useLimitedTagPure)
     {
         const auto& tagHeads =
@@ -4544,14 +6198,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         {
             for (const auto& entry : tagHeads)
             {
-                const std::uint32_t tag =
-                    entry.first;
-                if (queryDNF->Matches(&tag, 1))
+                if (queryDNF->Matches(
+                        &entry.first, 1))
                 {
-                    limitedMatchingHeads.insert(
-                        limitedMatchingHeads.end(),
-                        entry.second.begin(),
-                        entry.second.end());
+                    secondLevelQuerySignature.Insert(
+                        entry.first);
+                    limitedMatchingHeadLists.push_back(
+                        &entry.second);
                 }
             }
         }
@@ -4560,16 +6213,36 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             for (int query = 0;
                  query < numQueryTags; ++query)
             {
+                secondLevelQuerySignature.Insert(
+                    queryTags[query]);
                 const auto found =
                     tagHeads.find(queryTags[query]);
-                if (found != tagHeads.end())
+                if (found != tagHeads.end() &&
+                    std::find(
+                        limitedMatchingHeadLists.begin(),
+                        limitedMatchingHeadLists.end(),
+                        &found->second) ==
+                        limitedMatchingHeadLists.end())
                 {
-                    limitedMatchingHeads.insert(
-                        limitedMatchingHeads.end(),
-                        found->second.begin(),
-                        found->second.end());
+                    limitedMatchingHeadLists.push_back(
+                        &found->second);
                 }
             }
+        }
+    }
+
+    std::vector<SizeType> limitedMatchingHeads;
+    bool limitedMatchingHeadsMaterialized = false;
+    const auto materializeLimitedMatchingHeads =
+        [&]() -> const std::vector<SizeType>& {
+        if (limitedMatchingHeadsMaterialized)
+            return limitedMatchingHeads;
+        for (const auto* heads :
+             limitedMatchingHeadLists)
+        {
+            limitedMatchingHeads.insert(
+                limitedMatchingHeads.end(),
+                heads->begin(), heads->end());
         }
         std::sort(
             limitedMatchingHeads.begin(),
@@ -4579,18 +6252,239 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 limitedMatchingHeads.begin(),
                 limitedMatchingHeads.end()),
             limitedMatchingHeads.end());
+        limitedMatchingHeadsMaterialized = true;
+        return limitedMatchingHeads;
+    };
+
+    const size_t limitedExactHeadLimit =
+        static_cast<size_t>((std::max)(
+            1, m_options.m_maxCheck));
+    std::uint64_t limitedMatchingHeadReferences = 0;
+    for (const auto* heads :
+         limitedMatchingHeadLists)
+    {
+        const std::uint64_t headCount =
+            static_cast<std::uint64_t>(
+                heads->size());
+        if (headCount >
+            (std::numeric_limits<
+                std::uint64_t>::max)() -
+                limitedMatchingHeadReferences)
+        {
+            limitedMatchingHeadReferences =
+                (std::numeric_limits<
+                    std::uint64_t>::max)();
+            break;
+        }
+        limitedMatchingHeadReferences +=
+            headCount;
+    }
+    const auto scanExactLimitedHeads =
+        [&](int p_priorScanned) {
+        const auto& exactMatchingHeads =
+            materializeLimitedMatchingHeads();
+        p_queryResults->Reset();
+        int exactScanned = 0;
+        for (SizeType head :
+             exactMatchingHeads)
+        {
+            if (head < 0 ||
+                head >=
+                    m_index->GetNumSamples())
+                continue;
+            const void* sample =
+                m_index->GetSample(head);
+            if (sample == nullptr) continue;
+            p_queryResults->AddPoint(
+                head,
+                m_index->ComputeDistance(
+                    p_queryResults
+                        ->GetQuantizedTarget(),
+                    sample));
+            ++exactScanned;
+        }
+        p_queryResults->SortResult();
+        p_queryResults->SetScanned(
+            p_priorScanned + exactScanned);
+        return exactScanned;
+    };
+    bool limitedUnionDefinitelyTooLarge = false;
+    if (useLimitedTagPure &&
+        !useSecondLevelBySelectivity)
+    {
+        const size_t slotsPerHead =
+            static_cast<size_t>((std::max)(
+                1,
+                m_limitedTagSupport
+                    .SlotsPerHead()));
+        const size_t maxExactHeadReferences =
+            limitedExactHeadLimit >
+                    (std::numeric_limits<size_t>::max)() /
+                        slotsPerHead
+                ? (std::numeric_limits<size_t>::max)()
+                : limitedExactHeadLimit *
+                      slotsPerHead;
+        size_t matchingHeadReferences = 0;
+        for (const auto* heads :
+             limitedMatchingHeadLists)
+        {
+            // Each head occurs in at most one inverted list per support slot.
+            // A larger reference count therefore cannot deduplicate below the
+            // exact-scan limit, so broad predicates need not touch the IDs.
+            if (heads->size() >
+                    limitedExactHeadLimit ||
+                heads->size() >
+                    maxExactHeadReferences -
+                        matchingHeadReferences)
+            {
+                limitedUnionDefinitelyTooLarge = true;
+                break;
+            }
+            matchingHeadReferences +=
+                heads->size();
+        }
     }
     const bool useLimitedExactHeadScan =
         useLimitedTagPure &&
-        limitedMatchingHeads.size() <=
-            static_cast<size_t>((std::max)(
-                1, m_options.m_maxCheck));
+        !useSecondLevelBySelectivity &&
+        !limitedUnionDefinitelyTooLarge &&
+        materializeLimitedMatchingHeads().size() <=
+            limitedExactHeadLimit;
     const bool s_phaseTime = m_options.m_logPhaseTime;
     int phaseHeadMaxCheck = 0;
     g_bktSeedMs = 0.0;
     g_pqGraphMs = 0.0;
+    g_secondLevelProfile =
+        SecondLevelSearchProfile();
+    bool usedSecondLevelSearch = false;
+    double secondLevelRouteMs = 0.0;
+    if (m_options.m_logAdaptiveNprobe &&
+        useLimitedTagPure)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Info,
+            "LimitedRoute: selectivity=%.6f threshold=%.6f route=%s.\n",
+            static_cast<double>(routeSelectivity),
+            static_cast<double>(
+                m_options
+                    .m_secondLevelRouteSelectivityThreshold),
+            useSecondLevelBySelectivity
+                ? "H2"
+                : (useLimitedExactHeadScan
+                       ? "exact"
+                       : "H1"));
+    }
     auto _phT0 = s_phaseTime ? std::chrono::high_resolution_clock::now()
                              : std::chrono::high_resolution_clock::time_point{};
+
+    if (useSecondLevelBySelectivity)
+    {
+        const auto secondLevelStart =
+            s_phaseTime
+                ? std::chrono::high_resolution_clock::now()
+                : std::chrono::high_resolution_clock::time_point{};
+        p_queryResults->Reset();
+        int scanned = 0;
+        ret = SearchSecondLevelHeads(
+            p_queryResults, graphResultNum,
+            secondLevelQuerySignature,
+            limitedTagHeadAdmission,
+            limitedMatchingHeadReferences,
+            scanned);
+        if (ret == ErrorCode::MemoryOverFlow)
+        {
+            p_queryResults->Reset();
+            ret = ErrorCode::Success;
+            if (m_options.m_logAdaptiveNprobe)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Skipping an imbalanced two-layer expansion; using H1 routing.\n");
+            }
+        }
+        if (ret != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Second-level limited-tag head routing failed.\n");
+            return ret;
+        }
+        if (scanned > 0)
+        {
+            int admitted = 0;
+            for (; admitted < graphResultNum;
+                 ++admitted)
+            {
+                const BasicResult* result =
+                    p_queryResults->GetResult(
+                        admitted);
+                if (result == nullptr ||
+                    result->VID < 0)
+                    break;
+            }
+            if (admitted < graphResultNum)
+            {
+                const auto& exactMatchingHeads =
+                    materializeLimitedMatchingHeads();
+                if (exactMatchingHeads.size() <=
+                    limitedExactHeadLimit)
+                {
+                    const int secondLevelScanned =
+                        scanned;
+                    const int exactScanned =
+                        scanExactLimitedHeads(
+                            secondLevelScanned);
+                    scanned =
+                        secondLevelScanned +
+                        exactScanned;
+                    if (m_options
+                            .m_logAdaptiveNprobe)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Info,
+                            "Two-layer routing used bounded exact H1 completion (%d heads).\n",
+                            exactScanned);
+                    }
+                }
+                else
+                {
+                    p_queryResults->Reset();
+                    scanned = 0;
+                    if (m_options
+                            .m_logAdaptiveNprobe)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Info,
+                            "Two-layer routing did not fill nprobe; retrying with H1 routing.\n");
+                    }
+                }
+            }
+        }
+        if (s_phaseTime)
+        {
+            secondLevelRouteMs =
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::high_resolution_clock::now() -
+                    secondLevelStart)
+                    .count();
+        }
+        if (scanned > 0)
+        {
+            p_queryResults->SetScanned(scanned);
+            usedSecondLevelSearch = true;
+            usedHeadBundleSearch = true;
+            if (m_options.m_logAdaptiveNprobe)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Using two-layer head routing with %d H2 nodes and "
+                    "signature-admitted ID-only H1 postings.\n",
+                    static_cast<int>(
+                        m_secondLevelPostings
+                            .SecondLevelHeadCount()));
+            }
+        }
+    }
 
     if (!useLimitedExactHeadScan &&
         !usedHeadBundleSearch &&
@@ -4761,35 +6655,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             }
         }
         if (useLimitedExactHeadScan ||
-            admittedHeads < graphResultNum)
+            (admittedHeads < graphResultNum &&
+             !limitedUnionDefinitelyTooLarge))
         {
             const int graphScanned =
                 p_queryResults->GetScanned();
-            p_queryResults->Reset();
-            int exactScanned = 0;
-            for (SizeType head :
-                 limitedMatchingHeads)
-            {
-                if (head < 0 ||
-                    head >=
-                        m_index->GetNumSamples()) {
-                    continue;
-                }
-                const void* sample =
-                    m_index->GetSample(head);
-                if (sample == nullptr) continue;
-                const float distance =
-                    m_index->ComputeDistance(
-                        p_queryResults
-                            ->GetQuantizedTarget(),
-                        sample);
-                p_queryResults->AddPoint(
-                    head, distance);
-                ++exactScanned;
-            }
-            p_queryResults->SortResult();
-            p_queryResults->SetScanned(
-                graphScanned + exactScanned);
+            scanExactLimitedHeads(
+                graphScanned);
         }
     }
 
@@ -4800,6 +6672,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         int n = p_queryResults->GetResultNum();
         std::string line = "DUMPHEADS q=" + std::to_string(dumpHeadsQueryId) +
             " bundle=" + std::to_string(usedHeadBundleSearch ? 1 : 0) +
+            " twoLayer=" + std::to_string(usedSecondLevelSearch ? 1 : 0) +
             " n=" + std::to_string(n) + " :";
         for (int di = 0; di < n; ++di) {
             auto* r = p_queryResults->GetResult(di);
@@ -5257,10 +7130,31 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         double postMs  = std::chrono::duration<double, std::milli>(_phT2 - _phT1).count();
         uint32_t firstTag = (queryTags != nullptr && numQueryTags > 0) ? queryTags[0] : 0u;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "PhaseTime: tag=%u nprobe=%d heads=%d headScanned=%d headMaxCheck=%d headR50=%.3f headR90=%.3f headRMax=%.3f "
+            "PhaseTime: tag=%u nprobe=%d routeSel=%.6f twoLayer=%d h2=%.3f "
+            "h2Graph=%.3f h2Merge=%.3f h2Tag=%.3f h2Vec=%.3f h2Sort=%.3f "
+            "h2Upper=%llu h2Unique=%llu h2Assign=%llu h2Probe=%d h2MaxCheck=%d h2Iter=%d "
+            "heads=%d headScanned=%d headMaxCheck=%d headR50=%.3f headR90=%.3f headRMax=%.3f "
             "headAt110=%d headAt125=%d headAt150=%d headAt200=%d headAt400=%d headAt800=%d "
             "postIO=%d postPages=%d bkt=%.3f pq=%.3f graphOther=%.3f post=%.3f io=%.3f scan=%.3f postOther=%.3f total=%.3f\n",
-            firstTag, postingTarget, phaseHeadCandidates, phaseHeadScanned,
+            firstTag, postingTarget,
+            static_cast<double>(routeSelectivity),
+            usedSecondLevelSearch ? 1 : 0,
+            secondLevelRouteMs,
+            g_secondLevelProfile.m_graphMs,
+            g_secondLevelProfile.m_mergeMs,
+            g_secondLevelProfile.m_tagMs,
+            g_secondLevelProfile.m_vectorMs,
+            g_secondLevelProfile.m_sortMs,
+            static_cast<unsigned long long>(
+                g_secondLevelProfile.m_upperScanned),
+            static_cast<unsigned long long>(
+                g_secondLevelProfile.m_uniqueScanned),
+            static_cast<unsigned long long>(
+                g_secondLevelProfile.m_assignments),
+            g_secondLevelProfile.m_upperProbe,
+            g_secondLevelProfile.m_maxCheck,
+            g_secondLevelProfile.m_iterations,
+            phaseHeadCandidates, phaseHeadScanned,
             phaseHeadMaxCheck, phaseHeadRatioP50, phaseHeadRatioP90, phaseHeadRatioMax,
             phaseHeadsAt110, phaseHeadsAt125, phaseHeadsAt150, phaseHeadsAt200,
             phaseHeadsAt400, phaseHeadsAt800,
@@ -5757,54 +7651,54 @@ ErrorCode Index<T>::GetPostingDebug(SizeType vid, std::vector<SizeType> &VIDs, s
     return out;
 }
 
-template <typename T> void Index<T>::SelectHeadAdjustOptions(int p_vectorCount)
+template <typename T> void Index<T>::SelectHeadAdjustOptions(Options& p_options, int p_vectorCount)
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Adjust Parameters...\n");
 
-    if (m_options.m_headVectorCount != 0)
-        m_options.m_ratio = m_options.m_headVectorCount * 1.0 / p_vectorCount;
-    int headCnt = static_cast<int>(std::round(m_options.m_ratio * p_vectorCount));
+    if (p_options.m_headVectorCount != 0)
+        p_options.m_ratio = p_options.m_headVectorCount * 1.0 / p_vectorCount;
+    int headCnt = static_cast<int>(std::round(p_options.m_ratio * p_vectorCount));
     if (headCnt == 0)
     {
         for (double minCnt = 1; headCnt == 0; minCnt += 0.2)
         {
-            m_options.m_ratio = minCnt / p_vectorCount;
-            headCnt = static_cast<int>(std::round(m_options.m_ratio * p_vectorCount));
+            p_options.m_ratio = minCnt / p_vectorCount;
+            headCnt = static_cast<int>(std::round(p_options.m_ratio * p_vectorCount));
         }
 
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                      "Setting requires to select none vectors as head, adjusted it to %d vectors\n", headCnt);
     }
 
-    if (m_options.m_iBKTKmeansK > headCnt)
+    if (p_options.m_iBKTKmeansK > headCnt)
     {
-        m_options.m_iBKTKmeansK = headCnt;
+        p_options.m_iBKTKmeansK = headCnt;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting of cluster number is less than head count, adjust it to %d\n",
                      headCnt);
     }
 
-    if (m_options.m_selectThreshold == 0)
+    if (p_options.m_selectThreshold == 0)
     {
-        m_options.m_selectThreshold = min(p_vectorCount - 1, static_cast<int>(1 / m_options.m_ratio));
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SelectThreshold to %d\n", m_options.m_selectThreshold);
+        p_options.m_selectThreshold = min(p_vectorCount - 1, static_cast<int>(1 / p_options.m_ratio));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SelectThreshold to %d\n", p_options.m_selectThreshold);
     }
 
-    if (m_options.m_splitThreshold == 0)
+    if (p_options.m_splitThreshold == 0)
     {
-        m_options.m_splitThreshold = min(p_vectorCount - 1, static_cast<int>(m_options.m_selectThreshold * 2));
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SplitThreshold to %d\n", m_options.m_splitThreshold);
+        p_options.m_splitThreshold = min(p_vectorCount - 1, static_cast<int>(p_options.m_selectThreshold * 2));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SplitThreshold to %d\n", p_options.m_splitThreshold);
     }
 
-    if (m_options.m_splitFactor == 0)
+    if (p_options.m_splitFactor == 0)
     {
-        m_options.m_splitFactor = min(p_vectorCount - 1, static_cast<int>(std::round(1 / m_options.m_ratio) + 0.5));
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SplitFactor to %d\n", m_options.m_splitFactor);
+        p_options.m_splitFactor = min(p_vectorCount - 1, static_cast<int>(std::round(1 / p_options.m_ratio) + 0.5));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SplitFactor to %d\n", p_options.m_splitFactor);
     }
 }
 
 template <typename T>
 int Index<T>::SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID,
-                                            const Options &p_opts, std::vector<int> &p_selected)
+                                            const Options &p_opts, std::vector<SizeType> &p_selected)
 {
     typedef std::pair<int, int> CSPair;
     std::vector<CSPair> children;
@@ -5826,7 +7720,7 @@ int Index<T>::SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree
 
     if (childrenSize >= p_opts.m_selectThreshold)
     {
-        if (node.centerid < (*p_tree)[0].centerid)
+        if (p_nodeID != 0 && node.centerid >= 0)
         {
             p_selected.push_back(node.centerid);
         }
@@ -5852,33 +7746,38 @@ int Index<T>::SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree
 
 template <typename T>
 void Index<T>::SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount,
-                                     std::vector<int> &p_selected)
+                                     const Options& p_options, std::vector<SizeType> &p_selected,
+                                     const std::vector<SizeType>* p_candidateIndices)
 {
     p_selected.clear();
     p_selected.reserve(p_vectorCount);
 
-    if (static_cast<int>(std::round(m_options.m_ratio * p_vectorCount)) >= p_vectorCount)
+    if (static_cast<int>(std::round(p_options.m_ratio * p_vectorCount)) >= p_vectorCount)
     {
         for (int i = 0; i < p_vectorCount; ++i)
         {
-            p_selected.push_back(i);
+            p_selected.push_back(
+                p_candidateIndices == nullptr
+                    ? static_cast<SizeType>(i)
+                    : (*p_candidateIndices)[
+                          static_cast<size_t>(i)]);
         }
 
         return;
     }
-    Options opts = m_options;
+    Options opts = p_options;
 
-    int selectThreshold = m_options.m_selectThreshold;
-    int splitThreshold = m_options.m_splitThreshold;
+    int selectThreshold = p_options.m_selectThreshold;
+    int splitThreshold = p_options.m_splitThreshold;
 
     double minDiff = 100;
-    for (int select = 2; select <= m_options.m_selectThreshold; ++select)
+    for (int select = 2; select <= p_options.m_selectThreshold; ++select)
     {
         opts.m_selectThreshold = select;
-        opts.m_splitThreshold = m_options.m_splitThreshold;
+        opts.m_splitThreshold = p_options.m_splitThreshold;
 
-        int l = m_options.m_splitFactor;
-        int r = m_options.m_splitThreshold;
+        int l = p_options.m_splitFactor;
+        int r = p_options.m_splitThreshold;
 
         while (l < r - 1)
         {
@@ -5889,7 +7788,7 @@ void Index<T>::SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tre
             std::sort(p_selected.begin(), p_selected.end());
             p_selected.erase(std::unique(p_selected.begin(), p_selected.end()), p_selected.end());
 
-            double diff = static_cast<double>(p_selected.size()) / p_vectorCount - m_options.m_ratio;
+            double diff = static_cast<double>(p_selected.size()) / p_vectorCount - p_options.m_ratio;
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Select Threshold: %d, Split Threshold: %d, diff: %.2lf%%.\n",
                          opts.m_selectThreshold, opts.m_splitThreshold, diff * 100.0);
@@ -5927,6 +7826,257 @@ void Index<T>::SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tre
 
 template <typename T>
 template <typename InternalDataType>
+bool Index<T>::SelectHeadsFromData(COMMON::Dataset<InternalDataType>& p_data,
+                                   Options& p_options,
+                                   const std::vector<int>* p_perVectorTags,
+                                   std::vector<SizeType>& p_selected,
+                                   const char* p_stage,
+                                   bool p_fallbackToFirst,
+                                   const std::vector<SizeType>* p_candidateIndices)
+{
+    const SizeType candidateCount =
+        p_candidateIndices == nullptr
+            ? p_data.R()
+            : static_cast<SizeType>(
+                  p_candidateIndices->size());
+    if (candidateCount <= 0)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "%s: candidate set is empty\n", p_stage);
+        return false;
+    }
+    if (p_candidateIndices != nullptr &&
+        std::any_of(
+            p_candidateIndices->begin(),
+            p_candidateIndices->end(),
+            [&](SizeType p_index) {
+                return p_index < 0 ||
+                    p_index >= p_data.R();
+            }))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "%s: candidate set contains an invalid source ordinal\n",
+            p_stage);
+        return false;
+    }
+
+    const auto sourceIndex =
+        [&](SizeType p_local) {
+            return p_candidateIndices == nullptr
+                ? p_local
+                : (*p_candidateIndices)[
+                      static_cast<size_t>(p_local)];
+        };
+    SelectHeadAdjustOptions(p_options, candidateCount);
+    p_selected.clear();
+
+    if (candidateCount == 1)
+    {
+        p_selected.push_back(sourceIndex(0));
+        return true;
+    }
+
+    if (Helper::StrUtils::StrEqualIgnoreCase(p_options.m_selectType.c_str(), "Random"))
+    {
+        std::mt19937 generator;
+        p_selected.resize(
+            static_cast<size_t>(candidateCount));
+        std::iota(p_selected.begin(), p_selected.end(), 0);
+        std::shuffle(p_selected.begin(), p_selected.end(), generator);
+        p_selected.resize(static_cast<size_t>(
+            std::round(
+                p_options.m_ratio *
+                candidateCount)));
+        if (p_candidateIndices != nullptr)
+        {
+            for (SizeType& selected : p_selected)
+                selected = sourceIndex(selected);
+        }
+    }
+    else if (Helper::StrUtils::StrEqualIgnoreCase(p_options.m_selectType.c_str(), "BKT"))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "%s: start generating BKT.\n", p_stage);
+        std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
+        bkt->m_iBKTKmeansK = p_options.m_iBKTKmeansK;
+        bkt->m_iBKTLeafSize = p_options.m_iBKTLeafSize;
+        bkt->m_iSamples = p_options.m_iSamples;
+        bkt->m_iTreeNumber = p_options.m_iTreeNumber;
+        bkt->m_fBalanceFactor = p_options.m_fBalanceFactor;
+        bkt->m_pQuantizer = nullptr;
+
+        auto buildStart = std::chrono::high_resolution_clock::now();
+        if (p_options.m_parallelBKTBuild)
+            bkt->BuildTreesParallel<InternalDataType>(
+                p_data, p_options.m_distCalcMethod,
+                p_options.m_iSelectHeadNumberOfThreads,
+                p_candidateIndices, nullptr, true);
+        else
+            bkt->BuildTrees<InternalDataType>(
+                p_data, p_options.m_distCalcMethod,
+                p_options.m_iSelectHeadNumberOfThreads,
+                p_candidateIndices, nullptr, true);
+        auto buildEnd = std::chrono::high_resolution_clock::now();
+        double elapsedSeconds =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                buildEnd - buildStart).count();
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "%s: BuildTrees used %.2lf minutes (about %.2lf hours).\n",
+                     p_stage, elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+
+        if (p_options.m_saveBKT)
+        {
+            std::stringstream bktFileNameBuilder;
+            bktFileNameBuilder
+                << p_options.m_vectorPath << ".bkt."
+                << p_options.m_iBKTKmeansK << "_"
+                << p_options.m_iBKTLeafSize << "_"
+                << p_options.m_iTreeNumber << "_"
+                << p_options.m_iSamples << "_"
+                << static_cast<int>(p_options.m_distCalcMethod)
+                << ".bin";
+            bkt->SaveTrees(bktFileNameBuilder.str());
+        }
+
+        SelectHeadDynamically(
+            bkt, candidateCount, p_options,
+            p_selected, p_candidateIndices);
+    }
+    else if (Helper::StrUtils::StrEqualIgnoreCase(
+                 p_options.m_selectType.c_str(), "PerTagBKT"))
+    {
+        const bool sourceAlignedTags =
+            p_perVectorTags != nullptr &&
+            p_perVectorTags->size() ==
+                static_cast<size_t>(p_data.R());
+        const bool candidateAlignedTags =
+            p_perVectorTags != nullptr &&
+            p_perVectorTags->size() ==
+                static_cast<size_t>(candidateCount);
+        if (p_perVectorTags == nullptr ||
+            (!sourceAlignedTags &&
+             !candidateAlignedTags))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "%s: PerTagBKT requires one local tag per vector\n",
+                         p_stage);
+            return false;
+        }
+
+        const double configuredRatio =
+            p_options.m_ratioExplicitlySet ? p_options.m_ratio : 0.016;
+        const double perTagTarget =
+            std::min(0.9, std::clamp(configuredRatio, 1e-5, 0.9));
+        std::map<int, std::vector<SizeType>> tagGroups;
+        for (SizeType local = 0;
+             local < candidateCount; ++local)
+        {
+            const SizeType source = sourceIndex(local);
+            const int tag =
+                (*p_perVectorTags)[
+                    sourceAlignedTags
+                        ? static_cast<size_t>(source)
+                        : static_cast<size_t>(local)];
+            if (tag >= 0)
+            {
+                tagGroups[tag].push_back(source);
+            }
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "%s: PerTagBKT has %zu distinct tag values\n",
+                     p_stage, tagGroups.size());
+
+        std::vector<SizeType> initialHeads;
+        for (auto& group : tagGroups)
+        {
+            std::vector<SizeType>& subIndexes = group.second;
+            int subSize = static_cast<int>(subIndexes.size());
+            if (subSize <= 1)
+            {
+                if (subSize == 1)
+                    initialHeads.push_back(static_cast<int>(subIndexes[0]));
+                continue;
+            }
+
+            Options groupOptions = p_options;
+            groupOptions.m_ratio = perTagTarget;
+            groupOptions.m_iSamples =
+                std::min(groupOptions.m_iSamples, subSize);
+            SelectHeadAdjustOptions(groupOptions, subSize);
+
+            std::shared_ptr<COMMON::BKTree> bkt =
+                std::make_shared<COMMON::BKTree>();
+            bkt->m_iBKTKmeansK = groupOptions.m_iBKTKmeansK;
+            bkt->m_iBKTLeafSize = groupOptions.m_iBKTLeafSize;
+            bkt->m_iSamples = groupOptions.m_iSamples;
+            bkt->m_iTreeNumber = groupOptions.m_iTreeNumber;
+            bkt->m_fBalanceFactor = groupOptions.m_fBalanceFactor;
+            bkt->m_pQuantizer = nullptr;
+            if (groupOptions.m_parallelBKTBuild)
+                bkt->BuildTreesParallel<InternalDataType>(
+                    p_data, groupOptions.m_distCalcMethod,
+                    groupOptions.m_iSelectHeadNumberOfThreads,
+                    &subIndexes, nullptr, true);
+            else
+                bkt->BuildTrees<InternalDataType>(
+                    p_data, groupOptions.m_distCalcMethod,
+                    groupOptions.m_iSelectHeadNumberOfThreads,
+                    &subIndexes, nullptr, true);
+
+            std::vector<SizeType> subSelected;
+            SelectHeadDynamically(
+                bkt, subSize, groupOptions,
+                subSelected, &subIndexes);
+            if (subSelected.empty())
+                subSelected.push_back(subIndexes[0]);
+            initialHeads.insert(
+                initialHeads.end(), subSelected.begin(), subSelected.end());
+        }
+
+        p_options.m_ratio = perTagTarget;
+        p_selected.swap(initialHeads);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "%s: PerTagBKT selected %zu heads "
+                     "(target=%.3f%%, achieved=%.3f%%)\n",
+                     p_stage, p_selected.size(),
+                     100.0 * perTagTarget,
+                     100.0 * p_selected.size() /
+                         candidateCount);
+    }
+    else
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "%s: unsupported SelectHeadType '%s'\n",
+                     p_stage, p_options.m_selectType.c_str());
+        return false;
+    }
+
+    std::sort(p_selected.begin(), p_selected.end());
+    p_selected.erase(
+        std::unique(p_selected.begin(), p_selected.end()),
+        p_selected.end());
+    if (p_selected.empty())
+    {
+        if (!p_fallbackToFirst)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "%s: cannot select any vector as head\n",
+                         p_stage);
+            return false;
+        }
+        p_selected.push_back(sourceIndex(0));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "%s: adaptive selection produced no heads; "
+                     "using local vector 0\n",
+                     p_stage);
+    }
+    return true;
+}
+
+template <typename T>
+template <typename InternalDataType>
 bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_reader)
 {
     std::shared_ptr<VectorSet> vectorset = p_reader->GetVectorSet();
@@ -5939,213 +8089,46 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                                            vectorset->Count() + 1, (InternalDataType *)vectorset->GetData());
 
     auto t1 = std::chrono::high_resolution_clock::now();
-    SelectHeadAdjustOptions(data.R());
-    std::vector<int> selected;
-    if (data.R() == 1)
+    std::vector<int> perVectorTags;
+    if (Helper::StrUtils::StrEqualIgnoreCase(
+            m_options.m_selectType.c_str(), "PerTagBKT"))
     {
-        selected.push_back(0);
-    }
-    else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "Random"))
-    {
-        std::mt19937 rg;
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start generating Random head.\n");
-        selected.resize(data.R());
-        for (int i = 0; i < data.R(); i++)
-            selected[i] = i;
-        std::shuffle(selected.begin(), selected.end(), rg);
-        int headCnt = static_cast<int>(std::round(m_options.m_ratio * data.R()));
-        selected.resize(headCnt);
-    }
-    else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "BKT"))
-    {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
-        std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
-        bkt->m_iBKTKmeansK = m_options.m_iBKTKmeansK;
-        bkt->m_iBKTLeafSize = m_options.m_iBKTLeafSize;
-        bkt->m_iSamples = m_options.m_iSamples;
-        bkt->m_iTreeNumber = m_options.m_iTreeNumber;
-        bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
-        // Native clustering on raw vectors: do NOT route head selection through the
-        // quantizer reconstruct path (that's for posting encoding at BuildSSDIndex).
-        bkt->m_pQuantizer = nullptr;
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
-        SPTAGLIB_LOG(
-            Helper::LogLevel::LL_Info,
-            "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
-            bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber,
-            m_options.m_iSelectHeadNumberOfThreads);
-
-        if (m_options.m_parallelBKTBuild)
-            bkt->BuildTreesParallel<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads,
-                                              nullptr, nullptr, true);
-        else
-            bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads,
-                                          nullptr, nullptr, true);
-        auto t2 = std::chrono::high_resolution_clock::now();
-        double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Invoking BuildTrees used time: %.2lf minutes (about %.2lf hours).\n",
-                     elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
-
-        if (m_options.m_saveBKT)
-        {
-            std::stringstream bktFileNameBuilder;
-            bktFileNameBuilder << m_options.m_vectorPath << ".bkt." << m_options.m_iBKTKmeansK << "_"
-                               << m_options.m_iBKTLeafSize << "_" << m_options.m_iTreeNumber << "_"
-                               << m_options.m_iSamples << "_" << static_cast<int>(m_options.m_distCalcMethod) << ".bin";
-            bkt->SaveTrees(bktFileNameBuilder.str());
-        }
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Finish generating BKT.\n");
-
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start selecting nodes...Select Head Dynamically...\n");
-        SelectHeadDynamically(bkt, data.R(), selected);
-
-        if (selected.empty())
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Can't select any vector as head with current settings\n");
-            return false;
-        }
-    }
-    else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "PerTagBKT"))
-    {
-        // Per-tag head selection (the deprecated cross-tag "merge" variants were
-        // removed 2026-06-11):
-        //   Partition vectors by a per-vector grouping tag (the routing key,
-        //   e.g. SIFT project / YFCC country). For each group build a BKTree on
-        //   that subset and run SelectHeadDynamically at the target head ratio.
-        //   The union of all per-tag heads is the final head set. No merge.
-        // PerVectorTagsFile contains one grouping tag per vector and is supplied
-        // through native [SelectHead] configuration.
         if (m_options.m_perVectorTagsFile.empty())
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                          "PerTagBKT requires [SelectHead] PerVectorTagsFile\n");
             return false;
         }
-        const std::string& tagsFile = m_options.m_perVectorTagsFile;
-        // PerTagBKT historically used a 1.6% fallback, unlike vanilla BKT's
-        // 20% default. Preserve that behavior unless native Ratio was supplied.
-        const double configuredRatio =
-            m_options.m_ratioExplicitlySet ? m_options.m_ratio : 0.016;
-        const double finalRatio = std::clamp(configuredRatio, 1e-5, 0.9);
-
-        // ---- Read per-vector tag column (one int per line) ----
-        std::vector<int> perVecTag(data.R(), -1);
+        std::ifstream input(m_options.m_perVectorTagsFile);
+        if (!input.good())
         {
-            std::ifstream fin(tagsFile);
-            if (!fin.good())
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "PerTagBKT failed to open %s\n", tagsFile.c_str());
-                return false;
-            }
-            int v; int idx = 0;
-            while (idx < data.R() && (fin >> v))
-                perVecTag[idx++] = v;
-            if (idx != data.R())
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "PerTagBKT tag file has %d entries, expected %d\n",
-                             idx, data.R());
-                return false;
-            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "PerTagBKT failed to open %s\n",
+                         m_options.m_perVectorTagsFile.c_str());
+            return false;
         }
-
-        // ---- Group vector IDs by tag value ----
-        std::map<int, std::vector<SizeType>> tagGroups;
-        for (int i = 0; i < data.R(); ++i)
-            if (perVecTag[i] >= 0)
-                tagGroups[perVecTag[i]].push_back(static_cast<SizeType>(i));
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKT: %zu distinct tag values\n", tagGroups.size());
-
-        // ---- Per-tag BKT + SelectHeadDynamically ----
-        // Target ratio for SelectHeadDynamically per tag = finalRatio directly.
-        const double perTagTarget = std::min(0.9, finalRatio);
-        const auto savedSelTh    = m_options.m_selectThreshold;
-        const auto savedSplTh    = m_options.m_splitThreshold;
-        const auto savedSplFa    = m_options.m_splitFactor;
-        const auto savedKmeansK  = m_options.m_iBKTKmeansK;
-        const auto savedSamples  = m_options.m_iSamples;
-
-        std::vector<int> initialHeads;     // global VIDs
-
-        for (auto& kv : tagGroups)
+        perVectorTags.reserve(static_cast<size_t>(data.R()));
+        int tag = -1;
+        while (perVectorTags.size() < static_cast<size_t>(data.R()) &&
+               (input >> tag))
         {
-            std::vector<SizeType>& subIdx = kv.second;
-            int subSize = static_cast<int>(subIdx.size());
-            if (subSize <= 1)
-            {
-                if (subSize == 1)
-                    initialHeads.push_back(static_cast<int>(subIdx[0]));
-                continue;
-            }
-
-            // Per-tag SelectHead reuses the user-configured ratio AND thresholds
-            // exactly as vanilla path. Do NOT reset selectThreshold/splitThreshold
-            // — that was an oversample-era artifact that forced threshold
-            // re-derivation from ratio (=1/ratio), producing 10x fewer heads
-            // than vanilla which uses user-set defaults (e.g. 6/25).
-            m_options.m_ratio = perTagTarget;
-            m_options.m_iBKTKmeansK = savedKmeansK;
-            m_options.m_iSamples = std::min(savedSamples, subSize);
-            SelectHeadAdjustOptions(subSize);
-
-            std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
-            bkt->m_iBKTKmeansK   = m_options.m_iBKTKmeansK;
-            bkt->m_iBKTLeafSize  = m_options.m_iBKTLeafSize;
-            bkt->m_iSamples      = std::min(m_options.m_iSamples, subSize);
-            bkt->m_iTreeNumber   = m_options.m_iTreeNumber;
-            bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
-            // Native clustering on raw vectors (OPQ is posting-only, see BKT branch).
-            bkt->m_pQuantizer    = nullptr;
-            if (m_options.m_parallelBKTBuild)
-                bkt->BuildTreesParallel<InternalDataType>(data, m_options.m_distCalcMethod,
-                                                  m_options.m_iSelectHeadNumberOfThreads,
-                                                  &subIdx, nullptr, true);
-            else
-                bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod,
-                                              m_options.m_iSelectHeadNumberOfThreads,
-                                              &subIdx, nullptr, true);
-
-            std::vector<int> subSelected;
-            SelectHeadDynamically(bkt, subSize, subSelected);
-            if (subSelected.empty())
-                subSelected.push_back(static_cast<int>(subIdx[0]));
-
-            for (int h : subSelected)
-                initialHeads.push_back(h);
+            perVectorTags.push_back(tag);
         }
-
-        // Restore temporary selection knobs but retain the effective target for
-        // the persisted indexloader.ini.
-        m_options.m_ratio = perTagTarget;
-        m_options.m_selectThreshold = savedSelTh;
-        m_options.m_splitThreshold = savedSplTh;
-        m_options.m_splitFactor = savedSplFa;
-        m_options.m_iBKTKmeansK = savedKmeansK;
-        m_options.m_iSamples = savedSamples;
-
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKT: %zu per-tag heads "
-                     "(finalRatio=%.3f%%, perTagTarget=%.3f%%, achieved=%.3f%%)\n",
-                     initialHeads.size(),
-                     100.0 * finalRatio,
-                     100.0 * perTagTarget,
-                     100.0 * initialHeads.size() / data.R());
-
-        // [merge path removed 2026-06-11] No cross-tag merge: the per-tag
-        // heads ARE the final head set. Dedup + sort for downstream phases.
-        std::sort(initialHeads.begin(), initialHeads.end());
-        initialHeads.erase(std::unique(initialHeads.begin(), initialHeads.end()),
-                           initialHeads.end());
-        selected.swap(initialHeads);
-
-        if (selected.empty()) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PerTagBKT produced no heads\n");
+        if (perVectorTags.size() != static_cast<size_t>(data.R()))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "PerTagBKT tag file has %zu entries, expected %d\n",
+                         perVectorTags.size(), data.R());
             return false;
         }
     }
+
+    std::vector<SizeType> selected;
+    if (!SelectHeadsFromData(
+            data, m_options,
+            perVectorTags.empty() ? nullptr : &perVectorTags,
+            selected, "H1 SelectHead", false))
+        return false;
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Seleted Nodes: %u, about %.2lf%% of total.\n",
                  static_cast<unsigned int>(selected.size()), selected.size() * 100.0 / data.R());
@@ -6168,7 +8151,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
 
         std::unordered_set<SizeType> selectedSet;
         selectedSet.reserve(selected.size() * 2 + 1);
-        for (int vectorId : selected)
+        for (SizeType vectorId : selected)
         {
             if (vectorId < 0 || vectorId >= data.R()) {
                 continue;
@@ -6200,7 +8183,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             }
 
             if (selectedSet.insert(chosenVector).second) {
-                selected.push_back(static_cast<int>(chosenVector));
+                selected.push_back(chosenVector);
             }
             m_pendingNodeHeadSelections[nodeId].push_back(chosenVector);
             m_pendingHeadVectorOwners[chosenVector] = static_cast<int>(nodeId);
@@ -6213,6 +8196,67 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             std::sort(nodeHeads.begin(), nodeHeads.end());
             nodeHeads.erase(std::unique(nodeHeads.begin(), nodeHeads.end()), nodeHeads.end());
         }
+    }
+
+    if (m_options.m_selectSecondLevel)
+    {
+        const size_t h1Count = selected.size();
+        Options secondLevelOptions = m_options;
+        secondLevelOptions.m_ratio = m_options.m_secondLevelRatio;
+        secondLevelOptions.m_ratioExplicitlySet = true;
+        secondLevelOptions.m_headVectorCount = 0;
+        secondLevelOptions.m_saveBKT = false;
+
+        std::vector<SizeType> secondLevelSelected;
+        if (!SelectHeadsFromData(
+                data, secondLevelOptions,
+                perVectorTags.empty()
+                    ? nullptr
+                    : &perVectorTags,
+                secondLevelSelected,
+                "H2 SelectHead", true,
+                &selected))
+            return false;
+
+        std::vector<SizeType> secondLevelLocalIDs;
+        secondLevelLocalIDs.reserve(
+            secondLevelSelected.size());
+        size_t h1 = 0;
+        for (SizeType baseVector :
+             secondLevelSelected)
+        {
+            while (h1 < selected.size() &&
+                   selected[h1] < baseVector)
+                ++h1;
+            if (h1 >= selected.size() ||
+                selected[h1] != baseVector)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "H2 selection contains a vector outside H1.\n");
+                return false;
+            }
+            secondLevelLocalIDs.push_back(
+                static_cast<SizeType>(h1));
+        }
+
+        if (!m_options.m_noOutput &&
+            !WriteSelectedHeadFiles(
+                data, secondLevelSelected,
+                m_options.m_indexDirectory + FolderSep +
+                    m_options.m_secondLevelHeadVectorFile,
+                m_options.m_indexDirectory + FolderSep +
+                    m_options.m_secondLevelHeadIDFile,
+                &secondLevelLocalIDs))
+            return false;
+
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Info,
+            "H2 SelectHead: selected %zu of %zu H1 heads (%.3f%%) "
+            "with SelectHeadType=%s\n",
+            secondLevelSelected.size(), h1Count,
+            100.0 * secondLevelSelected.size() / h1Count,
+            m_options.m_selectType.c_str());
     }
 
     // --- Dual-pool v3 augmentation ---------------------------------------------
@@ -6420,6 +8464,84 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
 
 template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader> &p_reader)
 {
+    if (!ValidSecondLevelRouteConfig(m_options))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "SecondLevelRouteSelectivityThreshold must be in [0,1] and "
+            "SecondLevelMaxCheck must be positive.\n");
+        return ErrorCode::FailedParseValue;
+    }
+    if (!ValidSecondLevelArtifactLayout(
+            m_options))
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level artifacts must be safe, distinct names that do not collide with index outputs.\n");
+        return ErrorCode::FailedParseValue;
+    }
+
+    if (m_options.m_selectSecondLevel &&
+        (!m_options.m_selectHead ||
+         !m_options.m_buildHead ||
+         !m_options.m_enableSSD ||
+         !m_options.m_enableLimitedTagPosting ||
+         !std::isfinite(m_options.m_secondLevelRatio) ||
+         m_options.m_secondLevelRatio <= 0.0 ||
+         m_options.m_secondLevelRatio >= 1.0 ||
+         m_options.m_secondLevelReplicaCount <= 0 ||
+         m_options.m_secondLevelHeadVectorFile.empty() ||
+         m_options.m_secondLevelHeadIDFile.empty() ||
+         m_options.m_secondLevelHeadIndexFolder.empty() ||
+         m_options.m_secondLevelPostingFile.empty())) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Second-level routing requires SelectHead/BuildHead/SSD and "
+            "limited-tag mode, 0 < SecondLevelRatio < 1, a positive "
+            "replica count, a route-selectivity threshold in [0,1], and "
+            "distinct non-empty graph/posting artifacts.\n");
+        return ErrorCode::FailedParseValue;
+    }
+    if (!m_options.m_selectSecondLevel && m_options.m_selectHead)
+    {
+        const auto removeStaleSecondLevelFile =
+            [&](const std::string& p_file) {
+                if (!p_file.empty() &&
+                    p_file != m_options.m_headVectorFile &&
+                    p_file != m_options.m_headIDFile)
+                {
+                    std::remove(
+                        (m_options.m_indexDirectory +
+                         FolderSep + p_file).c_str());
+                }
+            };
+        removeStaleSecondLevelFile(
+            m_options.m_secondLevelHeadVectorFile);
+        removeStaleSecondLevelFile(
+            m_options.m_secondLevelHeadIDFile);
+        removeStaleSecondLevelFile(
+            m_options.m_secondLevelPostingFile);
+        if (!m_options
+                 .m_secondLevelHeadIndexFolder
+                 .empty() &&
+            m_options
+                    .m_secondLevelHeadIndexFolder !=
+                m_options.m_headIndexFolder)
+        {
+            std::error_code error;
+            std::filesystem::remove_all(
+                m_options.m_indexDirectory +
+                    FolderSep +
+                    m_options
+                        .m_secondLevelHeadIndexFolder,
+                error);
+        }
+    }
+    if (m_options.m_selectSecondLevel &&
+        m_options.m_buildSsdIndex)
+        m_options
+            .m_secondLevelGenerationFingerprint
+            .clear();
     if (m_options.m_enableHybridDistance &&
         m_options.m_enableLimitedTagPosting) {
         SPTAGLIB_LOG(
@@ -6529,6 +8651,16 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             return ErrorCode::Fail;
         }
     }
+    if (m_options.m_selectSecondLevel && resumedSelectHead &&
+        (!fileexists((m_options.m_indexDirectory + FolderSep +
+                      m_options.m_secondLevelHeadVectorFile).c_str()) ||
+         !fileexists((m_options.m_indexDirectory + FolderSep +
+                      m_options.m_secondLevelHeadIDFile).c_str()))) {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "Resume checkpoint is missing second-level head artifacts.\n");
+        return ErrorCode::Fail;
+    }
     auto t2 = std::chrono::high_resolution_clock::now();
     double selectHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs\n", selectHeadTime);
@@ -6563,7 +8695,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     }
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
-    if (m_options.m_buildHead && !resumedCompletedBundleHeads)
+    if (m_options.m_buildHead)
     {
         // QuantizeHead config gate: only build the head index on quantized vectors when
         // a global quantizer is present AND m_quantizeHead is set. With in-posting
@@ -6657,7 +8789,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             return true;
         };
 
-        if (!buildMetadataOnlyBundleRoot) {
+        if (!resumedCompletedBundleHeads &&
+            !buildMetadataOnlyBundleRoot) {
         m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
         m_index->SetQuantizer(headQuant ? m_pQuantizer : nullptr);
@@ -6740,7 +8873,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         }
         }
 
-        if (!m_pendingNodeHeadSelections.empty())
+        if (!resumedCompletedBundleHeads &&
+            !m_pendingNodeHeadSelections.empty())
         {
             m_headBundleNodes.clear();
             SizeType headOffset = 0;
@@ -6791,12 +8925,47 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 postingOffset += nodeInfo.postingCount;
             }
         }
-        else
+        else if (!resumedCompletedBundleHeads)
         {
             InitializeDefaultHeadBundle();
         }
 
-        if (buildMetadataOnlyBundleRoot)
+        if (m_options.m_selectSecondLevel)
+        {
+            const std::string secondVectorFile =
+                m_options.m_indexDirectory +
+                FolderSep +
+                m_options.m_secondLevelHeadVectorFile;
+            const std::string secondIndexDir =
+                m_options.m_indexDirectory +
+                FolderSep +
+                m_options.m_secondLevelHeadIndexFolder;
+            if (!buildHeadIndexFromFile(
+                    secondVectorFile,
+                    secondIndexDir))
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Failed to build the second-level head graph.\n");
+                return ErrorCode::Fail;
+            }
+            m_secondLevelIndex.reset();
+            if (VectorIndex::LoadIndex(
+                    secondIndexDir,
+                    m_secondLevelIndex) !=
+                    ErrorCode::Success ||
+                m_secondLevelIndex == nullptr)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Cannot reload second-level head graph %s.\n",
+                    secondIndexDir.c_str());
+                return ErrorCode::Fail;
+            }
+        }
+
+        if (buildMetadataOnlyBundleRoot &&
+            !resumedCompletedBundleHeads)
         {
             if (ActivateMetadataOnlyBundleRoot() != ErrorCode::Success) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
@@ -6829,6 +8998,43 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
 
         m_index->UpdateIndex();
+        if (m_options.m_selectSecondLevel)
+        {
+            if (m_secondLevelIndex == nullptr)
+            {
+                const std::string secondIndexDir =
+                    m_options.m_indexDirectory +
+                    FolderSep +
+                    m_options
+                        .m_secondLevelHeadIndexFolder;
+                if (VectorIndex::LoadIndex(
+                        secondIndexDir,
+                        m_secondLevelIndex) !=
+                        ErrorCode::Success ||
+                    m_secondLevelIndex == nullptr)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Cannot load second-level head graph %s.\n",
+                        secondIndexDir.c_str());
+                    return ErrorCode::Fail;
+                }
+            }
+            m_secondLevelIndex->SetParameter(
+                "NumberOfThreads",
+                std::to_string(
+                    m_options
+                        .m_iSSDNumberOfThreads));
+            m_secondLevelIndex->SetParameter(
+                "MaxCheck",
+                std::to_string(
+                    m_options.m_maxCheck));
+            m_secondLevelIndex->SetParameter(
+                "HashTableExponent",
+                std::to_string(
+                    m_options.m_hashExp));
+            m_secondLevelIndex->UpdateIndex();
+        }
 
         if (m_options.m_storage == Storage::STATIC)
         {
@@ -6910,7 +9116,6 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_options.m_datasetRowsInBlock,
                 m_options.m_datasetCapacity);
         }
-
         if (EnsureHeadHybridGraph() != ErrorCode::Success) {
             return ErrorCode::Fail;
         }
@@ -6997,6 +9202,20 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     m_options.m_indexDirectory) !=
                 ErrorCode::Success)
                 return ErrorCode::Fail;
+            if (m_options.m_selectSecondLevel)
+            {
+                const ErrorCode secondLevelStatus =
+                    m_options.m_buildSsdIndex
+                        ? BuildSecondLevelHeadPostings()
+                        : LoadSecondLevelIndex(
+                              m_options
+                                  .m_indexDirectory);
+                if (secondLevelStatus !=
+                    ErrorCode::Success)
+                {
+                    return secondLevelStatus;
+                }
+            }
             if ((m_options.m_storage != Storage::STATIC) && m_options.m_preReassign)
             {
                 if (m_extraSearcher->RefineIndex(m_index) != ErrorCode::Success)

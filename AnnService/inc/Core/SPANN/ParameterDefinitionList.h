@@ -67,6 +67,14 @@ DefineSelectHeadParameter(m_perVectorTagsFile, std::string, std::string(), "PerV
 DefineSelectHeadParameter(m_dualPoolAugment, bool, false, "DualPoolAugment")
 DefineSelectHeadParameter(m_dualPoolExtraRatio, double, 0.1, "DualPoolExtraRatio")
 DefineSelectHeadParameter(m_uExtraIDFile, std::string, std::string(), "UExtraIDFile")
+DefineSelectHeadParameter(m_selectSecondLevel, bool, false, "SelectSecondLevel")
+DefineSelectHeadParameter(m_secondLevelRatio, double, 0.05, "SecondLevelRatio")
+DefineSelectHeadParameter(m_secondLevelHeadVectorFile, std::string, std::string("SPTAGSecondLevelHeadVectors.bin"), "SecondLevelHeadVectors")
+DefineSelectHeadParameter(m_secondLevelHeadIDFile, std::string, std::string("SPTAGSecondLevelHeadVectorIDs.bin"), "SecondLevelHeadVectorIDs")
+DefineSelectHeadParameter(m_secondLevelReplicaCount, int, 4, "SecondLevelReplicaCount")
+DefineSelectHeadParameter(m_secondLevelHeadIndexFolder, std::string, std::string("SecondLevelHeadIndex"), "SecondLevelHeadIndexFolder")
+DefineSelectHeadParameter(m_secondLevelPostingFile, std::string, std::string("second_level_head_postings.bin"), "SecondLevelPostingFile")
+DefineSelectHeadParameter(m_secondLevelGenerationFingerprint, std::string, std::string(), "SecondLevelGenerationFingerprint")
 #endif
 
 #ifdef DefineBuildHeadParameter
@@ -91,6 +99,8 @@ DefineSSDParameter(m_limitedTagSupportFile, std::string, std::string("limited_ta
 DefineSSDParameter(m_limitedTagSlotsPerHead, int, 2, "LimitedTagSlotsPerHead")
 DefineSSDParameter(m_limitedTagVoteHeadCount, int, 2, "LimitedTagVoteHeadCount")
 DefineSSDParameter(m_limitedTagMinHeadCount, int, 8, "LimitedTagMinHeadCount")
+DefineSSDParameter(m_secondLevelRouteSelectivityThreshold, float, 0.02f, "SecondLevelRouteSelectivityThreshold") // Mutable
+DefineSSDParameter(m_secondLevelMaxCheck, int, 112, "SecondLevelMaxCheck") // Mutable
 DefineSSDParameter(m_hybridVectorWeight, float, 1.0f, "HybridVectorWeight")
 DefineSSDParameter(m_hybridCategoricalCols, std::string, std::string(""), "HybridCategoricalCols")
 DefineSSDParameter(m_hybridCategoricalWeights, std::string, std::string(""), "HybridCategoricalWeights")

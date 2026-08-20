@@ -6739,6 +6739,7 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     bool forceDenseTagSearch = false;
     bool adaptiveFilteredNprobeEnabled = false;
     bool hybridDistanceEnabled = false;
+    bool secondLevelRoutingEnabled = false;
     float filteredSearchNprobeSafety = 1.0f;
     if (internalIdx != nullptr) {
         const std::string forceDenseParam = internalIdx->GetParameter("ForceDenseTagSearch", "BuildSSDIndex");
@@ -6759,6 +6760,9 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         const auto* searchOptions = spannIndex != nullptr ? spannIndex->GetOptions() : nullptr;
         adaptiveFilteredNprobeEnabled =
             searchOptions != nullptr && searchOptions->m_enableAdaptiveFilteredNprobe;
+        secondLevelRoutingEnabled =
+            searchOptions != nullptr &&
+            searchOptions->m_selectSecondLevel;
         const std::string hybridDistanceParam =
             internalIdx->GetParameter(
                 "EnableHybridDistance", "BuildSSDIndex");
@@ -6771,6 +6775,11 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             // Tag-pure and sparse early returns cannot compare the original and
             // hybrid navigation and posting scan-range costs, so they are not
             // eligible here.
+            forceDenseTagSearch = true;
+        }
+        if (secondLevelRoutingEnabled) {
+            // Selectivity decides H2 versus H1 inside SPANN. Wrapper-local
+            // tag-pure/sparse returns would bypass that policy entirely.
             forceDenseTagSearch = true;
         }
     }
@@ -6850,11 +6859,12 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
 
     const auto tagStatsIt = m_tenantTagRoutingStats.find(p_tenantId);
     const auto* tagStats = (tagStatsIt != m_tenantTagRoutingStats.end()) ? &tagStatsIt->second : nullptr;
-    if (hybridDistanceEnabled &&
+    if ((hybridDistanceEnabled ||
+         secondLevelRoutingEnabled) &&
         (tagStats == nullptr || tagStats->empty())) {
         fprintf(
             stderr,
-            "[ERROR] Tenant %d: hybrid filtered search requires "
+            "[ERROR] Tenant %d: hybrid/second-level filtered search requires "
             "tag_routing_stats.bin; run BuildSignatures with the native "
             "INI before serving filtered queries\n",
             p_tenantId);
@@ -7205,7 +7215,9 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             (void)allowedNodeMask;
             (void)headNodeToNode;
 
-        if (adaptiveFilteredNprobeEnabled || hybridDistanceEnabled) {
+        if (adaptiveFilteredNprobeEnabled ||
+            hybridDistanceEnabled ||
+            secondLevelRoutingEnabled) {
             auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
             int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
             float vectorSel = EstimateQueryVectorSelectivity(
