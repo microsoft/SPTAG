@@ -351,6 +351,59 @@ nearest percentage of the distance-ordered pure prefix plus every tail record;
 attribute-ordered snapshots and cannot be combined with `UnfilterPurePages` or
 `UnfilterExtraTailPages`.
 
+#### **SIFT1B with attributes (RaBitQ FileIO postings)**
+
+RaBitQ postings use the dynamic `FILEIO` store; they cannot be enabled by
+changing `PostingQuantizer` in the preceding `STATIC` example. The native path
+currently supports one-byte base vectors (`Int8` or `UInt8`), keeps the head
+index full precision, stores a compact RaBitQ2 code in each posting record, and
+exact-reranks the best estimated candidates from `FullVectorFile`.
+
+First encode the headered base file. For the L2 configuration above, disable
+cosine normalization explicitly:
+
+```bash
+Release/rabitq2_encode_stream \
+  /absolute/path/sift1b_base.u8bin \
+  /absolute/path/sift1b_rabitq2_b2.bin \
+  2 UInt8 1000000 --no-normalize
+```
+
+Then copy the preceding SIFT1B INI and replace these values:
+
+```ini
+[Base]
+IndexDirectory=sift1b/sift1b_spann_rabitq2_b2
+
+[BuildSSDIndex]
+Storage=FILEIO
+PostingQuantizer=RaBitQ
+PostingQuantBits=2
+PostingQuantizerFile=/absolute/path/sift1b_rabitq2_b2.bin
+FullVectorFile=/absolute/path/sift1b_base.u8bin
+RerankL=500
+StartFileSizeGB=500
+GrowthFileSizeGB=10
+MaxFileSizeGB=560
+```
+
+Build it with the same native launcher:
+
+```bash
+Release/spannbuilder -c build_spann_attr_sift1b_rabitq2_b2.ini
+```
+
+`PostingQuantizerFile` and `FullVectorFile` should be absolute paths because the
+per-tenant index may be built in a separate work directory. The encoder's
+`total_bits` controls the physical code width recorded in the sidecar;
+`PostingQuantBits` should record the same value in the INI. `RerankL` is the
+number of estimated survivors fetched from the full-vector file by the batched
+O_DIRECT reranker and must be at least the requested result count. The
+`500/560` GiB block-pool values are a SIFT1B two-bit planning example; adjust
+them for the actual assignment count and available disk. The current RaBitQ
+path requires exact reranking; `QuantADCOnly` is not a no-rerank switch for this
+path.
+
 For sift1m dataset, use the default configuration below (buildconfig.ini) and run .\SSDServing.exe buildconfig.ini:
 ```
 [Base]

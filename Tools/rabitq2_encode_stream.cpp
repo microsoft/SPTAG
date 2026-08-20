@@ -19,13 +19,14 @@
 //   per vec: bin[binBytes] + ex[exBytes]
 //
 // Usage: rabitq2_encode_stream <base.bin> <rabitq2.bin> <total_bits> <Int8|UInt8|Float>
-//        [chunk_vectors]
-// Env: SPTAG_RABITQ_NONORM=1 -> skip cosine normalization (L2 mode).
+//        [chunk_vectors] [--no-normalize|--normalize]
+// Env fallback: SPTAG_RABITQ_NONORM=1 -> skip cosine normalization (L2 mode).
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 
@@ -71,14 +72,36 @@ void Normalize(float* v, int dim) {
 int main(int argc, char** argv) {
     if (argc < 5) {
         std::cerr << "usage: rabitq2_encode_stream <base.bin> <rabitq2.bin> <total_bits> "
-                     "<Int8|UInt8|Float> [chunk_vectors]\n";
+                     "<Int8|UInt8|Float> [chunk_vectors] [--no-normalize|--normalize]\n";
         return 1;
     }
     const std::string inPath = argv[1];
     const std::string outPath = argv[2];
     const int total_bits = atoi(argv[3]);
     const std::string vt = argv[4];
-    const size_t chunk = (argc > 5) ? (size_t)atoll(argv[5]) : 1000000;
+    size_t chunk = 1000000;
+    bool chunkSet = false;
+    int normalizationMode = -1;
+    for (int i = 5; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--no-normalize") {
+            normalizationMode = 0;
+        } else if (arg == "--normalize") {
+            normalizationMode = 1;
+        } else if (!chunkSet) {
+            char* end = nullptr;
+            unsigned long long parsed = std::strtoull(arg.c_str(), &end, 10);
+            if (end == arg.c_str() || *end != '\0' || parsed == 0) {
+                std::cerr << "bad chunk_vectors " << arg << "\n";
+                return 1;
+            }
+            chunk = static_cast<size_t>(parsed);
+            chunkSet = true;
+        } else {
+            std::cerr << "unexpected argument " << arg << "\n";
+            return 1;
+        }
+    }
     if (total_bits < 1) { std::cerr << "total_bits must be >= 1\n"; return 1; }
     const size_t ex_bits = (size_t)(total_bits - 1);
     const size_t esz = ElemSize(vt);
@@ -95,7 +118,9 @@ int main(int argc, char** argv) {
               << " total_bits=" << total_bits << " chunk=" << chunk << "\n";
 
     const char* nnEnv = std::getenv("SPTAG_RABITQ_NONORM");
-    const bool noNorm = nnEnv && nnEnv[0] == '1';
+    const bool noNorm = normalizationMode >= 0
+        ? normalizationMode == 0
+        : (nnEnv && nnEnv[0] == '1');
     std::cout << "normalize=" << (noNorm ? "OFF (L2)" : "ON (cosine)") << "\n";
 
     std::vector<char> rawBuf(chunk * rowBytes);
