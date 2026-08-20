@@ -27,6 +27,8 @@ namespace
 constexpr SizeType kVectorCount = 96;
 constexpr DimensionType kDimension = 128;
 constexpr int kRaBitQBits = 3;
+constexpr DimensionType kRaBitQCodeBytes =
+    kDimension * kRaBitQBits / 8 + 5 * sizeof(float);
 constexpr const char* kQuantizerFile = "rabitq_global_quantizer_test.bin";
 constexpr const char* kQueryFile = "rabitq_global_query_test.fvecs";
 constexpr SizeType kSearchQueryCount = 16;
@@ -268,25 +270,17 @@ void VerifySSDServingSearch(
 
 BOOST_AUTO_TEST_SUITE(RaBitQQuantizerTest)
 
-BOOST_AUTO_TEST_CASE(OfficialScalarRaBitQUsesGlobalQuantizerPath)
+BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQUsesGlobalQuantizerPath)
 {
     std::remove(kQuantizerFile);
     const auto raw = MakeRawVectors();
     auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
         kDimension, kRaBitQBits, false);
     BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
-    BOOST_CHECK_EQUAL(quantizer->GetNumSubvectors(), kDimension + 8);
+    BOOST_CHECK_EQUAL(quantizer->GetNumSubvectors(), kRaBitQCodeBytes);
 
     const auto codes = QuantizeVectors(raw, quantizer);
-    for (SizeType vector = 0; vector < codes->Count(); ++vector) {
-        float delta = 0.0F;
-        float lower_value = 0.0F;
-        const auto* code = reinterpret_cast<const std::uint8_t*>(codes->GetVector(vector));
-        std::memcpy(&delta, code + kDimension, sizeof(delta));
-        std::memcpy(&lower_value, code + kDimension + sizeof(delta), sizeof(lower_value));
-        BOOST_CHECK(std::isfinite(delta));
-        BOOST_CHECK(std::isfinite(lower_value));
-    }
+    BOOST_CHECK_EQUAL(codes->Dimension(), kRaBitQCodeBytes);
     const auto loaded = SaveAndLoad(quantizer);
     BOOST_CHECK_EQUAL(loaded->GetNumSubvectors(), codes->Dimension());
 
@@ -300,7 +294,7 @@ BOOST_AUTO_TEST_CASE(OfficialScalarRaBitQUsesGlobalQuantizerPath)
     std::remove(kQuantizerFile);
 }
 
-BOOST_AUTO_TEST_CASE(OfficialScalarRaBitQHandlesCentroidVector)
+BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQHandlesCentroidVector)
 {
     ByteArray bytes = ByteArray::Alloc(sizeof(float) * kDimension);
     auto* values = reinterpret_cast<float*>(bytes.Data());
@@ -325,6 +319,32 @@ BOOST_AUTO_TEST_CASE(OfficialScalarRaBitQHandlesCentroidVector)
     std::vector<std::uint8_t> query(quantizer->QuantizeSize());
     quantizer->QuantizeVector(values, query.data());
     BOOST_CHECK(std::isfinite(quantizer->L2Distance(query.data(), code.data())));
+}
+
+BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQStoresRequestedBits)
+{
+    const auto raw = MakeRawVectors();
+    for (int bits = 1; bits <= 8; ++bits) {
+        auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+            kDimension, bits, false);
+        BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
+        BOOST_CHECK_EQUAL(
+            quantizer->GetNumSubvectors(),
+            kDimension * bits / 8 + 5 * sizeof(float));
+
+        std::vector<std::uint8_t> code(quantizer->GetNumSubvectors());
+        quantizer->QuantizeVector(raw->GetVector(0), code.data(), false);
+        std::vector<float> reconstructed(kDimension);
+        quantizer->ReconstructVector(code.data(), reconstructed.data());
+        for (float value : reconstructed) {
+            BOOST_CHECK(std::isfinite(value));
+        }
+
+        quantizer->SetEnableADC(true);
+        std::vector<std::uint8_t> query(quantizer->QuantizeSize());
+        quantizer->QuantizeVector(raw->GetVector(1), query.data());
+        BOOST_CHECK(std::isfinite(quantizer->L2Distance(query.data(), code.data())));
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
