@@ -242,10 +242,109 @@ SearchPostingPageLimit=12
 ### **Global RaBitQ Quantizer**
 
 RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the
-official scalar model and encode base vectors with `Release/quantizer`, then
+official model and encode base vectors with `Release/quantizer`, then
 use the generated model through `QuantizerFilePath` in the normal SPANN
 workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
-`Dim=136` (128 scalar bytes plus two Float reconstruction factors).
+`Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
+
+Train and encode SIFT1M:
+
+```bash
+Release/quantizer \
+  -d 128 -v Float -f XVEC \
+  -i sift1m/sift_base.fvecs \
+  -o sift1m/sift_base.rabitq3.u8bin \
+  -oq sift1m/official_rabitq3_global.bin \
+  -qt RaBitQQuantizer -qd 3 -ts 1000000
+```
+
+The recommended SIFT1M SPANN configuration uses STATIC posting storage:
+
+```ini
+[Base]
+ValueType=UInt8
+DistCalcMethod=L2
+IndexAlgoType=BKT
+Dim=68
+VectorPath=sift1m/sift_base.rabitq3.u8bin
+VectorType=DEFAULT
+VectorSize=1000000
+QueryPath=sift1m/sift_query.fvecs
+QueryType=XVEC
+WarmupPath=sift1m/sift_query.fvecs
+WarmupType=XVEC
+TruthPath=sift1m/sift_groundtruth.ivecs
+TruthType=XVEC
+IndexDirectory=sift1m/spann-rabitq3
+QuantizerFilePath=sift1m/official_rabitq3_global.bin
+
+[SelectHead]
+isExecute=true
+TreeNumber=1
+BKTKmeansK=32
+BKTLeafSize=8
+SamplesNumber=1000
+SaveBKT=false
+SelectThreshold=50
+SplitFactor=6
+SplitThreshold=100
+Ratio=0.16
+NumberOfThreads=24
+BKTLambdaFactor=-1
+
+[BuildHead]
+isExecute=true
+NeighborhoodSize=32
+TPTNumber=32
+TPTLeafSize=2000
+MaxCheck=8192
+MaxCheckForRefineGraph=8192
+RefineIterations=3
+NumberOfThreads=24
+BKTLambdaFactor=-1
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+Storage=STATIC
+InternalResultNum=64
+ReplicaCount=8
+PostingPageLimit=12
+NumberOfThreads=24
+MaxCheck=8192
+TmpDir=/tmp/sift1m-spann-rabitq3
+EnableDeltaEncoding=false
+EnablePostingListRearrange=false
+EnableDataCompression=false
+PostingQuantizer=None
+Rerank=0
+EnableADC=true
+
+[SearchSSDIndex]
+isExecute=true
+BuildSsdIndex=false
+QueryCountLimit=10000
+InternalResultNum=32
+SearchThreadNum=1
+HashTableExponent=4
+ResultNum=10
+MaxCheck=2048
+MaxDistRatio=8.0
+SearchPostingPageLimit=12
+```
+
+`SearchSSDIndex.InternalResultNum` is the SPANN equivalent of `nprobe`.
+The recommended value is 32. On SIFT1M with one search thread, the measured
+trade-off after query-factor preprocessing is:
+
+| InternalResultNum | Average latency | P99 latency | QPS | Recall@10 |
+| ---: | ---: | ---: | ---: | ---: |
+| 16 | 0.480 ms | 0.596 ms | 2079 | 0.6401 |
+| 32 | 0.630 ms | 0.761 ms | 1586 | 0.6660 |
+| 64 | 0.811 ms | 0.957 ms | 1231 | 0.6781 |
+
+Adjust `NumberOfThreads` to the build machine. Queries remain raw 128-dimensional
+Float vectors; `Dim=68` describes the encoded base-vector width.
 
 See [`RaBitQ_Global_Quantizer.md`](RaBitQ_Global_Quantizer.md) and
 `Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini`.
