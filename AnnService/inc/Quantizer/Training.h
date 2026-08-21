@@ -2,8 +2,9 @@
 #include <inc/Core/Common/DistanceUtils.h>
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#ifdef RABITQ
 #include <inc/Core/Common/RaBitQQuantizer.h>
-
+#endif
 #include <memory>
 #include <inc/Core/VectorSet.h>
 #include "inc/Core/Common/BKTree.h"
@@ -151,6 +152,7 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     return codebooks;
 }
 
+#ifdef RABITQ
 inline std::shared_ptr<COMMON::RaBitQQuantizer> TrainRaBitQQuantizer(
     const std::shared_ptr<QuantizerOptions>& options,
     const std::shared_ptr<VectorSet>& raw_vectors)
@@ -167,3 +169,4 @@ inline std::shared_ptr<COMMON::RaBitQQuantizer> TrainRaBitQQuantizer(
     }
     return quantizer;
 }
+#endif

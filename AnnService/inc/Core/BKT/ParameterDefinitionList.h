@@ -15,7 +15,7 @@ DefineBKTParameter(m_pTrees.m_iBKTKmeansK, int, 32L, "BKTKmeansK")
 DefineBKTParameter(m_pTrees.m_iBKTLeafSize, int, 8L, "BKTLeafSize")
 DefineBKTParameter(m_pTrees.m_iSamples, int, 1000L, "Samples")
 DefineBKTParameter(m_pTrees.m_fBalanceFactor, float, 100.0F, "BKTLambdaFactor")
-DefineBKTParameter(m_pTrees.m_parallelBuild, bool, false, "ParallelBKTBuild")
+DefineBKTParameter(m_pTrees.m_parallelBuild, bool, true, "ParallelBKTBuild")
 
 DefineBKTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TPTNumber")
 DefineBKTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
@@ -37,6 +37,7 @@ DefineBKTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Dep
 DefineBKTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
 DefineBKTParameter(m_pGraph.m_iheadNumGPUs, int, 1, "HeadNumGPUs")
 DefineBKTParameter(m_pGraph.m_iTPTBalanceFactor, int, 2, "TPTBalanceFactor")
+DefineBKTParameter(m_pGraph.m_TPTParallelBuild, bool, true, "ParallelTPTBuild")
 
 DefineBKTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")

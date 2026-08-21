@@ -198,7 +198,7 @@ namespace SPTAG {
                         return ret;
                     }
                     auto warmupQuerySet = queryReader->GetVectorSet();
-                    int warmupNumQueries = min(warmupQuerySet->Count(), p_opts.m_queryCountLimit);
+                    int warmupNumQueries = min(static_cast<int>(warmupQuerySet->Count()), p_opts.m_queryCountLimit);
 
                     std::vector<QueryResult> warmupResults(warmupNumQueries, QueryResult(NULL, max(K, internalResultNum), false));
                     std::vector<SPANN::SearchStats> warmpUpStats(warmupNumQueries);
@@ -226,7 +226,7 @@ namespace SPTAG {
                     return ret;
                 }
                 auto querySet = queryReader->GetVectorSet();
-                int numQueries = min(querySet->Count(), p_opts.m_queryCountLimit);
+                int numQueries = min(static_cast<int>(querySet->Count()), p_opts.m_queryCountLimit);
 
                 std::vector<QueryResult> results(numQueries, QueryResult(NULL, max(K, internalResultNum), false));
                 std::vector<SPANN::SearchStats> stats(numQueries);
