@@ -3,11 +3,14 @@
 
 #include "inc/Core/Common/RaBitQQuantizer.h"
 
-#include "inc/Core/Common/DistanceUtils.h"
+#include "rabitqlib/quantization/data_layout.hpp"
+#include "rabitqlib/quantization/pack_excode.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 
 namespace SPTAG
@@ -29,12 +32,15 @@ ErrorCode RaBitQQuantizer::Initialize(DimensionType p_dimension, int p_bits, boo
     }
 
     m_dimension = p_dimension;
+    m_padded_dimension = static_cast<DimensionType>(
+        (static_cast<std::size_t>(p_dimension) + 63U) / 64U * 64U);
     m_bits = p_bits;
     m_normalize = p_normalize;
     m_enable_adc = false;
-    m_centroid.assign(static_cast<std::size_t>(m_dimension), 0.0F);
+    m_centroid.assign(static_cast<std::size_t>(m_padded_dimension), 0.0F);
     m_quantizer_config = rabitqlib::quant::faster_config(
-        static_cast<std::size_t>(m_dimension), static_cast<std::size_t>(m_bits));
+        static_cast<std::size_t>(m_padded_dimension), static_cast<std::size_t>(m_bits));
+    m_ip_func = rabitqlib::select_excode_ipfunc(static_cast<std::size_t>(m_bits));
     return ErrorCode::Success;
 }
 
@@ -46,16 +52,12 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
     }
 
     std::vector<double> accumulator(static_cast<std::size_t>(m_dimension), 0.0);
-    std::vector<float> normalized(static_cast<std::size_t>(m_dimension));
+    std::vector<float> prepared;
     for (SizeType i = 0; i < p_vectors->Count(); ++i) {
         const auto* vector = static_cast<const float*>(p_vectors->GetVector(i));
-        const float* input = vector;
-        if (m_normalize) {
-            CopyInput(vector, normalized.data());
-            input = normalized.data();
-        }
+        PrepareInput(vector, prepared);
         for (DimensionType j = 0; j < m_dimension; ++j) {
-            accumulator[static_cast<std::size_t>(j)] += input[j];
+            accumulator[static_cast<std::size_t>(j)] += prepared[static_cast<std::size_t>(j)];
         }
     }
 
@@ -69,98 +71,161 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
 
 float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
-    thread_local std::vector<float> left;
-    thread_local std::vector<float> right;
-    Decode(p_y, right);
-    if (m_enable_adc) {
-        return DistanceUtils::ComputeL2Distance(
-            reinterpret_cast<const float*>(p_x), right.data(), m_dimension);
+    thread_local std::vector<float> reconstructed_query;
+    const float* query = reinterpret_cast<const float*>(p_x);
+    float g_add = 0.0F;
+    float k1xsumq = 0.0F;
+    if (!m_enable_adc) {
+        Decode(p_x, reconstructed_query);
+        query = reconstructed_query.data();
+        g_add = rabitqlib::euclidean_sqr(
+            query, m_centroid.data(), static_cast<std::size_t>(m_padded_dimension));
+        k1xsumq = -0.5F * std::accumulate(
+            query, query + m_padded_dimension, 0.0F);
+    } else {
+        const std::uint8_t* query_factors =
+            p_x + static_cast<std::size_t>(m_padded_dimension) * sizeof(float);
+        std::memcpy(&g_add, query_factors, sizeof(float));
+        std::memcpy(&k1xsumq, query_factors + sizeof(float), sizeof(float));
     }
 
-    Decode(p_x, left);
-    return DistanceUtils::ComputeL2Distance(left.data(), right.data(), m_dimension);
+    float f_add = 0.0F;
+    float f_rescale = 0.0F;
+    ReadDistanceFactors(p_y, f_add, f_rescale);
+    return rabitqlib::quant::full_est_dist<float, std::uint8_t>(
+        p_y,
+        query,
+        m_ip_func,
+        static_cast<std::size_t>(m_padded_dimension),
+        static_cast<std::size_t>(m_bits),
+        f_add,
+        f_rescale,
+        g_add,
+        k1xsumq);
 }
 
 float RaBitQQuantizer::CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
-    thread_local std::vector<float> left;
-    thread_local std::vector<float> right;
-    Decode(p_y, right);
-    if (m_enable_adc) {
-        left.assign(reinterpret_cast<const float*>(p_x),
-                    reinterpret_cast<const float*>(p_x) + m_dimension);
-    } else {
-        Decode(p_x, left);
-    }
-
-    double dot = 0.0;
-    double left_norm = 0.0;
-    double right_norm = 0.0;
-    for (DimensionType i = 0; i < m_dimension; ++i) {
-        dot += static_cast<double>(left[static_cast<std::size_t>(i)]) * right[static_cast<std::size_t>(i)];
-        left_norm += static_cast<double>(left[static_cast<std::size_t>(i)]) * left[static_cast<std::size_t>(i)];
-        right_norm += static_cast<double>(right[static_cast<std::size_t>(i)]) * right[static_cast<std::size_t>(i)];
-    }
-    if (left_norm <= 0.0 || right_norm <= 0.0) {
-        return 1.0F;
-    }
-    return 1.0F - static_cast<float>(dot / std::sqrt(left_norm * right_norm));
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                 "RaBitQ official full-code adapter supports L2 distance only.\n");
+    return std::numeric_limits<float>::infinity();
 }
 
 void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc) const
 {
-    const auto* input = static_cast<const float*>(p_vector);
-    thread_local std::vector<float> normalized;
-    if (m_normalize) {
-        normalized.resize(static_cast<std::size_t>(m_dimension));
-        CopyInput(input, normalized.data());
-        input = normalized.data();
-    }
+    thread_local std::vector<float> prepared;
+    PrepareInput(static_cast<const float*>(p_vector), prepared);
+    const float* input = prepared.data();
 
     if (p_adc && m_enable_adc) {
-        std::memcpy(p_output, input, static_cast<std::size_t>(m_dimension) * sizeof(float));
+        const std::size_t query_bytes =
+            static_cast<std::size_t>(m_padded_dimension) * sizeof(float);
+        std::memcpy(p_output, input, query_bytes);
+        const float g_add = rabitqlib::euclidean_sqr(
+            input, m_centroid.data(), static_cast<std::size_t>(m_padded_dimension));
+        const float k1xsumq = -0.5F * std::accumulate(
+            input, input + m_padded_dimension, 0.0F);
+        std::memcpy(p_output + query_bytes, &g_add, sizeof(float));
+        std::memcpy(p_output + query_bytes + sizeof(float), &k1xsumq, sizeof(float));
         return;
     }
 
     bool zero_residual = true;
-    for (DimensionType i = 0; i < m_dimension; ++i) {
+    for (DimensionType i = 0; i < m_padded_dimension; ++i) {
         if (input[i] != m_centroid[static_cast<std::size_t>(i)]) {
             zero_residual = false;
             break;
         }
     }
-    std::memset(p_output, 0, static_cast<std::size_t>(m_dimension));
+    std::memset(p_output, 0, CodeBytes());
+    float f_add = 0.0F;
+    float f_rescale = 0.0F;
+    float f_error = 0.0F;
     float delta = 0.0F;
     float lower_value = 0.0F;
-    if (zero_residual) {
-        std::memcpy(p_output + m_dimension, &delta, sizeof(delta));
-        std::memcpy(p_output + m_dimension + sizeof(delta), &lower_value, sizeof(lower_value));
-        return;
+    if (!zero_residual) {
+        thread_local std::vector<std::uint8_t> scalar_code;
+        thread_local std::vector<std::uint8_t> full_code;
+        scalar_code.assign(static_cast<std::size_t>(m_padded_dimension), 0);
+        full_code.assign(static_cast<std::size_t>(m_padded_dimension), 0);
+
+        rabitqlib::quant::quantize_scalar<float, std::uint8_t>(
+            input,
+            m_centroid.data(),
+            static_cast<std::size_t>(m_padded_dimension),
+            static_cast<std::size_t>(m_bits),
+            scalar_code.data(),
+            delta,
+            lower_value,
+            m_quantizer_config);
+
+        if (m_bits == 1) {
+            std::vector<char> bin_data(
+                rabitqlib::BinDataMap<float>::data_bytes(
+                    static_cast<std::size_t>(m_padded_dimension)));
+            rabitqlib::quant::quantize_compact_one_bit(
+                input,
+                m_centroid.data(),
+                static_cast<std::size_t>(m_padded_dimension),
+                bin_data.data(),
+                rabitqlib::METRIC_L2);
+            rabitqlib::ConstBinDataMap<float> bin(
+                bin_data.data(), static_cast<std::size_t>(m_padded_dimension));
+            rabitqlib::quant::rabitq_impl::ex_bits::packing_rabitqplus_code(
+                scalar_code.data(),
+                p_output,
+                static_cast<std::size_t>(m_padded_dimension),
+                1);
+            f_add = bin.f_add();
+            f_rescale = bin.f_rescale();
+            f_error = bin.f_error();
+        } else {
+            rabitqlib::quant::quantize_full_single<float, std::uint8_t>(
+                input,
+                m_centroid.data(),
+                static_cast<std::size_t>(m_padded_dimension),
+                static_cast<std::size_t>(m_bits),
+                full_code.data(),
+                f_add,
+                f_rescale,
+                f_error,
+                rabitqlib::METRIC_L2,
+                m_quantizer_config);
+            if (scalar_code != full_code) {
+                throw std::runtime_error(
+                    "Official RaBitQ scalar and full-code quantizers produced different codes");
+            }
+            rabitqlib::quant::rabitq_impl::ex_bits::packing_rabitqplus_code(
+                full_code.data(),
+                p_output,
+                static_cast<std::size_t>(m_padded_dimension),
+                static_cast<std::size_t>(m_bits));
+        }
     }
 
-    rabitqlib::quant::quantize_scalar<float, std::uint8_t>(
-        input,
-        m_centroid.data(),
-        static_cast<std::size_t>(m_dimension),
-        static_cast<std::size_t>(m_bits),
-        p_output,
-        delta,
-        lower_value,
-        m_quantizer_config);
-    std::memcpy(p_output + m_dimension, &delta, sizeof(delta));
-    std::memcpy(p_output + m_dimension + sizeof(delta), &lower_value, sizeof(lower_value));
+    std::uint8_t* factors = p_output + PackedCodeBytes();
+    std::memcpy(factors, &f_add, sizeof(f_add));
+    std::memcpy(factors + sizeof(float), &f_rescale, sizeof(f_rescale));
+    std::memcpy(factors + 2 * sizeof(float), &f_error, sizeof(f_error));
+    std::memcpy(factors + 3 * sizeof(float), &delta, sizeof(delta));
+    std::memcpy(factors + 4 * sizeof(float), &lower_value, sizeof(lower_value));
 }
 
 int RaBitQQuantizer::QuantizeSize() const
 {
-    return m_enable_adc ? static_cast<int>(sizeof(float) * m_dimension) : static_cast<int>(CodeBytes());
+    return m_enable_adc
+        ? static_cast<int>(
+              sizeof(float) *
+              (static_cast<std::size_t>(m_padded_dimension) + kQueryFactorCount))
+        : static_cast<int>(CodeBytes());
 }
 
 void RaBitQQuantizer::ReconstructVector(const std::uint8_t* p_code, void* p_output) const
 {
     thread_local std::vector<float> reconstructed;
     Decode(p_code, reconstructed);
-    std::memcpy(p_output, reconstructed.data(), static_cast<std::size_t>(m_dimension) * sizeof(float));
+    std::memcpy(
+        p_output, reconstructed.data(), static_cast<std::size_t>(m_dimension) * sizeof(float));
 }
 
 int RaBitQQuantizer::ReconstructSize() const
@@ -191,6 +256,7 @@ ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_outpu
         kModelMagic,
         kModelVersion,
         m_dimension,
+        m_padded_dimension,
         m_bits,
         m_normalize ? 1U : 0U,
     };
@@ -274,63 +340,177 @@ float* RaBitQQuantizer::GetL2DistanceTables()
 bool RaBitQQuantizer::Ready() const
 {
     return m_dimension > 0 && m_bits >= 1 && m_bits <= 8 &&
-        m_centroid.size() == static_cast<std::size_t>(m_dimension);
+        m_padded_dimension >= m_dimension && m_padded_dimension % 64 == 0 &&
+        m_centroid.size() == static_cast<std::size_t>(m_padded_dimension) &&
+        m_ip_func != nullptr;
 }
 
 ErrorCode RaBitQQuantizer::LoadHeader(const ModelHeader& p_header)
 {
     if (p_header.magic != kModelMagic || p_header.version != kModelVersion ||
-        p_header.dimension <= 0 || p_header.bits < 1 || p_header.bits > 8) {
+        p_header.dimension <= 0 || p_header.paddedDimension < p_header.dimension ||
+        p_header.paddedDimension % 64 != 0 || p_header.bits < 1 || p_header.bits > 8) {
         return ErrorCode::FailedParseValue;
     }
-    return Initialize(p_header.dimension, p_header.bits, p_header.normalize != 0);
+    const ErrorCode status =
+        Initialize(p_header.dimension, p_header.bits, p_header.normalize != 0);
+    return status == ErrorCode::Success && m_padded_dimension == p_header.paddedDimension
+        ? ErrorCode::Success
+        : ErrorCode::FailedParseValue;
 }
 
 void RaBitQQuantizer::Decode(const std::uint8_t* p_code, std::vector<float>& p_output) const
 {
+    float f_add = 0.0F;
+    float f_rescale = 0.0F;
+    float f_error = 0.0F;
     float delta = 0.0F;
     float lower_value = 0.0F;
-    ReadCodeParameters(p_code, delta, lower_value);
-    p_output.resize(static_cast<std::size_t>(m_dimension));
+    ReadCodeFactors(
+        p_code, f_add, f_rescale, f_error, delta, lower_value);
+
+    thread_local std::vector<std::uint8_t> unpacked;
+    unpacked.resize(static_cast<std::size_t>(m_padded_dimension));
+    UnpackCode(p_code, unpacked.data());
+    p_output.resize(static_cast<std::size_t>(m_padded_dimension));
     rabitqlib::quant::reconstruct_vec<float, std::uint8_t>(
-        p_code,
+        unpacked.data(),
         delta,
         lower_value,
-        static_cast<std::size_t>(m_dimension),
+        static_cast<std::size_t>(m_padded_dimension),
         p_output.data());
-    for (DimensionType i = 0; i < m_dimension; ++i) {
+    for (DimensionType i = 0; i < m_padded_dimension; ++i) {
         p_output[static_cast<std::size_t>(i)] += m_centroid[static_cast<std::size_t>(i)];
     }
+    std::fill(
+        p_output.begin() + static_cast<std::size_t>(m_dimension), p_output.end(), 0.0F);
 }
 
-void RaBitQQuantizer::CopyInput(const float* p_input, float* p_output) const
+void RaBitQQuantizer::PrepareInput(
+    const float* p_input, std::vector<float>& p_output) const
 {
+    p_output.assign(static_cast<std::size_t>(m_padded_dimension), 0.0F);
+    std::copy(p_input, p_input + m_dimension, p_output.begin());
+    if (!m_normalize) {
+        return;
+    }
+
     double norm = 0.0;
     for (DimensionType i = 0; i < m_dimension; ++i) {
         norm += static_cast<double>(p_input[i]) * p_input[i];
     }
     if (norm == 0.0) {
-        std::memset(p_output, 0, static_cast<std::size_t>(m_dimension) * sizeof(float));
         return;
     }
 
     const float inverse_norm = static_cast<float>(1.0 / std::sqrt(norm));
     for (DimensionType i = 0; i < m_dimension; ++i) {
-        p_output[i] = p_input[i] * inverse_norm;
+        p_output[static_cast<std::size_t>(i)] = p_input[i] * inverse_norm;
     }
 }
 
-void RaBitQQuantizer::ReadCodeParameters(const std::uint8_t* p_code,
-                                         float& p_delta,
-                                         float& p_lower_value) const
+void RaBitQQuantizer::UnpackCode(
+    const std::uint8_t* p_code, std::uint8_t* p_output) const
 {
-    std::memcpy(&p_delta, p_code + m_dimension, sizeof(p_delta));
-    std::memcpy(&p_lower_value, p_code + m_dimension + sizeof(p_delta), sizeof(p_lower_value));
+    const std::size_t dim = static_cast<std::size_t>(m_padded_dimension);
+    std::memset(p_output, 0, dim);
+    if (m_bits == 8) {
+        std::memcpy(p_output, p_code, dim);
+        return;
+    }
+    if (m_bits == 1) {
+        for (std::size_t i = 0; i < dim; ++i) {
+            p_output[i] = static_cast<std::uint8_t>((p_code[i / 8] >> (i % 8)) & 1U);
+        }
+        return;
+    }
+
+    for (std::size_t block = 0; block < dim; block += 64) {
+        const std::uint8_t* packed =
+            p_code + block * static_cast<std::size_t>(m_bits) / 8;
+        std::uint8_t* output = p_output + block;
+        if (m_bits == 2 || m_bits == 3) {
+            for (std::size_t i = 0; i < 64; ++i) {
+                output[i] = static_cast<std::uint8_t>(
+                    (packed[i % 16] >> (2 * (i / 16))) & 0x3U);
+                if (m_bits == 3) {
+                    output[i] |= static_cast<std::uint8_t>(
+                        ((packed[16 + (i % 8)] >> (i / 8)) & 1U) << 2);
+                }
+            }
+        } else if (m_bits == 4) {
+            for (std::size_t i = 0; i < 64; ++i) {
+                const std::size_t group = i / 16;
+                const std::size_t within_group = i % 16;
+                output[i] = static_cast<std::uint8_t>(
+                    (packed[group * 8 + (within_group % 8)] >>
+                     (4 * (within_group / 8))) &
+                    0xFU);
+            }
+        } else if (m_bits == 5) {
+            for (std::size_t i = 0; i < 64; ++i) {
+                const std::size_t half = i / 32;
+                const std::size_t within_half = i % 32;
+                output[i] = static_cast<std::uint8_t>(
+                    (packed[half * 16 + (within_half % 16)] >>
+                     (4 * (within_half / 16))) &
+                    0xFU);
+                output[i] |= static_cast<std::uint8_t>(
+                    ((packed[32 + (i % 8)] >> (i / 8)) & 1U) << 4);
+            }
+        } else {
+            for (std::size_t i = 0; i < 48; ++i) {
+                output[i] = static_cast<std::uint8_t>(packed[i] & 0x3FU);
+            }
+            for (std::size_t lane = 0; lane < 16; ++lane) {
+                output[48 + lane] = static_cast<std::uint8_t>(
+                    ((packed[lane] >> 6) & 0x3U) |
+                    (((packed[16 + lane] >> 6) & 0x3U) << 2) |
+                    (((packed[32 + lane] >> 6) & 0x3U) << 4));
+            }
+            if (m_bits == 7) {
+                for (std::size_t i = 0; i < 64; ++i) {
+                    output[i] |= static_cast<std::uint8_t>(
+                        ((packed[48 + (i % 8)] >> (i / 8)) & 1U) << 6);
+                }
+            }
+        }
+    }
+}
+
+void RaBitQQuantizer::ReadCodeFactors(const std::uint8_t* p_code,
+                                      float& p_f_add,
+                                      float& p_f_rescale,
+                                      float& p_f_error,
+                                      float& p_delta,
+                                      float& p_lower_value) const
+{
+    const std::uint8_t* factors = p_code + PackedCodeBytes();
+    std::memcpy(&p_f_add, factors, sizeof(float));
+    std::memcpy(&p_f_rescale, factors + sizeof(float), sizeof(float));
+    std::memcpy(&p_f_error, factors + 2 * sizeof(float), sizeof(float));
+    std::memcpy(&p_delta, factors + 3 * sizeof(float), sizeof(float));
+    std::memcpy(&p_lower_value, factors + 4 * sizeof(float), sizeof(float));
+}
+
+void RaBitQQuantizer::ReadDistanceFactors(const std::uint8_t* p_code,
+                                          float& p_f_add,
+                                          float& p_f_rescale) const
+{
+    const std::uint8_t* factors = p_code + PackedCodeBytes();
+    std::memcpy(&p_f_add, factors, sizeof(float));
+    std::memcpy(&p_f_rescale, factors + sizeof(float), sizeof(float));
+}
+
+std::size_t RaBitQQuantizer::PackedCodeBytes() const
+{
+    return static_cast<std::size_t>(m_padded_dimension) *
+        static_cast<std::size_t>(m_bits) / 8U;
 }
 
 std::size_t RaBitQQuantizer::CodeBytes() const
 {
-    return static_cast<std::size_t>(m_dimension) + 2 * sizeof(float);
+    return PackedCodeBytes() + kCodeFactorCount * sizeof(float);
 }
 
 } // namespace COMMON
