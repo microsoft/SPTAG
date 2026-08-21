@@ -7,6 +7,7 @@
 #include "inc/Core/VectorSet.h"
 
 #include "rabitqlib/quantization/rabitq.hpp"
+#include "rabitqlib/utils/space.hpp"
 
 #include <memory>
 #include <vector>
@@ -16,7 +17,7 @@ namespace SPTAG
 namespace COMMON
 {
 
-// Global RaBitQ adapter backed by the official scalar quantizer API.
+// Global RaBitQ adapter backed by the official full-code quantizer and estimator.
 class RaBitQQuantizer : public IQuantizer
 {
 public:
@@ -54,25 +55,40 @@ private:
         std::uint32_t magic;
         std::uint32_t version;
         std::int32_t dimension;
+        std::int32_t paddedDimension;
         std::int32_t bits;
         std::uint32_t normalize;
     };
 
-    static constexpr std::uint32_t kModelMagic = 0x31534252U; // RBS1
-    static constexpr std::uint32_t kModelVersion = 1U;
+    static constexpr std::uint32_t kModelMagic = 0x32464252U; // RBF2
+    static constexpr std::uint32_t kModelVersion = 2U;
+    static constexpr std::size_t kCodeFactorCount = 5;
+    static constexpr std::size_t kQueryFactorCount = 2;
 
     ErrorCode Initialize(DimensionType p_dimension, int p_bits, bool p_normalize);
     ErrorCode LoadHeader(const ModelHeader& p_header);
     void Decode(const std::uint8_t* p_code, std::vector<float>& p_output) const;
-    void CopyInput(const float* p_input, float* p_output) const;
-    void ReadCodeParameters(const std::uint8_t* p_code, float& p_delta, float& p_lower_value) const;
+    void PrepareInput(const float* p_input, std::vector<float>& p_output) const;
+    void UnpackCode(const std::uint8_t* p_code, std::uint8_t* p_output) const;
+    void ReadCodeFactors(const std::uint8_t* p_code,
+                         float& p_f_add,
+                         float& p_f_rescale,
+                         float& p_f_error,
+                         float& p_delta,
+                         float& p_lower_value) const;
+    void ReadDistanceFactors(const std::uint8_t* p_code,
+                             float& p_f_add,
+                             float& p_f_rescale) const;
+    std::size_t PackedCodeBytes() const;
     std::size_t CodeBytes() const;
 
     DimensionType m_dimension = 0;
+    DimensionType m_padded_dimension = 0;
     int m_bits = 0;
     bool m_normalize = false;
     bool m_enable_adc = false;
     rabitqlib::quant::RabitqConfig m_quantizer_config;
+    rabitqlib::ex_ipfunc m_ip_func = nullptr;
     std::vector<float> m_centroid;
 };
 
