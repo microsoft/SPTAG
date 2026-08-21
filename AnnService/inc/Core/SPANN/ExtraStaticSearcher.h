@@ -296,7 +296,6 @@ namespace SPTAG
 
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
-                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -493,7 +492,6 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
-                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -595,7 +593,6 @@ namespace SPTAG
                     
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
-                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -1827,7 +1824,6 @@ namespace SPTAG
             int m_listPerFile = 0;
 
             std::unordered_map<SizeType, SizeType> m_globalVectorIDToHeadMap;
-
         };
     } // namespace SPANN
 } // namespace SPTAG

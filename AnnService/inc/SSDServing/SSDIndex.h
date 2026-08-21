@@ -159,16 +159,13 @@ namespace SPTAG {
                 for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
             }
 
-            template <typename ValueType, typename QueryValueType>
-            ErrorCode SearchWithQueryType(SPANN::Index<ValueType>* p_index)
+            template <typename ValueType>
+            ErrorCode Search(SPANN::Index<ValueType>* p_index)
             {
                 SPANN::Options& p_opts = *(p_index->GetOptions());
                 std::string outputFile = p_opts.m_searchResult;
                 std::string truthFile = p_opts.m_truthPath;
                 std::string warmupFile = p_opts.m_warmupPath;
-                const DimensionType queryDim = p_index->m_pQuantizer
-                    ? p_index->m_pQuantizer->ReconstructDim()
-                    : p_opts.m_dim;
 
                 if (p_index->m_pQuantizer)
                 {
@@ -188,9 +185,7 @@ namespace SPTAG {
                 if (!warmupFile.empty())
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading warmup query set...\n");
-                    std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(
-                        GetEnumValueType<QueryValueType>(), queryDim, p_opts.m_warmupType,
-                        p_opts.m_warmupDelimiter));
+                    std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_warmupType, p_opts.m_warmupDelimiter));
                     auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                     if (ErrorCode::Success != (ret = queryReader->LoadFile(p_opts.m_warmupPath)))
                     {
@@ -204,9 +199,7 @@ namespace SPTAG {
                     std::vector<SPANN::SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
-                        (*((COMMON::QueryResultSet<QueryValueType>*)&warmupResults[i])).SetTarget(
-                            reinterpret_cast<QueryValueType*>(warmupQuerySet->GetVector(i)),
-                            p_index->m_pQuantizer);
+                        (*((COMMON::QueryResultSet<ValueType>*)&warmupResults[i])).SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)), p_index->m_pQuantizer);
                         warmupResults[i].Reset();
                     }
 
@@ -216,9 +209,7 @@ namespace SPTAG {
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
-                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(
-                    GetEnumValueType<QueryValueType>(), queryDim, p_opts.m_queryType,
-                    p_opts.m_queryDelimiter));
+                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
                 auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                 if (ErrorCode::Success != (ret = queryReader->LoadFile(p_opts.m_queryPath)))
                 {
@@ -232,9 +223,7 @@ namespace SPTAG {
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
-                    (*((COMMON::QueryResultSet<QueryValueType>*)&results[i])).SetTarget(
-                        reinterpret_cast<QueryValueType*>(querySet->GetVector(i)),
-                        p_index->m_pQuantizer);
+                    (*((COMMON::QueryResultSet<ValueType>*)&results[i])).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)), p_index->m_pQuantizer);
                     results[i].Reset();
                 }
 
@@ -253,11 +242,8 @@ namespace SPTAG {
                     return ErrorCode::Fail;
                 }
 
-                if (!p_index->m_pQuantizer && !p_opts.m_vectorPath.empty() &&
-                    fileexists(p_opts.m_vectorPath.c_str())) {
-                    std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(
-                        GetEnumValueType<QueryValueType>(), queryDim, p_opts.m_vectorType,
-                        p_opts.m_vectorDelimiter));
+                if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
+                    std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
                     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                     if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_vectorPath))
                     {
@@ -274,10 +260,8 @@ namespace SPTAG {
                         for (int j = 0; j < K; j++)
                         {
                             if (results[i].GetResult(j)->VID < 0) continue;
-                            results[i].GetResult(j)->Dist = COMMON::DistanceUtils::ComputeDistance(
-                                (const QueryValueType*)querySet->GetVector(i),
-                                (const QueryValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID),
-                                querySet->Dimension(), p_opts.m_distCalcMethod);
+                            results[i].GetResult(j)->Dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(i),
+                                (const ValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), p_opts.m_distCalcMethod);
                         }
                         BasicResult* re = results[i].GetResults();
                         std::sort(re, re + K, COMMON::Compare);
@@ -303,9 +287,7 @@ namespace SPTAG {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
                     }
 
-                    recall = COMMON::TruthSet::CalculateRecall<QueryValueType>(
-                        (p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet,
-                        vectorSet, numQueries, nullptr, false, &MRR);
+                    recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
                 }
 
@@ -608,26 +590,6 @@ namespace SPTAG {
                         "\t\tRNG rule loss: %f percent\n", buildRNGRule / lost * 100);
                 }
                 return ErrorCode::Success;
-            }
-
-            template <typename ValueType>
-            ErrorCode Search(SPANN::Index<ValueType>* p_index)
-            {
-                if (!p_index->m_pQuantizer) {
-                    return SearchWithQueryType<ValueType, ValueType>(p_index);
-                }
-
-                switch (p_index->m_pQuantizer->GetReconstructType())
-                {
-#define DefineVectorValueType(Name, Type)                                                                              \
-                case VectorValueType::Name:                                                                            \
-                    return SearchWithQueryType<ValueType, Type>(p_index);
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-                default:
-                    return ErrorCode::FailedParseValue;
-                }
             }
 		}
 	}
