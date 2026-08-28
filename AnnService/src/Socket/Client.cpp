@@ -7,15 +7,10 @@
 
 using namespace SPTAG::Socket;
 
-
-Client::Client(const PacketHandlerMapPtr& p_handlerMap,
-               std::size_t p_threadNum,
+Client::Client(const PacketHandlerMapPtr &p_handlerMap, std::size_t p_threadNum,
                std::uint32_t p_heartbeatIntervalSeconds)
-    : c_requestHandlerMap(p_handlerMap),
-      m_connectionManager(new ConnectionManager),
-      m_deadlineTimer(m_ioContext),
-      m_heartbeatIntervalSeconds(p_heartbeatIntervalSeconds),
-      m_stopped(false)
+    : c_requestHandlerMap(p_handlerMap), m_connectionManager(new ConnectionManager), m_deadlineTimer(m_ioContext),
+      m_heartbeatIntervalSeconds(p_heartbeatIntervalSeconds), m_stopped(false)
 {
     KeepIoContext();
     m_threadPool.reserve(p_threadNum);
@@ -24,7 +19,6 @@ Client::Client(const PacketHandlerMapPtr& p_handlerMap,
         m_threadPool.emplace_back(std::move(std::thread([this]() { m_ioContext.run(); })));
     }
 }
-
 
 Client::~Client()
 {
@@ -37,17 +31,13 @@ Client::~Client()
         m_ioContext.stop();
     }
 
-    for (auto& t : m_threadPool)
+    for (auto &t : m_threadPool)
     {
         t.join();
     }
 }
 
-
-ConnectionID
-Client::ConnectToServer(const std::string& p_address,
-                        const std::string& p_port,
-                        SPTAG::ErrorCode& p_ec)
+ConnectionID Client::ConnectToServer(const std::string &p_address, const std::string &p_port, SPTAG::ErrorCode &p_ec)
 {
     boost::asio::ip::tcp::resolver resolver(m_ioContext);
 
@@ -60,7 +50,7 @@ Client::ConnectToServer(const std::string& p_address,
     }
 
     boost::asio::ip::tcp::socket socket(m_ioContext);
-    for (const auto ep : endPoints)
+    for (const auto &ep : endPoints)
     {
         errCode.clear();
         socket.connect(ep, errCode);
@@ -75,24 +65,16 @@ Client::ConnectToServer(const std::string& p_address,
     if (socket.is_open())
     {
         p_ec = ErrorCode::Success;
-        return m_connectionManager->AddConnection(std::move(socket),
-                                                  c_requestHandlerMap,
-                                                  m_heartbeatIntervalSeconds);
+        return m_connectionManager->AddConnection(std::move(socket), c_requestHandlerMap, m_heartbeatIntervalSeconds);
     }
 
     p_ec = ErrorCode::Socket_FailedConnectToEndPoint;
     return c_invalidConnectionID;
 }
 
-
-void 
-Client::AsyncConnectToServer(const std::string& p_address,
-                             const std::string& p_port,
-                             ConnectCallback p_callback)
+void Client::AsyncConnectToServer(const std::string &p_address, const std::string &p_port, ConnectCallback p_callback)
 {
-    boost::asio::post(m_ioContext,
-                      [this, p_address, p_port, p_callback]()
-    {
+    boost::asio::post(m_ioContext, [this, p_address, p_port, p_callback]() {
         SPTAG::ErrorCode errCode;
         auto connID = ConnectToServer(p_address, p_port, errCode);
         if (bool(p_callback))
@@ -102,9 +84,7 @@ Client::AsyncConnectToServer(const std::string& p_address,
     });
 }
 
-
-void
-Client::SendPacket(ConnectionID p_connection, Packet p_packet, std::function<void(bool)> p_callback)
+void Client::SendPacket(ConnectionID p_connection, Packet p_packet, std::function<void(bool)> p_callback)
 {
     auto connection = m_connectionManager->GetConnection(p_connection);
     if (nullptr != connection)
@@ -117,16 +97,12 @@ Client::SendPacket(ConnectionID p_connection, Packet p_packet, std::function<voi
     }
 }
 
-
-void
-Client::SetEventOnConnectionClose(std::function<void(ConnectionID)> p_event)
+void Client::SetEventOnConnectionClose(std::function<void(ConnectionID)> p_event)
 {
     m_connectionManager->SetEventOnRemoving(std::move(p_event));
 }
 
-
-void
-Client::KeepIoContext()
+void Client::KeepIoContext()
 {
     if (m_stopped)
     {
@@ -134,8 +110,5 @@ Client::KeepIoContext()
     }
 
     m_deadlineTimer.expires_from_now(boost::posix_time::hours(24));
-    m_deadlineTimer.async_wait([this](boost::system::error_code p_ec)
-    {
-        this->KeepIoContext();
-    });
+    m_deadlineTimer.async_wait([this](boost::system::error_code p_ec) { this->KeepIoContext(); });
 }

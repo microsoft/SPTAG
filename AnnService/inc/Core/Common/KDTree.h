@@ -30,11 +30,11 @@ namespace SPTAG
         class KDTree
         {
         public:
-            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000), m_lock(new std::shared_timed_mutex), m_pQuantizer(nullptr) {}
+            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000), m_lock(new std::shared_timed_mutex), m_bOldVersion(false), m_pQuantizer(nullptr) {}
 
             KDTree(const KDTree& other) : m_iTreeNumber(other.m_iTreeNumber),
                 m_numTopDimensionKDTSplit(other.m_numTopDimensionKDTSplit),
-                m_iSamples(other.m_iSamples), m_lock(new std::shared_timed_mutex), m_pQuantizer(other.m_pQuantizer) {}
+                m_iSamples(other.m_iSamples), m_lock(new std::shared_timed_mutex), m_bOldVersion(other.m_bOldVersion), m_pQuantizer(other.m_pQuantizer) {}
             ~KDTree() {}
 
             inline const KDTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
@@ -96,22 +96,48 @@ break;
 
                 m_pTreeRoots.resize(m_iTreeNumber * localindices.size());
                 m_pTreeStart.resize(m_iTreeNumber, 0);
-#pragma omp parallel for num_threads(numOfThreads)
-                for (int i = 0; i < m_iTreeNumber; i++)
+                std::vector<std::thread> mythreads;
+                mythreads.reserve(numOfThreads);
+                std::atomic_size_t sent(0);
+                for (int tid = 0; tid < numOfThreads; tid++)
                 {
-                    if (abort && abort->ShouldAbort()) continue;
+                    mythreads.emplace_back([&, tid]() {
+                        size_t i = 0;
+                        std::mt19937 rg;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < m_iTreeNumber)
+                            {
+                                if (abort && abort->ShouldAbort())
+                                    continue;
 
-                    Sleep(i * 100); std::srand(clock());
+                                Sleep(i * 100);
+                                std::srand(clock());
 
-                    std::vector<SizeType> pindices(localindices.begin(), localindices.end());
-                    std::shuffle(pindices.begin(), pindices.end(), rg);
+                                std::vector<SizeType> pindices(localindices.begin(), localindices.end());
+                                std::shuffle(pindices.begin(), pindices.end(), rg);
 
-                    m_pTreeStart[i] = i * (SizeType)pindices.size();
-                    LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
-                    SizeType iTreeSize = m_pTreeStart[i];
-                    DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
-                    LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
+                                m_pTreeStart[i] = i * (SizeType)pindices.size();
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
+                                SizeType iTreeSize = m_pTreeStart[i];
+                                DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i],
+                                                 iTreeSize, abort);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1,
+                                             iTreeSize - m_pTreeStart[i], pindices.size());
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
                 }
+                for (auto &t : mythreads)
+                {
+                    t.join();
+                }
+                mythreads.clear();
             }
 
             inline std::uint64_t BufferSize() const 
@@ -128,13 +154,13 @@ break;
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
                 IOBINARY(p_out, WriteBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
                 IOBINARY(p_out, WriteBinary, sizeof(KDTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
-                LOG(Helper::LogLevel::LL_Info, "Save KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
             ErrorCode SaveTrees(std::string sTreeFileName) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save KDT to %s\n", sTreeFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save KDT to %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveTrees(ptr);
@@ -152,7 +178,7 @@ break;
                 pKDTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pKDTMemFile, sizeof(KDTNode) * treeNodeSize);
-                LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
@@ -186,7 +212,7 @@ break;
                         }
                         treeNodeSize += iNodeSize;
                     }
-                    LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                     return ErrorCode::Success;
                 }
                 IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
@@ -198,65 +224,40 @@ break;
                 m_pTreeRoots.resize(treeNodeSize);
                 IOBINARY(p_input, ReadBinary, sizeof(KDTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
 
-                LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
             ErrorCode LoadTrees(std::string sTreeFileName)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load KDT From %s\n", sTreeFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT From %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return LoadTrees(ptr);
             }
 
-            template <typename T>
+            template <typename T, typename Q>
             void InitSearchTrees(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
-                    KDTSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
+                    KDTSearch<T, Q>(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
                 }
             }
 
-            template <typename T>
+            template <typename T, typename Q>
             void SearchTrees(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
                     auto& tcell = p_space.m_SPTQueue.pop();
-                    KDTSearch(p_data, fComputeDistance, p_query, p_space, tcell.node, tcell.distance);
+                    KDTSearch<T, Q>(p_data, fComputeDistance, p_query, p_space, tcell.node, tcell.distance);
                 }
             }
 
         private:
 
-            template <typename T>
-            void KDTSearch(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T>& p_query,
-                COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const
-            {
-                if (m_pQuantizer)
-                {
-                    switch (m_pQuantizer->GetReconstructType())
-                    {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, distBound);
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                    default: break;
-                    }
-                }
-                else
-                {
-                    return KDTSearchCore<T, T>(p_data, fComputeDistance, p_query, p_space, node, distBound);
-                }
-
-            }
-
             template <typename T, typename Q>
-            void KDTSearchCore(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query,
+            void KDTSearch(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query,
                            COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {
@@ -292,7 +293,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 }
 
                 p_space.m_SPTQueue.insert(NodeDistPair(otherChild, distanceBound));
-                KDTSearchCore<T,Q>(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
+                KDTSearch<T,Q>(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
             }
 
 

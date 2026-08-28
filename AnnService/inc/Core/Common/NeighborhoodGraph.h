@@ -34,7 +34,8 @@ namespace SPTAG
         class NeighborhoodGraph
         {
         public:
-            NeighborhoodGraph() : m_iTPTNumber(32),
+            NeighborhoodGraph() : m_iGraphSize(0),
+                m_iTPTNumber(32),
                 m_iTPTLeafSize(2000),
                 m_iSamples(1000),
                 m_numTopDimensionTPTSplit(5),
@@ -52,7 +53,7 @@ namespace SPTAG
                 m_iGPULeafSize(500),
                 m_iheadNumGPUs(1),
                 m_iTPTBalanceFactor(2),
-                m_rebuild(0)
+                m_rebuild(0), m_iThreadNum(1)
             {}
 
             ~NeighborhoodGraph() {}
@@ -65,36 +66,62 @@ namespace SPTAG
             {
                 DimensionType* correct = new DimensionType[samples];
 
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < samples; i++)
+                std::vector<std::thread> mythreads;
+                mythreads.reserve(m_iThreadNum);
+                std::atomic_size_t sent(0);
+                for (int tid = 0; tid < m_iThreadNum; tid++)
                 {
-                    SizeType x = COMMON::Utils::rand(m_iGraphSize);
-                    //int x = i;
-                    COMMON::QueryResultSet<void> query(nullptr, m_iCEF);
-                    for (SizeType y = 0; y < m_iGraphSize; y++)
-                    {
-                        if ((idmap != nullptr && idmap->find(y) != idmap->end())) continue;
-                        float dist = index->ComputeDistance(index->GetSample(x), index->GetSample(y));
-                        query.AddPoint(y, dist);
-                    }
-                    query.SortResult();
-                    SizeType* exact_rng = new SizeType[m_iNeighborhoodSize];
-                    RebuildNeighbors(index, x, exact_rng, query.GetResults(), m_iCEF);
+                    mythreads.emplace_back([&, tid](){
+                        size_t i = 0;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < samples)
+                            {
+                                SizeType x = COMMON::Utils::rand(m_iGraphSize);
+                                // int x = i;
+                                COMMON::QueryResultSet<void> query(nullptr, m_iCEF);
+                                for (SizeType y = 0; y < m_iGraphSize; y++)
+                                {
+                                    if ((idmap != nullptr && idmap->find(y) != idmap->end()))
+                                        continue;
+                                    float dist = index->ComputeDistance(index->GetSample(x), index->GetSample(y));
+                                    query.AddPoint(y, dist);
+                                }
+                                query.SortResult();
+                                SizeType *exact_rng = new SizeType[m_iNeighborhoodSize];
+                                RebuildNeighbors(index, x, exact_rng, query.GetResults(), m_iCEF);
 
-                    correct[i] = 0;
-                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
-                        if (exact_rng[j] == -1) {
-                            correct[i] += m_iNeighborhoodSize - j;
-                            break;
-                        }
-                        for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
-                            if ((m_pNeighborhoodGraph)[x][k] == exact_rng[j]) {
-                                correct[i]++;
-                                break;
+                                correct[i] = 0;
+                                for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
+                                {
+                                    if (exact_rng[j] == -1)
+                                    {
+                                        correct[i] += m_iNeighborhoodSize - j;
+                                        break;
+                                    }
+                                    for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
+                                        if ((m_pNeighborhoodGraph)[x][k] == exact_rng[j])
+                                        {
+                                            correct[i]++;
+                                            break;
+                                        }
+                                }
+                                delete[] exact_rng;
                             }
-                    }
-                    delete[] exact_rng;
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
                 }
+                for (auto &t : mythreads)
+                {
+                    t.join();
+                }
+                mythreads.clear();
+
                 float acc = 0;
                 for (SizeType i = 0; i < samples; i++) acc += float(correct[i]);
                 acc = acc / samples / m_iNeighborhoodSize;
@@ -109,13 +136,8 @@ namespace SPTAG
                 SizeType initSize;
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
-                if (index->m_pQuantizer) {
-                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
-                }
-                else {
-                    // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
-                }
+                // Build the entire RNG graph, both builds the KNN and refines it to RNG
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 
                 if (idmap != nullptr) {
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -149,7 +171,6 @@ break;
                 }
                 else
                 {
-			printf("No quantizer!\n");
                     PartitionByTptreeCore<T, T>(index, indices, first, last, leaves);
                 }
             }
@@ -317,51 +338,99 @@ break;
                         (NeighborhoodDists)[i][j] = MaxDist;
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
-#pragma omp parallel for schedule(dynamic)
-                for (int i = 0; i < m_iTPTNumber; i++)
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
                 {
-                    Sleep(i * 100); std::srand(clock());
-                    for (SizeType j = 0; j < m_iGraphSize; j++) TptreeDataIndices[i][j] = j;
-                    std::shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end(), rg);
-                    PartitionByTptree<T>(index, TptreeDataIndices[i], 0, m_iGraphSize - 1, TptreeLeafNodes[i]);
-                    LOG(Helper::LogLevel::LL_Info, "Finish Getting Leaves for Tree %d\n", i);
-                }
-                LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
-                auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
-
-		for(int i=0; i<10; i++) {
-                  for(int j=0; j<20; j++) {
-                    std::cout << static_cast<int16_t>(((uint8_t*)index->GetSample(i))[j]) << ", ";
-		  }
-		  std::cout << std::endl;
-		}
-
-                for (int i = 0; i < m_iTPTNumber; i++)
-                {
-#pragma omp parallel for schedule(dynamic)
-                    for (SizeType j = 0; j < (SizeType)TptreeLeafNodes[i].size(); j++)
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
                     {
-                        SizeType start_index = TptreeLeafNodes[i][j].first;
-                        SizeType end_index = TptreeLeafNodes[i][j].second;
-                        if ((j * 5) % TptreeLeafNodes[i].size() == 0) LOG(Helper::LogLevel::LL_Info, "Processing Tree %d %d%%\n", i, static_cast<int>(j * 1.0 / TptreeLeafNodes[i].size() * 100));
-                        for (SizeType x = start_index; x < end_index; x++)
-                        {
-                            for (SizeType y = x + 1; y <= end_index; y++)
+                        mythreads.emplace_back([&, tid]() {
+                            size_t i = 0;
+                            std::mt19937 rg;
+                            while (true)
                             {
-                                SizeType p1 = TptreeDataIndices[i][x];
-                                SizeType p2 = TptreeDataIndices[i][y];
-                                float dist = index->ComputeDistance(index->GetSample(p1), index->GetSample(p2));
-                                if (idmap != nullptr) {
-                                    p1 = (idmap->find(p1) == idmap->end()) ? p1 : idmap->at(p1);
-                                    p2 = (idmap->find(p2) == idmap->end()) ? p2 : idmap->at(p2);
+                                i = sent.fetch_add(1);
+                                if (i < m_iTPTNumber)
+                                {
+                                    Sleep(i * 100);
+                                    std::srand(clock());
+                                    for (SizeType j = 0; j < m_iGraphSize; j++)
+                                        TptreeDataIndices[i][j] = j;
+                                    std::shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end(), rg);
+                                    PartitionByTptree<T>(index, TptreeDataIndices[i], 0, m_iGraphSize - 1,
+                                                         TptreeLeafNodes[i]);
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Finish Getting Leaves for Tree %d\n", i);
                                 }
-                                COMMON::Utils::AddNeighbor(p2, dist, (m_pNeighborhoodGraph)[p1], (NeighborhoodDists)[p1], m_iNeighborhoodSize);
-                                COMMON::Utils::AddNeighbor(p1, dist, (m_pNeighborhoodGraph)[p2], (NeighborhoodDists)[p2], m_iNeighborhoodSize);
+                                else
+                                {
+                                    return;
+                                }
                             }
-                        }
+                        });
                     }
+                    for (auto &t : mythreads)
+                    {
+                        t.join();
+                    }
+                    mythreads.clear();
+                }
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
+                auto t2 = std::chrono::high_resolution_clock::now();
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+
+                for (int i = 0; i < m_iTPTNumber; i++)
+                {
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
+                    {
+                        mythreads.emplace_back([&, tid]() {
+                            size_t j = 0;
+                            while (true)
+                            {
+                                j = sent.fetch_add(1);
+                                if (j < TptreeLeafNodes[i].size())
+                                {
+                                    SizeType start_index = TptreeLeafNodes[i][j].first;
+                                    SizeType end_index = TptreeLeafNodes[i][j].second;
+                                    if ((j * 5) % TptreeLeafNodes[i].size() == 0)
+                                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Processing Tree %d %d%%\n", i,
+                                                     static_cast<int>(j * 1.0 / TptreeLeafNodes[i].size() * 100));
+                                    for (SizeType x = start_index; x < end_index; x++)
+                                    {
+                                        for (SizeType y = x + 1; y <= end_index; y++)
+                                        {
+                                            SizeType p1 = TptreeDataIndices[i][x];
+                                            SizeType p2 = TptreeDataIndices[i][y];
+                                            float dist =
+                                                index->ComputeDistance(index->GetSample(p1), index->GetSample(p2));
+                                            if (idmap != nullptr)
+                                            {
+                                                p1 = (idmap->find(p1) == idmap->end()) ? p1 : idmap->at(p1);
+                                                p2 = (idmap->find(p2) == idmap->end()) ? p2 : idmap->at(p2);
+                                            }
+                                            COMMON::Utils::AddNeighbor(p2, dist, (m_pNeighborhoodGraph)[p1],
+                                                                       (NeighborhoodDists)[p1], m_iNeighborhoodSize);
+                                            COMMON::Utils::AddNeighbor(p1, dist, (m_pNeighborhoodGraph)[p2],
+                                                                       (NeighborhoodDists)[p2], m_iNeighborhoodSize);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                        });
+                    }
+                    for (auto &t : mythreads)
+                    {
+                        t.join();
+                    }
+                    mythreads.clear();
                     TptreeDataIndices[i].clear();
                     TptreeLeafNodes[i].clear();
                 }
@@ -369,14 +438,14 @@ break;
                 TptreeLeafNodes.clear();
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Process TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Process TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
             }
 #endif
 
             template <typename T>
             void BuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale) * (m_rebuild + 1));
@@ -384,25 +453,25 @@ break;
 
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
-                    LOG(Helper::LogLevel::LL_Info, "Build RNG Graph end!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build RNG Graph end!\n");
                     return;
                 }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 BuildInitKNNGraph<T>(index, idmap);
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "BuildInitKNNGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BuildInitKNNGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
 
                 RefineGraph<T>(index, idmap);
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
 
                 if (m_rebuild) {
                     m_iNeighborhoodSize = m_iNeighborhoodSize / 2;
                     RebuildGraph<T>(index, idmap);
                     auto t4 = std::chrono::high_resolution_clock::now();
-                    LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
                 }
 
                 if (idmap != nullptr) {
@@ -417,57 +486,111 @@ break;
             template <typename T>
             void RebuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                std::vector<int> indegree(m_iGraphSize);
-
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < m_iGraphSize; i++) indegree[i] = 0;
+                std::vector<int> indegree(m_iGraphSize, 0);
 
                 auto t0 = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
-                    SizeType* outnodes = m_pNeighborhoodGraph[i];
-                    for (SizeType j = 0; j < m_iNeighborhoodSize; j++)
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
                     {
-                        int node = outnodes[j];
-                        if (node >= 0) {
-                            indegree[node]++;
-                        }
+                        mythreads.emplace_back([&, tid]() {
+                            size_t i = 0;
+                            while (true)
+                            {
+                                i = sent.fetch_add(1);
+                                if (i < m_iGraphSize)
+                                {
+                                    SizeType *outnodes = m_pNeighborhoodGraph[i];
+                                    for (SizeType j = 0; j < m_iNeighborhoodSize; j++)
+                                    {
+                                        int node = outnodes[j];
+                                        if (node >= 0)
+                                        {
+                                            indegree[node]++;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                        });
                     }
+                    for (auto &t : mythreads)
+                    {
+                        t.join();
+                    }
+                    mythreads.clear();
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
                 int rebuild_threshold = m_iNeighborhoodSize / 2;
                 int rebuildstart = m_iNeighborhoodSize / 2;
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                {
-                    SizeType* outnodes = m_pNeighborhoodGraph[i];
-                    std::vector<bool> reserve(2 * m_iNeighborhoodSize, false);
-                    int total = 0;
-                    for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2; j++)
-                        if ( outnodes[j] >= 0 && indegree[outnodes[j]] < rebuild_threshold) {
-                            reserve[j] = true;
-                            total++;
-                        }
 
-                    for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
-                        if (!reserve[j]) {
-                            reserve[j] = true;
-                            total++;
+                                std::vector<std::thread> mythreads;
+                mythreads.reserve(m_iThreadNum);
+                std::atomic_size_t sent(0);
+                for (int tid = 0; tid < m_iThreadNum; tid++)
+                {
+                    mythreads.emplace_back([&, tid]() {
+                        size_t i = 0;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < m_iGraphSize)
+                            {
+                                SizeType *outnodes = m_pNeighborhoodGraph[i];
+                                std::vector<bool> reserve(2 * m_iNeighborhoodSize, false);
+                                int total = 0;
+                                for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2; j++)
+                                    if (outnodes[j] >= 0 && indegree[outnodes[j]] < rebuild_threshold)
+                                    {
+                                        reserve[j] = true;
+                                        total++;
+                                    }
+
+                                for (SizeType j = rebuildstart;
+                                     j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++)
+                                {
+                                    if (!reserve[j])
+                                    {
+                                        reserve[j] = true;
+                                        total++;
+                                    }
+                                }
+                                for (SizeType j = rebuildstart, z = rebuildstart; j < m_iNeighborhoodSize; j++)
+                                {
+                                    while (!reserve[z])
+                                        z++;
+                                    if (outnodes[j] >= 0)
+                                        indegree[outnodes[j]] = indegree[outnodes[j]] - 1;
+                                    if (outnodes[z] >= 0)
+                                        indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
+                                    outnodes[j] = outnodes[z];
+                                    z++;
+                                }
+                                if ((i * 5) % m_iGraphSize == 0)
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n",
+                                                 static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+
+                            }
+                            else
+                            {
+                                return;
+                            }
                         }
-                    }
-                    for (SizeType j = rebuildstart, z = rebuildstart; j < m_iNeighborhoodSize; j++) {
-                        while (!reserve[z]) z++;
-                        if(outnodes[j] >= 0) indegree[outnodes[j]] = indegree[outnodes[j]] - 1;
-                        if(outnodes[z] >= 0) indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
-                        outnodes[j] = outnodes[z];
-                        z++;
-                    }
-                    if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                    });
                 }
+                for (auto &t : mythreads)
+                {
+                    t.join();
+                }
+                mythreads.clear();
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
             }
 
             template <typename T>
@@ -476,31 +599,79 @@ break;
                 for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
                     auto t1 = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for schedule(dynamic)
-                    for (SizeType i = 0; i < m_iGraphSize; i++)
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
                     {
-                        RefineNode<T>(index, i, false, false, (int)(m_iCEF * m_fCEFScale));
-                        if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                        mythreads.emplace_back([&, tid]() {
+                            size_t i = 0;
+                            while (true)
+                            {
+                                i = sent.fetch_add(1);
+                                if (i < m_iGraphSize)
+                                {
+                                    RefineNode<T>(index, i, false, false, (int)(m_iCEF * m_fCEFScale));
+                                    if ((i * 5) % m_iGraphSize == 0)
+                                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter,
+                                                     static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+
+                                }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                        });
                     }
+                    for (auto &t : mythreads)
+                    {
+                        t.join();
+                    }
+                    mythreads.clear();
                     auto t2 = std::chrono::high_resolution_clock::now();
-                    LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
 
                 m_iNeighborhoodSize = (DimensionType)(m_iNeighborhoodSize / m_fNeighborhoodScale);
 
                 if (m_iRefineIter > 0) {
                     auto t1 = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for schedule(dynamic)
-                    for (SizeType i = 0; i < m_iGraphSize; i++)
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
                     {
-                        RefineNode<T>(index, i, false, false, m_iCEF);
-                        if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", m_iRefineIter - 1, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                        mythreads.emplace_back([&, tid]() {
+                            size_t i = 0;
+                            while (true)
+                            {
+                                i = sent.fetch_add(1);
+                                if (i < m_iGraphSize)
+                                {
+                                    RefineNode<T>(index, i, false, false, m_iCEF);
+                                    if ((i * 5) % m_iGraphSize == 0)
+                                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", m_iRefineIter - 1,
+                                                     static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+
+                                }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                        });
                     }
+                    for (auto &t : mythreads)
+                    {
+                        t.join();
+                    }
+                    mythreads.clear();
                     auto t2 = std::chrono::high_resolution_clock::now();
-                    LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
                 else {
-                    LOG(Helper::LogLevel::LL_Info, "Graph Acc: %f\n", GraphAccuracyEstimation(index, 100, idmap));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Graph Acc: %f\n", GraphAccuracyEstimation(index, 100, idmap));
                 }
             }
 
@@ -519,27 +690,52 @@ break;
                 newGraph->m_iGraphSize = R;
                 newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < R; i++)
+                std::vector<std::thread> mythreads;
+                mythreads.reserve(m_iThreadNum);
+                std::atomic_size_t sent(0);
+                for (int tid = 0; tid < m_iThreadNum; tid++)
                 {
-                    if ((i * 5) % R == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d%%\n", static_cast<int>(i * 1.0 / R * 100));
+                    mythreads.emplace_back([&, tid]() {
+                        size_t i = 0;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < R)
+                            {
+                                if ((i * 5) % R == 0)
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine %d%%\n",
+                                                 static_cast<int>(i * 1.0 / R * 100));
 
-                    SizeType* outnodes = newGraph->m_pNeighborhoodGraph[i];
+                                SizeType *outnodes = newGraph->m_pNeighborhoodGraph[i];
 
-                    COMMON::QueryResultSet<T> query((const T*)index->GetSample(indices[i]), m_iCEF + 1);
-                    index->RefineSearchIndex(query, false);
-                    RebuildNeighbors(index, indices[i], outnodes, query.GetResults(), m_iCEF + 1);
+                                COMMON::QueryResultSet<T> query((const T *)index->GetSample(indices[i]), m_iCEF + 1);
+                                index->RefineSearchIndex(query, false);
+                                RebuildNeighbors(index, indices[i], outnodes, query.GetResults(), m_iCEF + 1);
 
-                    std::unordered_map<SizeType, SizeType>::const_iterator iter;
-                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
-                    {
-                        if (outnodes[j] >= 0 && outnodes[j] < reverseIndices.size()) outnodes[j] = reverseIndices[outnodes[j]];
-                        if (idmap != nullptr && (iter = idmap->find(outnodes[j])) != idmap->end()) outnodes[j] = iter->second;
-                    }
-                    if (idmap != nullptr && (iter = idmap->find(-1 - i)) != idmap->end())
-                        outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
+                                std::unordered_map<SizeType, SizeType>::const_iterator iter;
+                                for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
+                                {
+                                    if (outnodes[j] >= 0 && outnodes[j] < reverseIndices.size())
+                                        outnodes[j] = reverseIndices[outnodes[j]];
+                                    if (idmap != nullptr && (iter = idmap->find(outnodes[j])) != idmap->end())
+                                        outnodes[j] = iter->second;
+                                }
+                                if (idmap != nullptr && (iter = idmap->find(-1 - i)) != idmap->end())
+                                    outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
+
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
                 }
-
+                for (auto &t : mythreads)
+                {
+                    t.join();
+                }
+                mythreads.clear();
                 if (output != nullptr) newGraph->SaveGraph(output);
                 return ErrorCode::Success;
             }
@@ -610,7 +806,7 @@ break;
 
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sGraphFilename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveGraph(ptr);
@@ -623,7 +819,7 @@ break;
 
                 for (int i = 0; i < m_iGraphSize; i++)
                     IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
-                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
                 return ErrorCode::Success;
             }
 
@@ -665,7 +861,8 @@ break;
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
             float m_fNeighborhoodScale, m_fCEFScale, m_fRNGFactor;
-            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor, m_rebuild;
+            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps,
+                m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor, m_rebuild, m_iThreadNum;
         };
     }
 }

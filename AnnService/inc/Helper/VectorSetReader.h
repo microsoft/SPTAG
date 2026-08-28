@@ -34,6 +34,10 @@ public:
     std::uint32_t m_threadNum;
 
     bool m_normalized;
+
+    // When true (and the file type supports it), map the input vector file instead of
+    // reading it fully into RAM, so the OS demand-pages it and RSS stays bounded.
+    bool m_useMmap = false;
 };
 
 class VectorSetReader

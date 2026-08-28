@@ -4,7 +4,6 @@
 #ifndef _SPTAG_COMMON_SIMDUTILS_H_
 #define _SPTAG_COMMON_SIMDUTILS_H_
 
-#include <xmmintrin.h>
 #include <functional>
 #include <iostream>
 

@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include "Distance.hxx"
+#include "GPUKNNDistance.hxx"
 
 
 // Object used to store id,distance combination for KNN graph
@@ -73,8 +74,8 @@ class ThreadHeap {
 
       while(2*i+2 < KVAL) {
         swapDest = 2*i;
-        swapDest += (vals[i].dist < vals[2*i+1].dist && vals[2*i+2].dist <= vals[2*i+1].dist);
-        swapDest += 2*(vals[i].dist < vals[2*i+2].dist && vals[2*i+1].dist < vals[2*i+2].dist);
+        swapDest += (vals[2*i+1].dist >= vals[i].dist && vals[2*i+1].dist > vals[2*i+2].dist);
+        swapDest += 2*(vals[2*i+2].dist >= vals[i].dist && vals[2*i+2].dist >= vals[2*i+1].dist);
 
         if(swapDest == 2*i) return;
 
@@ -89,10 +90,10 @@ class ThreadHeap {
       int i=idx;
       int swapDest=0;
 
-      while(2*i+2 < KVAL) {
+      while(KVAL >= 2*i+2) {
         swapDest = 2*i;
-        swapDest += (vals[i].dist < vals[2*i+1].dist && vals[2*i+2].dist <= vals[2*i+1].dist);
-        swapDest += 2*(vals[i].dist < vals[2*i+2].dist && vals[2*i+1].dist < vals[2*i+2].dist);
+        swapDest += (vals[2*i+1].dist >= vals[i].dist && vals[2*i+1].dist > vals[2*i+2].dist);
+        swapDest += 2*(vals[2*i+2].dist >= vals[i].dist && vals[2*i+2].dist >= vals[2*i+1].dist);
 
         if(swapDest == 2*i) return;
 
@@ -164,7 +165,7 @@ class ThreadHeap {
       heapifyAt(idx);
     }
 
-/*
+
     // Load a sorted set of vectors into the heap
     __device__ void load_mem_sorted(Point<T, SUMTYPE,Dim>* data, int* mem, Point<T,SUMTYPE,Dim> query, int metric) {
       for(int i=0; i<=KVAL-1; i++) {
@@ -187,7 +188,7 @@ class ThreadHeap {
     __device__ SUMTYPE top() {
       return vals[0].dist;
     }
-*/
+
 };
 
 #endif

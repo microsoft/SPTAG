@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_COMMON_LABELSET_H_
-#define _SPTAG_COMMON_LABELSET_H_
+#ifndef _SPTAG_COMMON_POSTINGSIZERECORD_H_
+#define _SPTAG_COMMON_POSTINGSIZERECORD_H_
 
 #include <atomic>
 #include "Dataset.h"
@@ -11,17 +11,15 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        class Labelset
+        class PostingSizeRecord
         {
         private:
-            std::atomic<SizeType> m_inserted;
-            Dataset<std::int8_t> m_data;
+            Dataset<int> m_data;
             
         public:
-            Labelset() 
+            PostingSizeRecord() 
             {
-                m_inserted = 0;
-                m_data.SetName("DeleteID");
+                m_data.SetName("PostingSizeRecord");
             }
 
             void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
@@ -29,31 +27,45 @@ namespace SPTAG
                 m_data.Initialize(size, 1, blockSize, capacity);
             }
 
-            inline size_t Count() const { return m_inserted.load(); }
-
-            inline bool Contains(const SizeType& key) const
+            inline int GetSize(const SizeType& headID)
             {
-                return *m_data[key] == 1;
+                return *m_data[headID];
             }
 
-            inline bool Insert(const SizeType& key)
+            inline bool UpdateSize(const SizeType& headID, int newSize)
             {
-                char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
-                if (oldvalue == 1) return false;
-                m_inserted++;
-                return true;
+                while (true) {
+                    int oldSize = GetSize(headID);
+                    if (InterlockedCompareExchange((unsigned*)m_data[headID], (unsigned)newSize, (unsigned)oldSize) == oldSize) {
+                        return true;
+                    }
+                }
+            }
+
+            inline bool IncSize(const SizeType& headID, int appendNum)
+            {
+                while (true) {
+                    int oldSize = GetSize(headID);
+                    int newSize = oldSize + appendNum;
+                    if (InterlockedCompareExchange((unsigned*)m_data[headID], (unsigned)newSize, (unsigned)oldSize) == oldSize) {
+                        return true;
+                    }
+                }
+            }
+            
+            inline SizeType GetPostingNum()
+            {
+                return m_data.R();
             }
 
             inline ErrorCode Save(std::shared_ptr<Helper::DiskIO> output)
             {
-                SizeType deleted = m_inserted.load();
-                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
                 return m_data.Save(output);
             }
 
-            inline ErrorCode Save(std::string filename)
+            inline ErrorCode Save(const std::string& filename)
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return Save(ptr);
@@ -61,15 +73,12 @@ namespace SPTAG
 
             inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
             {
-                SizeType deleted;
-                IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
-                m_inserted = deleted;
                 return m_data.Load(input, blockSize, capacity);
             }
 
-            inline ErrorCode Load(std::string filename, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return Load(ptr, blockSize, capacity);
@@ -77,7 +86,6 @@ namespace SPTAG
 
             inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
             {
-                m_inserted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
             }
 
@@ -94,11 +102,6 @@ namespace SPTAG
             inline void SetR(SizeType num)
             {
                 m_data.SetR(num);
-            }
-
-            inline SizeType R() const
-            {
-                return m_data.R();
             }
         };
     }

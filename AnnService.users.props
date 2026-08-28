@@ -10,9 +10,10 @@
 
   <PropertyGroup Label="UserMacros">
 	<OutAppDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutAppDir>
-    <OutLibDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutLibDir>
+	<OutLibDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutLibDir>
 	<JavaIncDir></JavaIncDir>
 	<JavaLib></JavaLib>
+  <PYTHON_VERSION>3.9</PYTHON_VERSION>
   </PropertyGroup>
 </Project>
 

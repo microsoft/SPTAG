@@ -3,5 +3,6 @@
 
 #pragma once
 
+#define BOOST_TEST_LOG_LEVEL test_suite
 #include <iostream>
 #include <boost/test/unit_test.hpp>

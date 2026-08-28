@@ -13,7 +13,7 @@ namespace SPTAG
         template <typename T>
         class Heap {
         public:
-            Heap() : heap(nullptr), length(0), count(0) {}
+            Heap() : heap(nullptr), length(0), count(0),lastlevel(0) {}
 
             Heap(int size) { Resize(size); }
 
@@ -24,10 +24,15 @@ namespace SPTAG
                 count = 0;
                 lastlevel = int(pow(2.0, floor(log2((float)size))));
             }
-            ~Heap() {}
+            ~Heap() { heap.reset(); }
             inline int size() { return count; }
             inline bool empty() { return count == 0; }
-            inline void clear() { count = 0; }
+            inline void clear(int size)
+            {
+                if (size > length) Resize(size);
+                count = 0;
+            }
+
             inline T& Top() { if (count == 0) return heap[0]; else return heap[1]; }
 
             // Insert a new element in the heap.

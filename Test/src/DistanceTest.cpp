@@ -1,60 +1,63 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Test.h"
 #include <bitset>
 #include <ctime>
 #include <thread>
 #include <vector>
-#include "inc/Test.h"
-#include "inc/Core/Common/DistanceUtils.h"
 
-template<typename T>
-static float ComputeCosineDistance(const T *pX, const T *pY, SPTAG::DimensionType length) {
+template <typename T> static float ComputeCosineDistance(const T *pX, const T *pY, SPTAG::DimensionType length)
+{
     float diff = 0;
-    const T* pEnd1 = pX + length;
-    while (pX < pEnd1) diff += (*pX++) * (*pY++);
+    const T *pEnd1 = pX + length;
+    while (pX < pEnd1)
+        diff += (*pX++) * (*pY++);
     return diff;
 }
 
-template<typename T>
-static float ComputeL2Distance(const T *pX, const T *pY, SPTAG::DimensionType length)
+template <typename T> static float ComputeL2Distance(const T *pX, const T *pY, SPTAG::DimensionType length)
 {
     float diff = 0;
-    const T* pEnd1 = pX + length;
-    while (pX < pEnd1) {
-        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    const T *pEnd1 = pX + length;
+    while (pX < pEnd1)
+    {
+        float c1 = ((float)(*pX++) - (float)(*pY++));
+        diff += c1 * c1;
     }
     return diff;
 }
 
-template<typename T>
-T random(int high = RAND_MAX, int low = 0)   // Generates a random value.
+template <typename T> T random(int high = RAND_MAX, int low = 0) // Generates a random value.
 {
-    return (T)(low + float(high - low)*(std::rand()/static_cast<float>(RAND_MAX + 1.0)));
+    return (T)(low + float(high - low) * (std::rand() / static_cast<float>(RAND_MAX + 1.0)));
 }
 
-template<typename T>
-void test(int high) {
+template <typename T> void test(int high)
+{
     SPTAG::DimensionType dimension = random<SPTAG::DimensionType>(256, 2);
     T *X = new T[dimension], *Y = new T[dimension];
     BOOST_ASSERT(X != nullptr && Y != nullptr);
-    for (SPTAG::DimensionType i = 0; i < dimension; i++) {
+    for (SPTAG::DimensionType i = 0; i < dimension; i++)
+    {
         X[i] = random<T>(high, -high);
         Y[i] = random<T>(high, -high);
     }
-    BOOST_CHECK_CLOSE_FRACTION(ComputeL2Distance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2), 1e-5);
-    BOOST_CHECK_CLOSE_FRACTION(high * high - ComputeCosineDistance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine), 1e-5);
+    BOOST_CHECK_CLOSE_FRACTION(
+        ComputeL2Distance(X, Y, dimension),
+        SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2), 1e-5);
+    BOOST_CHECK_CLOSE_FRACTION(
+        high * high - ComputeCosineDistance(X, Y, dimension),
+        SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine), 1e-5);
 
     delete[] X;
     delete[] Y;
 }
 
 template <typename T>
-void test_dist_calc_performance(
-    int high, 
-    SPTAG::DimensionType dimension = 256,
-    SPTAG::SizeType size = 100,
-    SPTAG::DistCalcMethod calc_method = SPTAG::DistCalcMethod::L2)
+void test_dist_calc_performance(int high, SPTAG::DimensionType dimension = 256, SPTAG::SizeType size = 100,
+                                SPTAG::DistCalcMethod calc_method = SPTAG::DistCalcMethod::L2, int threads = 1)
 {
     T **X = new T *[size];
     T **Y = new T *[size];
@@ -69,15 +72,38 @@ void test_dist_calc_performance(
         }
     }
 
-    double start, end;
-    start = omp_get_wtime();
-#pragma omp parallel for
-    for (SPTAG::SizeType i = 0; i < size; i++)
+    auto start = std::chrono::steady_clock::now();
+    std::vector<std::thread> mythreads;
+    mythreads.reserve(threads);
+    std::atomic_size_t sent(0);
+    for (int tid = 0; tid < threads; tid++)
     {
-        SPTAG::COMMON::DistanceUtils::ComputeDistance(X[i], Y[i], dimension, calc_method);
+        mythreads.emplace_back([&, tid]() {
+            size_t i = 0;
+            while (true)
+            {
+                i = sent.fetch_add(1);
+                if (i < size)
+                {
+                    SPTAG::COMMON::DistanceUtils::ComputeDistance(X[i], Y[i], dimension, calc_method);
+                }
+                else
+                {
+                    return;
+                }
+            }
+        });
     }
-    end = omp_get_wtime();
-    std::cout << "Time to calculate distance (ms): " << (end - start) * 1000 << std::endl;
+    for (auto &t : mythreads)
+    {
+        t.join();
+    }
+    mythreads.clear();
+
+    auto end = std::chrono::steady_clock::now();
+    std::cout << "Time to calculate distance (ms): "
+              << (std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() * 1.0) / 1000.0
+              << std::endl;
 
     delete[] X;
     delete[] Y;
@@ -102,14 +128,13 @@ BOOST_AUTO_TEST_CASE(TestDistanceComputationPerformance)
     for (int num_threads : nums_threads)
     {
         std::cout << "num_thread: " << num_threads << std::endl;
-        omp_set_num_threads(num_threads);
         for (SPTAG::DistCalcMethod calc_method : calc_methods)
         {
             std::cout << "calc_method: " << (calc_method == SPTAG::DistCalcMethod::L2 ? "L2" : "Cosine") << std::endl;
             for (auto dimension : dimensions)
             {
                 std::cout << "type: int8, dimension: " << dimension << ", size: " << size << std::endl;
-                test_dist_calc_performance<std::int8_t>(127, dimension, size, calc_method);
+                test_dist_calc_performance<std::int8_t>(127, dimension, size, calc_method, num_threads);
             }
         }
     }

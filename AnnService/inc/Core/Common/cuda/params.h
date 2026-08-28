@@ -28,13 +28,19 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+
 /******************************************************
 * Parameters that have been optimized experimentally 
 ******************************************************/
 #define THREADS 64 // Number of threads per block
+#define KNN_THREADS 32 // Number of threads per block
 #define BLOCKS 10240 // Total blocks used
 #define SAMPLES 5000 // number of samples used to determine median for TPT construction
 #define KEYTYPE float // Keys used to divide TPTs at each node
+#define ILP 1 // Increase of ILP using registers in distance calculations
+#define TPT_ITERS 1 // Number of random sets of weights tried for each level
+#define TPT_PART_DIMS D // Number of dimensions used to create hyperplane
+#define REFINE_DEPTH 1 // Depth of refinement step.  No refinement if 0
 
 #define REORDER 1 // Option to re-order queries for perf improvement (1 = reorder, 0 = no reorder)
 

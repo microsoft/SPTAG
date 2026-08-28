@@ -8,6 +8,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <fstream>
+#include <atomic>
+#include <mutex>
 
 #pragma warning(disable:4996)
 
@@ -31,6 +33,48 @@ namespace SPTAG
         {
         public:
             virtual void Logging(const char* title, LogLevel level, const char* file, int line, const char* func, const char* format, ...) = 0;
+        };
+
+        class LoggerHolder
+        {
+        // The C++20 path uses `std::atomic<std::shared_ptr<Logger>>`, which the
+        // libc++ shipped with ClickHouse rejects (it requires the value type to
+        // be trivially copyable). The pre-C++20 path with `std::atomic_load` /
+        // `std::atomic_store` works under both standards, so force it
+        // unconditionally — same workaround SPTAG-cmake uses for `_sptag` via
+        // `-std=c++17`, but applied at the header so consumers compiled at
+        // higher standards (e.g. ClickHouse's `dbms` at C++23) are unaffected.
+#if 0
+        private:
+            std::atomic<std::shared_ptr<Logger>> m_logger;
+        public:
+            LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
+
+            void SetLogger(std::shared_ptr<Logger> p_logger)
+            {
+                m_logger = p_logger;
+            }
+
+            std::shared_ptr<Logger> GetLogger()
+            {
+                return m_logger;
+            }
+#else
+        private:
+            std::shared_ptr<Logger> m_logger;
+        public:
+            LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
+
+            void SetLogger(std::shared_ptr<Logger> p_logger)
+            {
+                std::atomic_store(&m_logger, p_logger);
+            }
+
+            std::shared_ptr<Logger> GetLogger()
+            {
+                return std::atomic_load(&m_logger);
+            }
+#endif
         };
 
 

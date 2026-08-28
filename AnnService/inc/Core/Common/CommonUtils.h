@@ -11,13 +11,19 @@
 #include <exception>
 #include <algorithm>
 
+#include <thread>
 #include <time.h>
-#include <omp.h>
 #include <string.h>
 #include <vector>
 #include <set>
 
 #define PREFETCH
+
+#ifndef _MSC_VER
+#define EXCHANGE_TYPE_32 int
+#else
+#define EXCHANGE_TYPE_32 long
+#endif
 
 namespace SPTAG
 {
@@ -33,18 +39,19 @@ namespace SPTAG
             static inline float atomic_float_add(volatile float* ptr, const float operand)
             {
                 union {
-                    volatile long iOld;
+                    volatile EXCHANGE_TYPE_32 iOld;
                     float fOld;
                 };
                 union {
-                    long iNew;
+                    EXCHANGE_TYPE_32 iNew;
                     float fNew;
                 };
 
                 while (true) {
-                    iOld = *(volatile long *)ptr;
+                    iOld = *(volatile EXCHANGE_TYPE_32 *)ptr;
                     fNew = fOld + operand;
-                    if (InterlockedCompareExchange((long *)ptr, iNew, iOld) == iOld) {
+                    if (InterlockedCompareExchange((EXCHANGE_TYPE_32 *)ptr, iNew, iOld) == iOld)
+                    {
                         return fNew;
                     }
                 }
@@ -98,6 +105,30 @@ namespace SPTAG
                         dists[nb] = dist;
                         neighbors[nb] = idx;
                     }
+                }
+            }
+
+            static void PrintPostingDiff(std::string &p1, std::string &p2, const char *pos)
+            {
+                if (p1.size() != p2.size())
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Merge %s: p1 and p2 have different sizes: before=%u after=%u\n", pos, p1.size(),
+                                 p2.size());
+                    return;
+                }
+                std::string diff = "";
+                for (size_t i = 0; i < p1.size(); i++)
+                {
+                    if (p1[i] != p2[i])
+                    {
+                        diff += "[" + std::to_string(i) + "]:" + std::to_string(int(p1[i])) + "^" +
+                                std::to_string(int(p2[i])) + " ";
+                    }
+                }
+                if (diff.size() != 0)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "%s: %s\n", pos, diff.substr(0, 1000).c_str());
                 }
             }
         };

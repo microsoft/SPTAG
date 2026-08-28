@@ -28,6 +28,10 @@ public:
 
     void SetQuantizerADC(bool p_adc);
 
+    ByteArray QuantizeVector(ByteArray p_data, int p_num);
+
+    ByteArray ReconstructVector(ByteArray p_data, int p_num);
+
     bool BuildSPANN(bool p_normalized);
 
     bool BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
@@ -35,6 +39,8 @@ public:
     bool Build(ByteArray p_data, SizeType p_num, bool p_normalized);
 
     bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
+
+    std::shared_ptr<ResultIterator> GetIterator(ByteArray p_target);
 
     std::shared_ptr<QueryResult> Search(ByteArray p_data, int p_resultNum);
 
@@ -55,6 +61,12 @@ public:
     bool Delete(ByteArray p_data, SizeType p_num);
 
     bool DeleteByMetaData(ByteArray p_meta);
+
+    uint64_t CalculateBufferSize();
+
+    ByteArray Dump(ByteArray p_blobs);
+
+    static AnnIndex LoadFromDump(ByteArray p_config, ByteArray p_blobs);
 
     static AnnIndex Load(const char* p_loaderFile);
 

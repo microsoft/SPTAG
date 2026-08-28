@@ -5,6 +5,7 @@
 #define _SPTAG_COMMON_QUANTIZER_H_
 
 #include "inc/Core/Common.h"
+#include "inc/Helper/DiskIO.h"
 #include <cstdint>
 #include "inc/Core/CommonDataStructure.h"
 #include "DistanceUtils.h"
@@ -23,7 +24,7 @@ namespace SPTAG
             template <typename T>
             std::function<float(const T*, const T*, SizeType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method) const;
 
-            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const = 0;
+            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const = 0;
 
             virtual SizeType QuantizeSize() const = 0;
 
@@ -58,6 +59,9 @@ namespace SPTAG
             virtual int GetBase() const = 0;
 
             virtual float* GetL2DistanceTables() = 0;
+
+            template<typename T>
+            T* GetCodebooks();
         };
     }
 }

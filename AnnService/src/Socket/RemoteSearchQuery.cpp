@@ -7,15 +7,11 @@
 using namespace SPTAG;
 using namespace SPTAG::Socket;
 
-
-RemoteQuery::RemoteQuery()
-    : m_type(QueryType::String)
+RemoteQuery::RemoteQuery() : m_type(QueryType::String)
 {
 }
 
-
-std::size_t
-RemoteQuery::EstimateBufferSize() const
+std::size_t RemoteQuery::EstimateBufferSize() const
 {
     std::size_t sum = 0;
     sum += SimpleSerialization::EstimateBufferSize(MajorVersion());
@@ -26,9 +22,7 @@ RemoteQuery::EstimateBufferSize() const
     return sum;
 }
 
-
-std::uint8_t*
-RemoteQuery::Write(std::uint8_t* p_buffer) const
+std::uint8_t *RemoteQuery::Write(std::uint8_t *p_buffer) const
 {
     p_buffer = SimpleSerialization::SimpleWriteBuffer(MajorVersion(), p_buffer);
     p_buffer = SimpleSerialization::SimpleWriteBuffer(MirrorVersion(), p_buffer);
@@ -39,9 +33,7 @@ RemoteQuery::Write(std::uint8_t* p_buffer) const
     return p_buffer;
 }
 
-
-const std::uint8_t*
-RemoteQuery::Read(const std::uint8_t* p_buffer)
+const std::uint8_t *RemoteQuery::Read(const std::uint8_t *p_buffer)
 {
     decltype(MajorVersion()) majorVer = 0;
     decltype(MirrorVersion()) mirrorVer = 0;
@@ -59,29 +51,21 @@ RemoteQuery::Read(const std::uint8_t* p_buffer)
     return p_buffer;
 }
 
-
-RemoteSearchResult::RemoteSearchResult()
-    : m_status(ResultStatus::Timeout)
+RemoteSearchResult::RemoteSearchResult() : m_status(ResultStatus::Timeout)
 {
 }
 
-
-RemoteSearchResult::RemoteSearchResult(const RemoteSearchResult& p_right)
-    : m_status(p_right.m_status),
-      m_allIndexResults(p_right.m_allIndexResults)
+RemoteSearchResult::RemoteSearchResult(const RemoteSearchResult &p_right)
+    : m_status(p_right.m_status), m_allIndexResults(p_right.m_allIndexResults)
 {
 }
 
-
-RemoteSearchResult::RemoteSearchResult(RemoteSearchResult&& p_right)
-    : m_status(std::move(p_right.m_status)),
-      m_allIndexResults(std::move(p_right.m_allIndexResults))
+RemoteSearchResult::RemoteSearchResult(RemoteSearchResult &&p_right)
+    : m_status(std::move(p_right.m_status)), m_allIndexResults(std::move(p_right.m_allIndexResults))
 {
 }
 
-
-RemoteSearchResult&
-RemoteSearchResult::operator=(RemoteSearchResult&& p_right)
+RemoteSearchResult &RemoteSearchResult::operator=(RemoteSearchResult &&p_right)
 {
     m_status = p_right.m_status;
     m_allIndexResults = std::move(p_right.m_allIndexResults);
@@ -89,9 +73,7 @@ RemoteSearchResult::operator=(RemoteSearchResult&& p_right)
     return *this;
 }
 
-
-std::size_t
-RemoteSearchResult::EstimateBufferSize() const
+std::size_t RemoteSearchResult::EstimateBufferSize() const
 {
     std::size_t sum = 0;
     sum += SimpleSerialization::EstimateBufferSize(MajorVersion());
@@ -100,13 +82,13 @@ RemoteSearchResult::EstimateBufferSize() const
     sum += SimpleSerialization::EstimateBufferSize(m_status);
 
     sum += sizeof(std::uint32_t);
-    for (const auto& indexRes : m_allIndexResults)
+    for (const auto &indexRes : m_allIndexResults)
     {
         sum += SimpleSerialization::EstimateBufferSize(indexRes.m_indexName);
         sum += sizeof(std::uint32_t);
         sum += sizeof(bool);
 
-        for (const auto& res : indexRes.m_results)
+        for (const auto &res : indexRes.m_results)
         {
             sum += SimpleSerialization::EstimateBufferSize(res.VID);
             sum += SimpleSerialization::EstimateBufferSize(res.Dist);
@@ -124,23 +106,22 @@ RemoteSearchResult::EstimateBufferSize() const
     return sum;
 }
 
-
-std::uint8_t*
-RemoteSearchResult::Write(std::uint8_t* p_buffer) const
+std::uint8_t *RemoteSearchResult::Write(std::uint8_t *p_buffer) const
 {
     p_buffer = SimpleSerialization::SimpleWriteBuffer(MajorVersion(), p_buffer);
     p_buffer = SimpleSerialization::SimpleWriteBuffer(MirrorVersion(), p_buffer);
 
     p_buffer = SimpleSerialization::SimpleWriteBuffer(m_status, p_buffer);
     p_buffer = SimpleSerialization::SimpleWriteBuffer(static_cast<std::uint32_t>(m_allIndexResults.size()), p_buffer);
-    for (const auto& indexRes : m_allIndexResults)
+    for (const auto &indexRes : m_allIndexResults)
     {
         p_buffer = SimpleSerialization::SimpleWriteBuffer(indexRes.m_indexName, p_buffer);
 
-        p_buffer = SimpleSerialization::SimpleWriteBuffer(static_cast<std::uint32_t>(indexRes.m_results.GetResultNum()), p_buffer);
+        p_buffer = SimpleSerialization::SimpleWriteBuffer(static_cast<std::uint32_t>(indexRes.m_results.GetResultNum()),
+                                                          p_buffer);
         p_buffer = SimpleSerialization::SimpleWriteBuffer(indexRes.m_results.WithMeta(), p_buffer);
 
-        for (const auto& res : indexRes.m_results)
+        for (const auto &res : indexRes.m_results)
         {
             p_buffer = SimpleSerialization::SimpleWriteBuffer(res.VID, p_buffer);
             p_buffer = SimpleSerialization::SimpleWriteBuffer(res.Dist, p_buffer);
@@ -158,9 +139,7 @@ RemoteSearchResult::Write(std::uint8_t* p_buffer) const
     return p_buffer;
 }
 
-
-const std::uint8_t*
-RemoteSearchResult::Read(const std::uint8_t* p_buffer)
+const std::uint8_t *RemoteSearchResult::Read(const std::uint8_t *p_buffer)
 {
     decltype(MajorVersion()) majorVer = 0;
     decltype(MirrorVersion()) mirrorVer = 0;
@@ -178,7 +157,7 @@ RemoteSearchResult::Read(const std::uint8_t* p_buffer)
     p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, len);
     m_allIndexResults.resize(len);
 
-    for (auto& indexRes : m_allIndexResults)
+    for (auto &indexRes : m_allIndexResults)
     {
         p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, indexRes.m_indexName);
 
@@ -189,7 +168,7 @@ RemoteSearchResult::Read(const std::uint8_t* p_buffer)
         p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, withMeta);
 
         indexRes.m_results.Init(nullptr, resNum, withMeta);
-        for (auto& res : indexRes.m_results)
+        for (auto &res : indexRes.m_results)
         {
             p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, res.VID);
             p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, res.Dist);

@@ -4,17 +4,22 @@
 #ifndef _SPTAG_VECTORINDEX_H_
 #define _SPTAG_VECTORINDEX_H_
 
+#include <unordered_set>
 #include "Common.h"
+#include "Common/WorkSpace.h"
+#include "inc/Helper/DiskIO.h"
 #include "SearchQuery.h"
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
-#include <unordered_set>
 #include "inc/Core/Common/IQuantizer.h"
+
+class ResultIterator;
 
 namespace SPTAG
 {
 
+extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 class IAbortOperation
 {
 public:
@@ -31,12 +36,27 @@ public:
     virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false) = 0;
     
     virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false) = 0;
+    virtual ErrorCode AddIndexId(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, int& beginHead, int& endHead) { return ErrorCode::Undefined; }
+    virtual ErrorCode AddIndexIdx(SizeType begin, SizeType end) { return ErrorCode::Undefined; }
+
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
+    virtual std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const = 0;
+
+    virtual bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const = 0;
+
+    virtual std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const = 0;
+
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const = 0;
 
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
 
@@ -44,6 +64,7 @@ public:
 
     virtual float AccurateDistance(const void* pX, const void* pY) const = 0;
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
+    virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
     virtual bool NeedRefine() const = 0;
@@ -113,6 +134,28 @@ public:
 
     virtual ErrorCode LoadQuantizer(std::string p_quantizerFile);
 
+    virtual std::shared_ptr<SPTAG::COMMON::IQuantizer> GetQuantizer() {
+        return m_pQuantizer;
+    }
+
+    virtual ErrorCode QuantizeVector(const void* p_data, SizeType p_num, ByteArray p_out) {
+        if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->GetNumSubvectors() * (size_t)p_num) {
+            for (int i = 0; i < p_num; i++) 
+                m_pQuantizer->QuantizeVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->ReconstructSize()), p_out.Data() + i * (size_t)(m_pQuantizer->GetNumSubvectors()), false);
+            return ErrorCode::Success;
+        }
+        return ErrorCode::Fail;
+    }
+
+    virtual ErrorCode ReconstructVector(const void* p_data, SizeType p_num, ByteArray p_out) {
+        if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->ReconstructSize() * (size_t)p_num) {
+            for (int i = 0; i < p_num; i++)
+                m_pQuantizer->ReconstructVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->GetNumSubvectors()), p_out.Data() + i * (size_t)(m_pQuantizer->ReconstructSize()));
+            return ErrorCode::Success;
+        }
+        return ErrorCode::Fail;
+    }
+
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
@@ -124,6 +167,8 @@ public:
     static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
     static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
+
+    virtual std::shared_ptr<VectorIndex> Clone(std::string p_clone);
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
 
@@ -141,7 +186,9 @@ public:
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
-    virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) = 0;
+    virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort, std::vector<SizeType>* p_mapping) = 0;
+
+    virtual ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory) = 0;
 
     inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
 
@@ -151,7 +198,14 @@ public:
 
     void BuildMetaMapping(bool p_checkDeleted = true);
 
-private:
+    virtual ErrorCode Check()
+    {
+        return ErrorCode::Undefined;
+    }
+
+    virtual std::string GetPriorityID(int queryID) const { return ""; }
+    
+  private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
     ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut);

@@ -2,6 +2,7 @@
 #include <inc/Core/Common/DistanceUtils.h>
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#include <inc/Helper/VectorSetReader.h>
 
 #include <memory>
 #include <inc/Core/VectorSet.h>
@@ -13,7 +14,7 @@ using namespace SPTAG;
 class QuantizerOptions : public Helper::ReaderOptions
 {
 public:
-    QuantizerOptions(SizeType trainingSamples, bool debug, float lambda, SPTAG::QuantizerType qtype, std::string qfile, DimensionType qdim, std::string fullvecs, std::string recvecs) : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32), m_trainingSamples(trainingSamples), m_debug(debug), m_KmeansLambda(lambda), m_quantizerType(qtype), m_outputQuantizerFile(qfile), m_quantizedDim(qdim), m_outputFullVecFile(fullvecs), m_outputReconstructVecFile(recvecs)
+    QuantizerOptions(SizeType trainingSamples, bool debug, float lambda, SPTAG::QuantizerType qtype, SPTAG::DistCalcMethod dm, std::string qfile, DimensionType qdim, std::string fullvecs, std::string recvecs) : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32), m_trainingSamples(trainingSamples), m_debug(debug), m_KmeansLambda(lambda), m_quantizerType(qtype), m_distMethod(dm), m_outputQuantizerFile(qfile), m_quantizedDim(qdim), m_outputFullVecFile(fullvecs), m_outputReconstructVecFile(recvecs)
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFile, "-o", "--output", "Output quantized vectors.");
@@ -29,6 +30,7 @@ public:
         AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
         AddOptionalOption(m_outputFullVecFile, "-ofv", "--output_full", "Output Uncompressed vectors.");
         AddOptionalOption(m_outputFullVecFile, "-orv", "--output_reconstruct", "Output reconstructed vectors.");
+        AddOptionalOption(m_distMethod, "-dist", "--distance_function", "The distance calculation method.");
     }
 
     ~QuantizerOptions() {}
@@ -53,6 +55,8 @@ public:
 
     SPTAG::QuantizerType m_quantizerType;
 
+    SPTAG::DistCalcMethod m_distMethod;
+
     bool m_debug;
 
     float m_KmeansLambda;
@@ -63,61 +67,85 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
 {
     SizeType numCentroids = 256;
     if (raw_vectors->Dimension() % options->m_quantizedDim != 0) {
-        LOG(Helper::LogLevel::LL_Error, "Only n_codebooks that divide dimension are supported.\n");
-        exit(1);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only n_codebooks that divide dimension are supported.\n");
+        return nullptr;
     }
     DimensionType subdim = raw_vectors->Dimension() / options->m_quantizedDim;
     auto codebooks = std::make_unique<T[]>(numCentroids * raw_vectors->Dimension());
 
-    LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
-#pragma omp parallel for
-    for (int codebookIdx = 0; codebookIdx < options->m_quantizedDim; codebookIdx++) {
-        LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
-        auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2, nullptr);
-        auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
 
-        for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
-            auto raw_addr = reinterpret_cast<T*>(raw_vectors->GetVector(vectorIdx)) + (codebookIdx * subdim);
-            auto dset_addr = dset[vectorIdx];
-            for (int k = 0; k < subdim; k++) {
-                dset_addr[k] = raw_addr[k];
-            }
-        }
-
-        std::vector<SizeType> localindices;
-        localindices.resize(dset.R());
-        for (SizeType il = 0; il < localindices.size(); il++) localindices[il] = il;
-
-        auto nclusters = COMMON::KmeansClustering<T>(dset, localindices, 0, dset.R(), kargs, options->m_trainingSamples, options->m_KmeansLambda, options->m_debug, nullptr);
-
-        std::vector<SizeType> reverselocalindex;
-        reverselocalindex.resize(dset.R());
-        for (SizeType il = 0; il < reverselocalindex.size(); il++)
-        {
-            reverselocalindex[localindices[il]] = il;
-        }
-
-        for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
-            auto localidx = reverselocalindex[vectorIdx];
-            auto quan_addr = reinterpret_cast<uint8_t*>(quantized_vectors->GetVector(vectorIdx));
-            quan_addr[codebookIdx] = kargs.label[localidx];
-
-        }
-
-        for (int j = 0; j < numCentroids; j++) {
-            std::cout << kargs.counts[j] << '\t';
-        }
-        std::cout << std::endl;
-
-        T* cb = codebooks.get() + (numCentroids * subdim * codebookIdx);
-        for (int i = 0; i < numCentroids; i++)
-        {
-            for (int j = 0; j < subdim; j++)
+    std::vector<std::thread> mythreads;
+    mythreads.reserve(options->m_threadNum);
+    std::atomic_size_t sent(0);
+    for (int tid = 0; tid < options->m_threadNum; tid++)
+    {
+        mythreads.emplace_back([&, tid]() {
+            size_t codebookIdx = 0;
+            while (true)
             {
-                cb[i * subdim + j] = kargs.centers[i * subdim + j];
-            }
-        }
-    }
+                codebookIdx = sent.fetch_add(1);
+                if (codebookIdx < options->m_quantizedDim)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
+                    COMMON::Dataset<T> dset(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
 
+                    for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++)
+                    {
+                        T* raw_addr = reinterpret_cast<T*>(raw_vectors->GetVector(vectorIdx)) + (codebookIdx * subdim);
+                        T* dset_addr = dset[vectorIdx];
+                        std::memcpy(dset_addr, raw_addr, sizeof(T)*subdim);
+                    }
+
+                    std::vector<SizeType> localindices;
+                    localindices.resize(dset.R());
+                    for (SizeType il = 0; il < localindices.size(); il++)
+                        localindices[il] = il;
+
+                    auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, options->m_distMethod, nullptr);
+                    auto nclusters = COMMON::KmeansClustering<T>(dset, localindices, 0, dset.R(), kargs,
+                        options->m_trainingSamples, options->m_KmeansLambda, options->m_debug, nullptr);
+
+                    std::vector<SizeType> reverselocalindex;
+                    reverselocalindex.resize(dset.R());
+                    for (SizeType il = 0; il < reverselocalindex.size(); il++)
+                    {
+                        reverselocalindex[localindices[il]] = il;
+                    }
+
+                    for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++)
+                    {
+                        auto localidx = reverselocalindex[vectorIdx];
+                        auto quan_addr = reinterpret_cast<uint8_t *>(quantized_vectors->GetVector(vectorIdx));
+                        quan_addr[codebookIdx] = kargs.label[localidx];
+                    }
+
+                    for (int j = 0; j < numCentroids; j++)
+                    {
+                        std::cout << kargs.counts[j] << '\t';
+                    }
+                    std::cout << std::endl;
+
+                    T *cb = codebooks.get() + (numCentroids * subdim * codebookIdx);
+                    for (int i = 0; i < numCentroids; i++)
+                    {
+                        for (int j = 0; j < subdim; j++)
+                        {
+                            cb[i * subdim + j] = kargs.centers[i * subdim + j];
+                        }
+                    }
+                }
+                else
+                {
+                    return;
+                }
+            }
+        });
+    }
+    for (auto &t : mythreads)
+    {
+        t.join();
+    }
+    mythreads.clear();
     return codebooks;
 }

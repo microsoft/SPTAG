@@ -5,38 +5,32 @@
 
 using namespace SPTAG::Helper;
 
-
 ArgumentsParser::IArgument::IArgument()
 {
 }
-
 
 ArgumentsParser::IArgument::~IArgument()
 {
 }
 
-
 ArgumentsParser::ArgumentsParser()
 {
 }
-
 
 ArgumentsParser::~ArgumentsParser()
 {
 }
 
-
-bool
-ArgumentsParser::Parse(int p_argc, char** p_args)
+bool ArgumentsParser::Parse(int p_argc, char **p_args)
 {
     while (p_argc > 0)
     {
         int last = p_argc;
-        for (auto& option : m_arguments)
+        for (auto &option : m_arguments)
         {
             if (!option->ParseValue(p_argc, p_args))
             {
-                LOG(Helper::LogLevel::LL_Empty, "Failed to parse args around \"%s\"\n", *p_args);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "Failed to parse args around \"%s\"\n", *p_args);
                 PrintHelp();
                 return false;
             }
@@ -50,20 +44,20 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
     }
 
     bool isValid = true;
-    for (auto& option : m_arguments)
+    for (auto &option : m_arguments)
     {
         if (option->IsRequiredButNotSet())
         {
-            LOG(Helper::LogLevel::LL_Empty, "Required option not set:\n  ");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "Required option not set:\n  ");
             option->PrintDescription();
-            LOG(Helper::LogLevel::LL_Empty, "\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "\n");
             isValid = false;
         }
     }
 
     if (!isValid)
     {
-        LOG(Helper::LogLevel::LL_Empty, "\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "\n");
         PrintHelp();
         return false;
     }
@@ -71,16 +65,14 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
     return true;
 }
 
-
-void
-ArgumentsParser::PrintHelp()
+void ArgumentsParser::PrintHelp()
 {
-    LOG(Helper::LogLevel::LL_Empty, "Usage: ");
-    for (auto& option : m_arguments)
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "Usage: ");
+    for (auto &option : m_arguments)
     {
-        LOG(Helper::LogLevel::LL_Empty, "\n  ");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "\n  ");
         option->PrintDescription();
     }
 
-    LOG(Helper::LogLevel::LL_Empty, "\n\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "\n\n");
 }

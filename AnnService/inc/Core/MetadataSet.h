@@ -4,6 +4,7 @@
 #ifndef _SPTAG_METADATASET_H_
 #define _SPTAG_METADATASET_H_
 
+#include "inc/Helper/DiskIO.h"
 #include "CommonDataStructure.h"
 
 namespace SPTAG
@@ -92,7 +93,7 @@ public:
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
 
     MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile, 
-        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize, int start = 0, int count = -1);
 
     MemMetadataSet(std::shared_ptr<Helper::DiskIO> p_metain, std::shared_ptr<Helper::DiskIO> p_metaindexin, 
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
@@ -117,7 +118,7 @@ public:
 
 private:
     ErrorCode Init(std::shared_ptr<Helper::DiskIO> p_metain, std::shared_ptr<Helper::DiskIO> p_metaindexin,
-        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+                 std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize, int start = 0, int count = -1);
 
     std::shared_ptr<void> m_lock;
 

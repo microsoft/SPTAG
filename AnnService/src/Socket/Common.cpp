@@ -3,7 +3,6 @@
 
 #include "inc/Socket/Common.h"
 
-
 using namespace SPTAG::Socket;
 
 const ConnectionID SPTAG::Socket::c_invalidConnectionID = 0;

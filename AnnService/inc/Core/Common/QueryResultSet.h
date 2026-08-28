@@ -43,42 +43,19 @@ public:
     {
     }
 
-    inline void SetTarget(const T *p_target)
-    {
-        m_target = p_target;
-        if (m_quantizedTarget)
-        {
-            ALIGN_FREE(m_quantizedTarget);
-        }
-        m_quantizedTarget = nullptr;
-        m_quantizedSize = 0;
-    }
-
     inline void SetTarget(const T* p_target, const std::shared_ptr<IQuantizer>& quantizer)
     {
-        m_target = p_target;
-        if (quantizer)
-        {
-            if (m_quantizedTarget && (m_quantizedSize == quantizer->QuantizeSize()))
-            {
-                quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
-            }
-            else
-            {
-                if (m_quantizedTarget) ALIGN_FREE(m_quantizedTarget);
-                m_quantizedSize = quantizer->QuantizeSize();
-                m_quantizedTarget = ALIGN_ALLOC(m_quantizedSize);
-                quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
-            }
-        }
+        if (quantizer == nullptr) QueryResult::SetTarget((const void*)p_target);
         else
         {
-            if (m_quantizedTarget)
+            if (m_target == m_quantizedTarget || (m_quantizedSize != quantizer->QuantizeSize()))
             {
-                ALIGN_FREE(m_quantizedTarget);
+                if (m_target != m_quantizedTarget) ALIGN_FREE(m_quantizedTarget);
+                m_quantizedTarget = ALIGN_ALLOC(quantizer->QuantizeSize());
+                m_quantizedSize = quantizer->QuantizeSize();
             }
-            m_quantizedTarget = nullptr;
-            m_quantizedSize = 0;
+            m_target = p_target;
+            quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
         }
     }
 
@@ -89,19 +66,7 @@ public:
 
     T* GetQuantizedTarget()
     {
-        if (m_quantizedTarget)
-        {
-            return reinterpret_cast<T*>(m_quantizedTarget);
-        }
-        else
-        {
-            return (T*)reinterpret_cast<const T*>(m_target);
-        }
-    }
-
-    bool HasQuantizedTarget()
-    {
-        return m_quantizedTarget;
+        return reinterpret_cast<T*>(m_quantizedTarget);
     }
 
     inline float worstDist() const

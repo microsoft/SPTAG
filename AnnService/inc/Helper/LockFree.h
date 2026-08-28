@@ -32,7 +32,7 @@ namespace SPTAG
 
                 ~LockFreeVector() 
                 {
-                    for (T* ptr : m_blocks) delete ptr;
+                    for (T* ptr : m_blocks) delete[] ptr;
                     m_blocks.clear();
                 }
 

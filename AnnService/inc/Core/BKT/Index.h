@@ -15,7 +15,7 @@
 #include "inc/Core/Common/WorkSpacePool.h"
 #include "inc/Core/Common/RelativeNeighborhoodGraph.h"
 #include "inc/Core/Common/BKTree.h"
-#include "inc/Core/Common/Labelset.h"
+#include "inc/Core/Common/LabelSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
@@ -41,8 +41,32 @@ namespace SPTAG
             public:
                 RebuildJob(COMMON::Dataset<T>* p_data, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph, 
                     DistCalcMethod p_distMethod) : m_data(p_data), m_tree(p_tree), m_graph(p_graph), m_distMethod(p_distMethod) {}
+                
+                void exec(void* p_workSpace, IAbortOperation* p_abort) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot support job.exec(workspace, abort)!\n");
+                }
+
                 void exec(IAbortOperation* p_abort) {
-                    m_tree->Rebuild<T>(*m_data, m_distMethod, p_abort);
+                    COMMON::BKTree newTrees(*m_tree);
+                    newTrees.BuildTrees<T>(*m_data, m_distMethod, 1, nullptr, nullptr, false, p_abort);
+
+                    std::unique_lock<std::shared_timed_mutex> lock(*(m_tree->m_lock));
+                    const std::unordered_map<SizeType, SizeType>* idmap = &(m_tree->GetSampleMap());
+                    for (auto iter = idmap->begin(); iter != idmap->end(); iter++) {
+                        if (iter->first < 0)
+                        {
+                            (*m_graph)[-1 - iter->first][m_graph->m_iNeighborhoodSize - 1] = -1;
+                        }
+                    }
+                    m_tree->SwapTree(newTrees);
+
+                    const std::unordered_map<SizeType, SizeType>* newidmap = &(m_tree->GetSampleMap());
+                    for (auto iter = newidmap->begin(); iter != newidmap->end(); iter++) {
+                        if (iter->first < 0)
+                        {
+                            (*m_graph)[-1 - iter->first][m_graph->m_iNeighborhoodSize - 1] = -2 - iter->second;
+                        }
+                    }
                 }
             private:
                 COMMON::Dataset<T>* m_data;
@@ -70,9 +94,8 @@ namespace SPTAG
             float m_fDeletePercentageForRefine;
             std::mutex m_dataAddLock; // protect data and graph
             std::shared_timed_mutex m_dataDeleteLock;
-            COMMON::Labelset m_deletedID;
+            COMMON::LabelSet m_deletedID;
 
-            std::unique_ptr<COMMON::WorkSpacePool<COMMON::WorkSpace>> m_workSpacePool;
             Helper::ThreadPool m_threadPool;
             int m_iNumberOfThreads;
 
@@ -85,6 +108,7 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
+            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
         public:
             Index()
@@ -98,6 +122,7 @@ namespace SPTAG
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod));
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>();
             }
 
             ~Index() {}
@@ -122,6 +147,9 @@ namespace SPTAG
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));
             }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
+            inline float GetDistance(const void* target, const SizeType idx) const {
+                return ComputeDistance(target, m_pSamples.At(idx));
+            }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return idx >= 0 && idx < m_deletedID.R() && !m_deletedID.Contains(idx); }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
@@ -154,9 +182,18 @@ namespace SPTAG
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+
+            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
+            ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const;
+            ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const;
+            bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const;
+            std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
+            ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
+            ErrorCode AddIndexIdx(SizeType begin, SizeType end);
+            ErrorCode AddIndexId(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, int& beginHead, int& endHead);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
 
@@ -164,11 +201,42 @@ namespace SPTAG
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;
             ErrorCode UpdateIndex();
 
-            ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort);
+            ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams,
+                                  IAbortOperation *p_abort, std::vector<SizeType> *p_mapping);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
+            ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
+            {
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();
+                if (!raw_generic_ptr) return ErrorCode::Fail;
 
+
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>* raw_specialized_ptr = dynamic_cast<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>*>(raw_generic_ptr);
+                if (!raw_specialized_ptr)
+                {
+                    delete raw_generic_ptr;
+                    return ErrorCode::Fail;
+                }
+                else
+                {
+                    m_workSpaceFactory = std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>(raw_specialized_ptr);
+                    return ErrorCode::Success;
+                }
+            }
+
+            virtual ErrorCode Check() override;
+
+            virtual std::string GetPriorityID(int queryID) const override { return m_pTrees.GetPriorityID(m_pSamples, queryID, m_fComputeDistance); }
         private:
-            void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const;
+
+            int SearchIndexIterative(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool p_isFirst, int batch, bool p_searchDeleted, bool p_searchDuplicated) const;
+
+            template <bool(*notDeleted)(const COMMON::LabelSet&, SizeType), bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool (*checkFilter)(const std::shared_ptr<MetadataSet> &, SizeType, std::function<bool(const ByteArray &)>)>
+            int SearchIterative(COMMON::QueryResultSet<T>& p_query,
+                COMMON::WorkSpace& p_space, bool p_isFirst, int batch) const;
+
+            void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc = nullptr) const;
+            template <bool(*notDeleted)(const COMMON::LabelSet&, SizeType), bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, std::function<bool(const ByteArray&)>)>
+            void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, std::function<bool(const ByteArray&)> filterFunc) const;
         };
     } // namespace BKT
 } // namespace SPTAG

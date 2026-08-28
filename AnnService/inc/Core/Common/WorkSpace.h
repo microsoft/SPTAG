@@ -9,11 +9,65 @@
 #include "Heap.h"
 
 #include <stdarg.h>
+#include <functional>
 
 namespace SPTAG
 {
     namespace COMMON
     {
+        template <typename WorkSpaceType>
+        class IWorkSpaceFactory
+        {
+        public:
+            using Ptr = std::unique_ptr<WorkSpaceType>;
+
+            virtual std::unique_ptr<WorkSpaceType> GetWorkSpace() = 0;
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) = 0;
+        };
+
+        template <typename WorkSpaceType>
+        class ThreadLocalWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType>
+        {
+        public:
+            static thread_local std::unique_ptr<WorkSpaceType> m_workspace;
+
+            virtual std::unique_ptr< WorkSpaceType> GetWorkSpace() override
+            {
+                return std::move(m_workspace);
+            }
+
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) override
+            {
+                m_workspace = std::move(ws);
+            }
+        };
+
+	template <typename WorkSpaceType>
+        class SharedPoolWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType> {
+        public:
+            virtual std::unique_ptr<WorkSpaceType> GetWorkSpace() override
+	    {
+                std::unique_ptr<WorkSpaceType>  ws;
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (!m_pool.empty()) {
+                    ws = std::move(m_pool.back());
+                    m_pool.pop_back();
+                }
+		return ws;
+	    }
+
+            void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) override {
+                if (ws) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_pool.emplace_back(std::move(ws));
+                }
+            }
+
+        private:
+            std::mutex m_mutex;
+            std::vector<std::unique_ptr<WorkSpaceType>> m_pool;
+        };
+
         class OptHashPosVector
         {
         protected:
@@ -48,7 +102,7 @@ namespace SPTAG
         public:
             OptHashPosVector(): m_secondHash(false), m_exp(2), m_poolSize(8191) {}
 
-            ~OptHashPosVector() {}
+            ~OptHashPosVector() { m_hashTable.reset(); }
 
 
             void Init(SizeType size, int exp)
@@ -133,7 +187,7 @@ namespace SPTAG
                 }
 
                 DoubleSize();
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
@@ -146,6 +200,8 @@ namespace SPTAG
             
         public:
             DistPriorityQueue(): m_size(0), m_length(0), m_count(0) {}
+
+            ~DistPriorityQueue() { m_data.reset(); }
 
             void Resize(int size_) {
                 m_size = size_;
@@ -198,14 +254,20 @@ namespace SPTAG
             }
         };
 
+        class IWorkSpace {};
+
         // Variables for each single NN search
-        struct WorkSpace
+        struct WorkSpace : public IWorkSpace
         {
             WorkSpace() {}
 
             WorkSpace(WorkSpace& other) 
             {
                 Initialize(other.m_iMaxCheck, other.nodeCheckStatus.HashTableExponent());
+            }
+
+            ~WorkSpace() {
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Delete workspace happens!\n");
             }
 
             void Initialize(int maxCheck, int hashExp)
@@ -220,6 +282,7 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
             }
 
             void Initialize(va_list& arg)
@@ -232,8 +295,8 @@ namespace SPTAG
             void Reset(int maxCheck, int resultNum)
             {
                 nodeCheckStatus.clear();
-                m_SPTQueue.clear();
-                m_NGQueue.clear();
+                m_SPTQueue.clear(maxCheck * 10);
+                m_NGQueue.clear(maxCheck * 30);
                 m_Results.clear(max(maxCheck / 16, resultNum));
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
@@ -241,6 +304,15 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
+            }
+
+            void ResetResult(int maxCheck, int resultNum)
+            {
+                m_Results.clear(max(maxCheck / 16, resultNum));
+                m_iNumOfContinuousNoBetterPropagation = 0;
+                m_iNumberOfTreeCheckedLeaves = 0;
+                m_iNumberOfCheckedLeaves = 0;
             }
 
             inline bool CheckAndSet(SizeType idx)
@@ -258,11 +330,12 @@ namespace SPTAG
             OptHashPosVector nodeCheckStatus;
 
             // counter for dynamic pivoting
-            int m_iNumOfContinuousNoBetterPropagation;
-            int m_iContinuousLimit;
-            int m_iNumberOfTreeCheckedLeaves;
-            int m_iNumberOfCheckedLeaves;
-            int m_iMaxCheck;
+            int m_iNumOfContinuousNoBetterPropagation = 0;
+            int m_iContinuousLimit = 128;
+            int m_iNumberOfTreeCheckedLeaves = 0;
+            int m_iNumberOfCheckedLeaves = 0;
+            int m_iMaxCheck = 8192;
+            bool m_relaxedMono = false;
 
             // Prioriy queue used for neighborhood graph
             Heap<NodeDistPair> m_NGQueue;
@@ -274,6 +347,7 @@ namespace SPTAG
             Heap<NodeDistPair> m_nextBSPTQueue;
 
             DistPriorityQueue m_Results;
+            std::function<bool(const ByteArray&)> m_filterFunc;
         };
     }
 }

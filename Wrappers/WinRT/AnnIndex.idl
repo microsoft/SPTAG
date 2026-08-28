@@ -1,0 +1,34 @@
+namespace SPTAG
+{
+
+  enum LogLevel
+  {
+    Debug = 0,
+    Info,
+    Status,
+    Warning,
+    Error,
+    Assert,
+    Count,
+    Empty
+  };
+
+  [default_interface]
+  runtimeclass SearchResult
+  {
+    UInt8[] Metadata {get; };
+    Single Distance{ get; };
+  };
+
+  [default_interface]
+  runtimeclass AnnIndex 
+  {
+    AnnIndex();
+    [default_overload]
+    void AddWithMetadata(Single[] data, UInt8[] metadata);
+
+    void Save(Windows.Storage.StorageFile file);
+    void Load(Windows.Storage.StorageFile file);
+    Windows.Foundation.Collections.IVector<SearchResult> Search(Single[] vector, UInt32 neighborCount);
+  }
+}
