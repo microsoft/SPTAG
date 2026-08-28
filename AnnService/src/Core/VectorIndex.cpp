@@ -1185,7 +1185,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet> &fullVectors, std::u
                     default:
                         SPTAGLIB_LOG(
                             Helper::LogLevel::LL_Error, "Unable to get quantizer reconstruct type %s",
-                            Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()));
+                            Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()).c_str());
                     }
                 }
                 else
