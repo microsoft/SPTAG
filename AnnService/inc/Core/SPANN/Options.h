@@ -103,6 +103,7 @@ namespace SPTAG {
             std::string m_postingQuantizerFile;
             int m_postingQuantBits;
             int m_postingQuantizerTrainingSamples;
+            int m_postingRaBitQRerank;
             std::string m_fullDeletedIDFile;
             Storage m_storage;
             std::string m_KVFile;

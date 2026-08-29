@@ -2255,7 +2255,16 @@ namespace SPTAG::SPANN {
         bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::Dataset<SizeType>& p_headToLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) override {
             m_opt = &p_opt;
             int numThreads = m_opt->m_iSSDNumberOfThreads;
-            int candidateNum = m_opt->m_internalResultNum;
+            const int candidateNum = std::min(
+                m_opt->m_internalResultNum,
+                static_cast<int>(p_headIndex->GetNumSamples()));
+            if (candidateNum <= 0)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Cannot build dynamic postings without head candidates.\n");
+                return false;
+            }
             if (m_opt->m_headIDFile.empty()) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
                 return false;
@@ -2322,7 +2331,7 @@ namespace SPTAG::SPANN {
                     {
                         COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
                     }
-                    acc = acc / sampleNum;
+                    if (sampleNum > 0) acc = acc / sampleNum;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%lld,%lld) loaded with %lld vectors (%zu) HeadIndex acc @%d:%f.\n", i, (std::int64_t)start, (std::int64_t)end, (std::int64_t)(fullVectors->Count()), selections.m_selections.size(), candidateNum, acc);
 
                     p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), m_opt->m_replicaCount, numThreads, m_opt->m_gpuSSDNumTrees, m_opt->m_gpuSSDLeafSize, m_opt->m_rngFactor, m_opt->m_numGPUs);

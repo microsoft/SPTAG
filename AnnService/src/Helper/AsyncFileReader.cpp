@@ -95,6 +95,28 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
 
     std::vector<struct io_event> events(totalToSubmit);
     int totalDone = 0, totalSubmitted = 0, totalQueued = 0;
+    auto completeRequest = [](const struct io_event &event)
+    {
+        AsyncReadRequest *req =
+            reinterpret_cast<AsyncReadRequest *>(event.data);
+        if (req == nullptr) return;
+
+        const bool success =
+            event.res >= 0 &&
+            static_cast<std::uint64_t>(event.res) == req->m_readSize;
+        if (!success)
+        {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error,
+                "Async batch read completed with %lld bytes, expected %llu.\n",
+                static_cast<long long>(event.res),
+                static_cast<unsigned long long>(req->m_readSize));
+        }
+        if (req->m_callback)
+        {
+            req->m_callback(success);
+        }
+    };
     while (totalDone < totalToSubmit)
     {
         if (totalSubmitted < totalToSubmit)
@@ -123,11 +145,7 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
 
         for (int i = totalQueued; i < totalDone; i++)
         {
-            AsyncReadRequest *req = reinterpret_cast<AsyncReadRequest *>((events[i].data));
-            if (nullptr != req)
-            {
-                req->m_callback(true);
-            }
+            completeRequest(events[i]);
         }
         totalQueued = totalDone;
 
@@ -150,11 +168,7 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
 
     for (int i = totalQueued; i < totalDone; i++)
     {
-        AsyncReadRequest *req = reinterpret_cast<AsyncReadRequest *>((events[i].data));
-        if (nullptr != req)
-        {
-            req->m_callback(true);
-        }
+        completeRequest(events[i]);
     }
     return true;
 }

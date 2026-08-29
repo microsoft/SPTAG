@@ -7,14 +7,19 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "IExtraSearcher.h"
+#include "inc/Core/Common/RaBitQQuantizer.h"
 #include "inc/Core/Common/TruthSet.h"
 #include "Compressor.h"
 
+#include <atomic>
 #include <cstring>
 #include <map>
 #include <cmath>
 #include <climits>
 #include <future>
+#include <filesystem>
+#include <limits>
+#include <mutex>
 #include <numeric>
 
 namespace SPTAG
@@ -182,10 +187,35 @@ namespace SPTAG
                 m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
                 m_enableDataCompression = p_opt.m_enableDataCompression;
                 m_enableDictTraining = p_opt.m_enableDictTraining;
+                m_indexFiles.clear();
+                m_indexFilePaths.clear();
+                m_extendedSidecars.clear();
+                m_rawSidecars.clear();
+                m_sidecarReadLocks.clear();
+                m_listInfos.clear();
+                m_globalVectorIDToHeadMap.clear();
+                m_totalListCount = 0;
+                m_vectorInfoSize = 0;
+                m_iDataDimension = 0;
+                if (!ConfigurePostingFormat(p_opt))
+                {
+                    return false;
+                }
 
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile + "_" + std::to_string(m_layer);
-                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(SizeType)) + PageSize - 1) / PageSize));
+                int loadFileID = 0;
+                const size_t minimumPostingBytes = UseRaBitQBatchPosting()
+                    ? RaBitQBatchPostingBytes(static_cast<size_t>(p_opt.m_postingVectorLimit))
+                    : static_cast<size_t>(p_opt.m_postingVectorLimit) *
+                        (UseRaBitQPosting()
+                            ? ExpectedRaBitQVectorInfoSize()
+                            : static_cast<size_t>(p_opt.m_dim) * sizeof(ValueType) +
+                                sizeof(SizeType));
+                p_opt.m_searchPostingPageLimit = max(
+                    p_opt.m_searchPostingPageLimit,
+                    static_cast<int>(
+                        (minimumPostingBytes + PageSize - 1) / PageSize));
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
                     auto curIndexFile = f_createAsyncIO();
@@ -205,8 +235,21 @@ namespace SPTAG
                     }
 
                     m_indexFiles.emplace_back(curIndexFile);
+                    m_indexFilePaths.emplace_back(curFile);
                     try {
-                        m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos);
+                        const size_t firstList = m_listInfos.size();
+                        const int loadedListCount = LoadingHeadInfo(
+                            curFile, p_opt.m_searchPostingPageLimit, m_listInfos);
+                        if (UseRaBitQBatchPosting() &&
+                            !LoadRaBitQBatchSidecars(
+                                curFile,
+                                static_cast<int>(m_indexFiles.size()) - 1,
+                                firstList,
+                                static_cast<size_t>(loadedListCount)))
+                        {
+                            return false;
+                        }
+                        m_totalListCount += loadedListCount;
                     } 
                     catch (std::exception& e)
                     {
@@ -214,8 +257,20 @@ namespace SPTAG
                         return false;
                     }
 
-                    curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
-                } while (fileexists(curFile.c_str()));
+                    ++loadFileID;
+                    if (UseRaBitQBatchPosting())
+                    {
+                        if (loadFileID >= max(1, p_opt.m_ssdIndexFileNum)) break;
+                        curFile = m_extraFullGraphFile + "_" +
+                            std::to_string(m_layer) + ".part" +
+                            std::to_string(loadFileID);
+                    }
+                    else
+                    {
+                        curFile = m_extraFullGraphFile + "_" +
+                            std::to_string(m_indexFiles.size());
+                    }
+                } while (UseRaBitQBatchPosting() || fileexists(curFile.c_str()));
                 m_oneContext = (m_indexFiles.size() == 1);
 
                 if (m_enablePostingListRearrange) m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingListRearrange;
@@ -252,10 +307,11 @@ namespace SPTAG
                 }
 
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
-                int diskRead = 0;
-                int diskIO = 0;
+                QueryDiskStats diskStats;
                 int listElements = 0;
                 int missingPostingIDs = 0;
+                std::atomic<int> scanRet(static_cast<int>(ErrorCode::Success));
+                std::vector<BatchCandidate> batchCandidates;
 
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
@@ -281,8 +337,6 @@ namespace SPTAG
                     Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
 #endif
 
-                    diskRead += listInfo->listPageCount;
-                    diskIO += 1;
                     listElements += listInfo->listEleCount;
 
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
@@ -293,6 +347,7 @@ namespace SPTAG
                                      p_exWorkSpace->m_pageBuffers[pi].GetPageSize());
                         return ErrorCode::DiskIOFail;
                     }
+                    diskStats.RecordRead(totalBytes);
 
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
@@ -304,16 +359,44 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, &scanRet, &batchCandidates, &diskStats, this](bool success)
                     {
+                        if (!success)
+                        {
+                            scanRet.store(
+                                static_cast<int>(ErrorCode::DiskIOFail),
+                                std::memory_order_relaxed);
+                            return;
+                        }
                         char* buffer = request.m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request.m_payload);
+                        const SizeType localPostingID = static_cast<SizeType>(listInfo - m_listInfos.data());
 
                         // decompress posting list
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
                         if (m_enableDataCompression)
                         {
                             DecompressPosting();
+                        }
+
+                        if (UseRaBitQPosting())
+                        {
+                            auto ret = ProcessRaBitQPostingList(
+                                localPostingID,
+                                p_exWorkSpace,
+                                queryResults,
+                                listInfo,
+                                p_postingListFullData,
+                                nullptr,
+                                m_opt->m_postingRaBitQRerank > 0
+                                    ? &batchCandidates
+                                    : nullptr,
+                                &diskStats);
+                            if (ret != ErrorCode::Success)
+                            {
+                                scanRet.store(static_cast<int>(ret), std::memory_order_relaxed);
+                            }
+                            return;
                         }
 
                         ProcessPosting();
@@ -345,7 +428,25 @@ namespace SPTAG
                         DecompressPosting();
                     }
 
-                    ProcessPosting();
+                    if (UseRaBitQPosting())
+                    {
+                        auto ret = ProcessRaBitQPostingList(
+                            curPostingID,
+                            p_exWorkSpace,
+                            queryResults,
+                            listInfo,
+                            p_postingListFullData,
+                            nullptr,
+                            m_opt->m_postingRaBitQRerank > 0
+                                ? &batchCandidates
+                                : nullptr,
+                            &diskStats);
+                        if (ret != ErrorCode::Success) return ret;
+                    }
+                    else
+                    {
+                        ProcessPosting();
+                    }
 #endif
                 }
 
@@ -357,7 +458,19 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
 #ifdef BATCH_READ
-                BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
+                {
+                    int retry = 0;
+                    bool readSuccess = false;
+                    while (retry < 2 && !readSuccess)
+                    {
+                        readSuccess = BatchReadFileAsync(
+                            m_indexFiles,
+                            (p_exWorkSpace->m_diskRequests).data(),
+                            postingListCount);
+                        ++retry;
+                    }
+                    if (!readSuccess) return ErrorCode::DiskIOFail;
+                }
 #else
                 while (unprocessed > 0)
                 {
@@ -374,14 +487,58 @@ namespace SPTAG
                         DecompressPosting();
                     }
 
-                    ProcessPosting();
+                    if (UseRaBitQPosting())
+                    {
+                        auto ret = ProcessRaBitQPostingList(
+                            static_cast<SizeType>(listInfo - m_listInfos.data()),
+                            p_exWorkSpace,
+                            queryResults,
+                            listInfo,
+                            p_postingListFullData,
+                            nullptr,
+                            m_opt->m_postingRaBitQRerank > 0
+                                ? &batchCandidates
+                                : nullptr,
+                            &diskStats);
+                        if (ret != ErrorCode::Success)
+                        {
+                            scanRet.store(static_cast<int>(ret), std::memory_order_relaxed);
+                        }
+                    }
+                    else
+                    {
+                        ProcessPosting();
+                    }
                 }
 #endif
 #endif
-                if (truth) {
+                if (scanRet.load(std::memory_order_relaxed) != static_cast<int>(ErrorCode::Success))
+                {
+                    return static_cast<ErrorCode>(scanRet.load(std::memory_order_relaxed));
+                }
+                if (UseRaBitQBatchPosting() &&
+                    m_opt->m_postingRaBitQRerank > 0)
+                {
+                    const ErrorCode rerankStatus = FinalizeRaBitQBatchRerank(
+                        batchCandidates,
+                        p_exWorkSpace,
+                        queryResults,
+                        nullptr,
+                        &diskStats);
+                    if (rerankStatus != ErrorCode::Success) return rerankStatus;
+                }
+                if (truth && found) {
                     for (uint32_t pi = 0; pi < postingListCount; ++pi)
                     {
-                        auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
+                        const auto globalPostingID =
+                            p_exWorkSpace->m_postingIDs[pi];
+                        const auto posting = m_globalVectorIDToHeadMap.find(
+                            globalPostingID);
+                        if (posting == m_globalVectorIDToHeadMap.end())
+                        {
+                            continue;
+                        }
+                        const auto curPostingID = posting->second;
 
                         ListInfo* listInfo = &(m_listInfos[curPostingID]);
                         char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
@@ -402,10 +559,72 @@ namespace SPTAG
                             }
                         }
 
+                        if (UseRaBitQBatchPosting())
+                        {
+                            size_t vectorCount = 0;
+                            const size_t batchCount =
+                                RaBitQBatchCount(listInfo->listEleCount);
+                            for (size_t batch = 0; batch < batchCount; ++batch)
+                            {
+                                const char* record = p_postingListFullData +
+                                    batch * ExpectedRaBitQBatchRecordSize();
+                                BatchRecordHeader recordHeader;
+                                std::memcpy(
+                                    &recordHeader, record, sizeof(recordHeader));
+                                if (recordHeader.reserved != 0 ||
+                                    recordHeader.validCount >
+                                        m_splitBatchLayout.batchSize ||
+                                    recordHeader.validCount >
+                                        static_cast<size_t>(
+                                            listInfo->listEleCount) -
+                                            vectorCount)
+                                {
+                                    SPTAGLIB_LOG(
+                                        Helper::LogLevel::LL_Error,
+                                        "Corrupt STATIC RaBitQ batch metadata during truth instrumentation.\n");
+                                    return ErrorCode::DiskIOFail;
+                                }
+                                const char* ids =
+                                    record + sizeof(BatchRecordHeader);
+                                for (size_t lane = 0;
+                                     lane < recordHeader.validCount;
+                                     ++lane)
+                                {
+                                    SizeType vectorID = -1;
+                                    std::memcpy(
+                                        &vectorID,
+                                        ids + lane * sizeof(SizeType),
+                                        sizeof(vectorID));
+                                    if (truth->count(vectorID))
+                                    {
+                                        (*found)[globalPostingID].insert(
+                                            vectorID);
+                                    }
+                                }
+                                vectorCount += recordHeader.validCount;
+                            }
+                            if (vectorCount !=
+                                static_cast<size_t>(listInfo->listEleCount))
+                            {
+                                SPTAGLIB_LOG(
+                                    Helper::LogLevel::LL_Error,
+                                    "Incomplete STATIC RaBitQ batch metadata during truth instrumentation.\n");
+                                return ErrorCode::DiskIOFail;
+                            }
+                            continue;
+                        }
+
                         for (size_t i = 0; i < listInfo->listEleCount; ++i) {
-                            uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(SizeType)) * listInfo->listEleCount + sizeof(SizeType) * i : m_vectorInfoSize * i; \
-                            SizeType vectorID = *(reinterpret_cast<SizeType*>(p_postingListFullData + offsetVectorID)); \
-                            if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
+                            uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(SizeType)) * listInfo->listEleCount + sizeof(SizeType) * i : m_vectorInfoSize * i;
+                            SizeType vectorID = -1;
+                            std::memcpy(
+                                &vectorID,
+                                p_postingListFullData + offsetVectorID,
+                                sizeof(vectorID));
+                            if (truth->count(vectorID))
+                            {
+                                (*found)[globalPostingID].insert(vectorID);
+                            }
                         }
                     }
                 }
@@ -413,8 +632,10 @@ namespace SPTAG
                 if (p_stats) 
                 {
                     p_stats->m_totalListElementsCount = listElements;
-                    p_stats->m_diskIOCount = diskIO;
-                    p_stats->m_diskAccessCount = diskRead;
+                    p_stats->m_diskIOCount +=
+                        diskStats.operationCount.load(std::memory_order_relaxed);
+                    p_stats->m_diskAccessCount +=
+                        diskStats.pageCount.load(std::memory_order_relaxed);
                 }
                 queryResults.SetScanned(listElements);
                 return ErrorCode::Success;
@@ -427,6 +648,7 @@ namespace SPTAG
             {
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+                std::vector<BatchCandidate> batchCandidates;
 
                 auto appendPosting = [&](char* buffer, ListInfo* listInfo) -> ErrorCode {
                     char* p_postingListFullData = buffer + listInfo->pageOffset;
@@ -450,6 +672,20 @@ namespace SPTAG
                         }
                     }
 
+                    if (UseRaBitQPosting())
+                    {
+                        return ProcessRaBitQPostingList(
+                            static_cast<SizeType>(listInfo - m_listInfos.data()),
+                            p_exWorkSpace,
+                            queryResults,
+                            listInfo,
+                            p_postingListFullData,
+                            &p_results,
+                            m_opt->m_postingRaBitQRerank > 0
+                                ? &batchCandidates
+                                : nullptr);
+                    }
+
                     for (int i = 0; i < listInfo->listEleCount; i++) {
                         uint64_t offsetVectorID, offsetVector;
                         (this->*m_parsePosting)(offsetVectorID, offsetVector, i, listInfo->listEleCount);
@@ -464,7 +700,8 @@ namespace SPTAG
                     return ErrorCode::Success;
                 };
 
-                ErrorCode scanRet = ErrorCode::Success;
+                std::atomic<int> scanRet(
+                    static_cast<int>(ErrorCode::Success));
 
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
@@ -504,12 +741,16 @@ namespace SPTAG
                     request.m_callback = [&appendPosting, &request, &scanRet](bool success)
                     {
                         if (!success) {
-                            scanRet = ErrorCode::DiskIOFail;
+                            scanRet.store(
+                                static_cast<int>(ErrorCode::DiskIOFail),
+                                std::memory_order_relaxed);
                             return;
                         }
                         ErrorCode ret = appendPosting(request.m_buffer, static_cast<ListInfo*>(request.m_payload));
                         if (ret != ErrorCode::Success)
-                            scanRet = ret;
+                            scanRet.store(
+                                static_cast<int>(ret),
+                                std::memory_order_relaxed);
                     };
 #else
                     request.m_callback = [&p_exWorkSpace, &request](bool success)
@@ -547,7 +788,12 @@ namespace SPTAG
                     retry++;
                 }
                 if (!success) return ErrorCode::DiskIOFail;
-                if (scanRet != ErrorCode::Success) return scanRet;
+                if (scanRet.load(std::memory_order_relaxed) !=
+                    static_cast<int>(ErrorCode::Success))
+                {
+                    return static_cast<ErrorCode>(
+                        scanRet.load(std::memory_order_relaxed));
+                }
 #else
                 while (unprocessed > 0)
                 {
@@ -562,6 +808,15 @@ namespace SPTAG
                 }
 #endif
 #endif
+                if (UseRaBitQBatchPosting() &&
+                    m_opt->m_postingRaBitQRerank > 0)
+                {
+                    return FinalizeRaBitQBatchRerank(
+                        batchCandidates,
+                        p_exWorkSpace,
+                        queryResults,
+                        &p_results);
+                }
                 return ErrorCode::Success;
             }
 
@@ -752,6 +1007,75 @@ namespace SPTAG
                 bool p_enablePostingListRearrange = false,
                 const ValueType *headVector = nullptr)
             {
+                if (UseRaBitQBatchPosting())
+                {
+                    return BuildRaBitQBatchPosting(
+                        postingListId,
+                        p_postingListSize,
+                        p_selections,
+                        p_fullVectors,
+                        p_localToGlobal).binary;
+                }
+
+                if (UseRaBitQPosting())
+                {
+                    if (p_enableDeltaEncoding || p_enablePostingListRearrange)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "STATIC PostingQuantizer=RaBitQ does not support delta encoding or posting rearrangement.\n");
+                        throw std::runtime_error("Unsupported STATIC RaBitQ posting encoding");
+                    }
+
+                    const auto* localCentroid = reinterpret_cast<const float*>(
+                        m_headIndex->GetMemoryIndex()->GetSample(static_cast<SizeType>(postingListId)));
+                    if (localCentroid == nullptr)
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to read head centroid for posting list %d.\n",
+                                     postingListId);
+                        throw std::runtime_error("Missing STATIC RaBitQ posting centroid");
+                    }
+
+                    std::string postingListFullData(
+                        p_postingListSize * static_cast<size_t>(m_vectorInfoSize), '\0');
+                    size_t selectIdx = p_selections.lower_bound(postingListId);
+                    for (int i = 0; i < p_postingListSize; ++i)
+                    {
+                        if (p_selections[selectIdx].node != postingListId)
+                        {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Selection ID NOT MATCH! node:%d offset:%zu\n",
+                                         postingListId, selectIdx);
+                            throw std::runtime_error("Selection ID mismatch");
+                        }
+
+                        const SizeType localVid = p_selections[selectIdx++].tonode;
+                        SizeType vid = localVid;
+                        if (p_localToGlobal.R() > 0) vid = *(p_localToGlobal[localVid]);
+
+                        char* record = postingListFullData.data() +
+                            static_cast<size_t>(i) * static_cast<size_t>(m_vectorInfoSize);
+                        std::memcpy(record, &vid, sizeof(SizeType));
+                        auto* binaryCode = reinterpret_cast<std::uint8_t*>(record + sizeof(SizeType));
+                        auto* extendedCode = (m_splitCodeLayout.extendedBytes == 0)
+                            ? nullptr
+                            : binaryCode + m_splitCodeLayout.binaryBytes;
+                        if (m_postingQuantizer->QuantizeSplitVector(
+                                p_fullVectors->GetVector(localVid),
+                                localCentroid,
+                                binaryCode,
+                                extendedCode) != ErrorCode::Success)
+                        {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Failed to encode STATIC RaBitQ posting vector %d.\n",
+                                         vid);
+                            throw std::runtime_error("Failed STATIC RaBitQ posting encoding");
+                        }
+                    }
+                    return postingListFullData;
+                }
+
                 std::string postingListFullData("");
                 std::string vectors("");
                 std::string vectorIDs("");
@@ -767,11 +1091,12 @@ namespace SPTAG
                     std::string vectorID("");
                     std::string vector("");
 
-                    SizeType vid = p_selections[selectIdx++].tonode;
-                    if (p_localToGlobal.R() > 0) vid = *(p_localToGlobal[vid]);
+                    const SizeType localVid = p_selections[selectIdx++].tonode;
+                    SizeType vid = localVid;
+                    if (p_localToGlobal.R() > 0) vid = *(p_localToGlobal[localVid]);
                     vectorID.append(reinterpret_cast<char *>(&vid), sizeof(SizeType));
 
-                    ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(vid));
+                    ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(localVid));
                     if (p_enableDeltaEncoding)
                     {
                         DimensionType n = p_fullVectors->Dimension();
@@ -813,8 +1138,25 @@ namespace SPTAG
                 }
 
                 m_opt = &p_opt;
+                if (!ConfigurePostingFormat(p_opt))
+                {
+                    return false;
+                }
+                if (UseRaBitQPosting() && !PersistPostingQuantizerCopy(p_opt))
+                {
+                    return false;
+                }
                 int numThreads = p_opt.m_iSSDNumberOfThreads;
-                int candidateNum = p_opt.m_internalResultNum;
+                const int candidateNum = std::min(
+                    p_opt.m_internalResultNum,
+                    static_cast<int>(p_headIndex->GetNumSamples()));
+                if (candidateNum <= 0)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Cannot build STATIC postings without head candidates.\n");
+                    return false;
+                }
                 std::unordered_map<SizeType, SizeType> headVectorIDS;
                 if (p_opt.m_headIDFile.empty()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
@@ -828,7 +1170,18 @@ namespace SPTAG
 
                 for (int i = 0; i < p_headToLocal.R(); i++)
                 {
-                    headVectorIDS[static_cast<SizeType>(*(p_headToLocal[i]))] = i;
+                    const SizeType headID = *(p_headToLocal[i]);
+                    if (p_localToGlobal.R() > 0 &&
+                        (headID < 0 || headID >= p_localToGlobal.R()))
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Head ID %lld is outside the previous layer mapping of size %lld.\n",
+                            static_cast<std::int64_t>(headID),
+                            static_cast<std::int64_t>(p_localToGlobal.R()));
+                        return false;
+                    }
+                    headVectorIDS[headID] = i;
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded %lld Vector IDs\n", static_cast<std::int64_t>(headVectorIDS.size()));
 
@@ -837,7 +1190,13 @@ namespace SPTAG
                 {
                     auto fullVectors = p_reader->GetVectorSet();
                     fullCount = fullVectors->Count();
-                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(SizeType);
+                    m_iDataDimension = static_cast<int>(fullVectors->Dimension());
+                    vectorInfoSize = UseRaBitQBatchPosting()
+                        ? ExpectedRaBitQBatchRecordSize()
+                        : UseRaBitQPosting()
+                            ? ExpectedRaBitQVectorInfoSize()
+                        : fullVectors->PerVectorDataSize() + sizeof(SizeType);
+                    m_vectorInfoSize = static_cast<int>(vectorInfoSize);
                 }
                 if (upperBound > 0) fullCount = upperBound;
 
@@ -894,7 +1253,7 @@ namespace SPTAG
                         {
                             COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
                         }
-                        acc = acc / sampleNum;
+                        if (sampleNum > 0) acc = acc / sampleNum;
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%lld,%lld) loaded with %lld vectors (%zu) HeadIndex acc @%d:%f.\n", i, (std::int64_t)start, (std::int64_t)end, (std::int64_t)(fullVectors->Count()), selections.m_selections.size(), candidateNum, acc);
 
                         p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opt.m_replicaCount, numThreads, p_opt.m_gpuSSDNumTrees, p_opt.m_gpuSSDLeafSize, p_opt.m_rngFactor, p_opt.m_numGPUs);
@@ -946,10 +1305,22 @@ namespace SPTAG
                 int postingSizeLimit = INT_MAX;
                 if (p_opt.m_postingPageLimit > 0)
                 {
-                    p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * vectorInfoSize + PageSize - 1) / PageSize));
+                    const size_t minimumBytes = UseRaBitQBatchPosting()
+                        ? RaBitQBatchPostingBytes(
+                            static_cast<size_t>(p_opt.m_postingVectorLimit))
+                        : static_cast<size_t>(p_opt.m_postingVectorLimit) *
+                            vectorInfoSize;
+                    p_opt.m_postingPageLimit = max(
+                        p_opt.m_postingPageLimit,
+                        static_cast<int>((minimumBytes + PageSize - 1) / PageSize));
                     p_opt.m_searchPostingPageLimit = p_opt.m_postingPageLimit;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build index with posting page limit:%d\n", p_opt.m_postingPageLimit);
-                    postingSizeLimit = static_cast<int>(p_opt.m_postingPageLimit * PageSize / vectorInfoSize);
+                    postingSizeLimit = UseRaBitQBatchPosting()
+                        ? static_cast<int>(
+                            p_opt.m_postingPageLimit * PageSize / vectorInfoSize *
+                            m_splitBatchLayout.batchSize)
+                        : static_cast<int>(
+                            p_opt.m_postingPageLimit * PageSize / vectorInfoSize);
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", postingSizeLimit);
@@ -1170,7 +1541,11 @@ namespace SPTAG
                     else {
                         for (int j = 0; j < curPostingListSizes.size(); j++)
                         {
-                            curPostingListBytes[j] = curPostingListSizes[j] * vectorInfoSize;
+                            curPostingListBytes[j] = UseRaBitQBatchPosting()
+                                ? RaBitQBatchPostingBytes(
+                                    static_cast<size_t>(curPostingListSizes[j]))
+                                : static_cast<size_t>(curPostingListSizes[j]) *
+                                    vectorInfoSize;
                         }
                     }
 
@@ -1179,7 +1554,12 @@ namespace SPTAG
                     std::vector<int> postingOrderInIndex;
                     SelectPostingOffset(curPostingListBytes, postPageNum, postPageOffset, postingOrderInIndex);
 
-                    OutputSSDIndexFile((i == 0) ? outputFile : outputFile + "_" + std::to_string(i),
+                    OutputSSDIndexFile(
+                        (i == 0)
+                            ? outputFile
+                            : UseRaBitQBatchPosting()
+                                ? outputFile + ".part" + std::to_string(i)
+                                : outputFile + "_" + std::to_string(i),
                         p_opt.m_enableDeltaEncoding,
                         p_opt.m_enablePostingListRearrange,
                         p_opt.m_enableDataCompression,
@@ -1193,7 +1573,51 @@ namespace SPTAG
                         postPageOffset,
                         postingOrderInIndex,
                         fullVectors, p_headToLocal, p_localToGlobal,
-                        curPostingListOffSet);
+                        curPostingListOffSet,
+                        i);
+                }
+
+                if (p_localToGlobal.R() > 0)
+                {
+                    p_headGlobaltoLocal.clear();
+                    for (SizeType i = 0; i < p_headToLocal.R(); ++i)
+                    {
+                        const SizeType localID = *(p_headToLocal[i]);
+                        if (localID < 0 || localID >= p_localToGlobal.R())
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Head ID %lld is outside the previous layer mapping of size %lld.\n",
+                                static_cast<std::int64_t>(localID),
+                                static_cast<std::int64_t>(p_localToGlobal.R()));
+                            return false;
+                        }
+
+                        const SizeType globalID = *(p_localToGlobal[localID]);
+                        *(p_headToLocal[i]) = globalID;
+                        if (p_headGlobaltoLocal.find(globalID) !=
+                            p_headGlobaltoLocal.end())
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Duplicate global head ID %lld in layer %d.\n",
+                                static_cast<std::int64_t>(globalID),
+                                m_layer);
+                            return false;
+                        }
+                        p_headGlobaltoLocal[globalID] = i;
+                    }
+
+                    if (p_headToLocal.Save(
+                            p_opt.m_indexDirectory + FolderSep +
+                            p_opt.m_headIDFile) != ErrorCode::Success)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Failed to save global head IDs for layer %d.\n",
+                            m_layer);
+                        return false;
+                    }
                 }
 
                 auto t5 = std::chrono::high_resolution_clock::now();
@@ -1232,10 +1656,1241 @@ namespace SPTAG
                 std::uint64_t listOffset = 0;
 
                 std::uint16_t pageOffset = 0;
+
+                int fileID = 0;
+
+                std::uint64_t extendedOffset = 0;
+
+                std::uint64_t extendedBytes = 0;
+
+                std::uint64_t rawOffset = 0;
+
+                std::uint64_t rawBytes = 0;
+
+                std::vector<float> centroid;
             };
+
+            enum class StaticPostingFormat : std::uint32_t
+            {
+                LegacyRaw = 0,
+                RaBitQSplit = 1,
+                RaBitQBatch = 2,
+            };
+
+            struct StaticPostingHeader
+            {
+                std::uint32_t magic = 0;
+                std::uint32_t version = 0;
+                std::uint32_t format = 0;
+                std::uint32_t reserved = 0;
+                SizeType listCount = 0;
+                SizeType totalDocumentCount = 0;
+                int dataDimension = 0;
+                SizeType listPageOffset = 0;
+                int vectorInfoSize = 0;
+                std::uint64_t postingQuantizerFingerprint = 0;
+            };
+
+            struct StaticBatchPostingHeader
+            {
+                StaticPostingHeader base;
+                std::uint32_t batchSize = 0;
+                std::uint32_t batchRecordBytes = 0;
+                std::uint32_t extendedBytesPerVector = 0;
+                std::uint32_t flags = 0;
+            };
+
+            struct BatchRecordHeader
+            {
+                std::uint32_t validCount = 0;
+                std::uint32_t reserved = 0;
+            };
+
+            enum class BatchSidecarKind : std::uint32_t
+            {
+                Extended = 1,
+                Raw = 2,
+            };
+
+            struct BatchSidecarHeader
+            {
+                std::uint32_t magic = 0;
+                std::uint32_t version = 0;
+                std::uint32_t kind = 0;
+                std::uint32_t layer = 0;
+                std::uint32_t fileID = 0;
+                std::uint32_t listCount = 0;
+                std::uint32_t dimension = 0;
+                std::uint32_t batchSize = 0;
+                std::uint64_t postingQuantizerFingerprint = 0;
+                std::uint64_t dataBytesPerRecord = 0;
+            };
+
+            struct BatchSidecarListInfo
+            {
+                std::uint64_t vectorCount = 0;
+                std::uint64_t batchCount = 0;
+                std::uint64_t centroidOffset = 0;
+                std::uint64_t dataOffset = 0;
+                std::uint64_t dataBytes = 0;
+            };
+
+            struct BatchPostingData
+            {
+                std::string binary;
+                std::string extended;
+                std::string raw;
+                std::vector<float> centroid;
+            };
+
+            struct BatchCandidate
+            {
+                SizeType vectorID = -1;
+                float distance = std::numeric_limits<float>::infinity();
+                float upperBound = std::numeric_limits<float>::infinity();
+                int fileID = 0;
+                std::uint64_t rawOffset = 0;
+            };
+
+            struct QueryDiskStats
+            {
+                void RecordRead(size_t p_bytes)
+                {
+                    operationCount.fetch_add(1, std::memory_order_relaxed);
+                    const size_t pages =
+                        p_bytes / PageSize + (p_bytes % PageSize != 0);
+                    pageCount.fetch_add(
+                        static_cast<int>(pages), std::memory_order_relaxed);
+                }
+
+                std::atomic<int> operationCount{0};
+                std::atomic<int> pageCount{0};
+            };
+
+            static constexpr std::uint32_t kStaticPostingHeaderMagic = 0x32545053U; // SPT2
+            static constexpr std::uint32_t kStaticPostingHeaderVersion = 2U;
+            static constexpr std::uint32_t kStaticBatchPostingHeaderVersion = 3U;
+            static constexpr std::uint32_t kBatchSidecarMagic = 0x53425152U; // RQBS
+            static constexpr std::uint32_t kBatchSidecarVersion = 1U;
+            static constexpr const char* kPostingQuantizerIndexFile = "SPTAGPostingRaBitQQuantizer.bin";
+            static constexpr const char* kBatchExtendedSuffix = ".rabitq.ext";
+            static constexpr const char* kBatchRawSuffix = ".rabitq.raw";
+            static constexpr std::uint32_t kBatchPostingRawFlag = 1U;
+
+            bool UseRaBitQPosting() const
+            {
+                return m_postingFormat == StaticPostingFormat::RaBitQSplit ||
+                    m_postingFormat == StaticPostingFormat::RaBitQBatch;
+            }
+
+            bool UseRaBitQBatchPosting() const
+            {
+                return m_postingFormat == StaticPostingFormat::RaBitQBatch;
+            }
+
+            size_t ExpectedRaBitQVectorInfoSize() const
+            {
+                return sizeof(SizeType) + m_splitCodeLayout.totalBytes;
+            }
+
+            size_t ExpectedRaBitQBatchRecordSize() const
+            {
+                return sizeof(BatchRecordHeader) +
+                    m_splitBatchLayout.batchSize * sizeof(SizeType) +
+                    m_splitBatchLayout.binaryBytes;
+            }
+
+            size_t RaBitQBatchCount(size_t p_vectorCount) const
+            {
+                return (p_vectorCount + m_splitBatchLayout.batchSize - 1) /
+                    m_splitBatchLayout.batchSize;
+            }
+
+            size_t RaBitQBatchPostingBytes(size_t p_vectorCount) const
+            {
+                return RaBitQBatchCount(p_vectorCount) * ExpectedRaBitQBatchRecordSize();
+            }
+
+            std::string ResolvePostingQuantizerPath(const Options& p_opt) const
+            {
+                std::filesystem::path quantizerPath(p_opt.m_postingQuantizerFile);
+                if (quantizerPath.is_absolute())
+                {
+                    return p_opt.m_postingQuantizerFile;
+                }
+
+                const auto indexLocalPath =
+                    (std::filesystem::path(p_opt.m_indexDirectory) / quantizerPath).string();
+                if (fileexists(indexLocalPath.c_str()))
+                {
+                    return indexLocalPath;
+                }
+
+                if (fileexists(p_opt.m_postingQuantizerFile.c_str()))
+                {
+                    return p_opt.m_postingQuantizerFile;
+                }
+
+                return indexLocalPath;
+            }
+
+            bool ReadPostingQuantizerBytes(const std::string& p_quantizerPath, std::vector<char>& p_bytes) const
+            {
+                std::error_code ec;
+                const auto fileSize = std::filesystem::file_size(p_quantizerPath, ec);
+                if (ec || fileSize == 0)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to stat PostingQuantizerFile %s.\n",
+                                 p_quantizerPath.c_str());
+                    return false;
+                }
+
+                auto quantizerFile = f_createIO();
+                if (quantizerFile == nullptr ||
+                    !quantizerFile->Initialize(p_quantizerPath.c_str(), std::ios::binary | std::ios::in))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to open PostingQuantizerFile %s.\n",
+                                 p_quantizerPath.c_str());
+                    return false;
+                }
+
+                p_bytes.resize(static_cast<size_t>(fileSize));
+                if (quantizerFile->ReadBinary(fileSize, p_bytes.data()) != fileSize)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to read PostingQuantizerFile %s.\n",
+                                 p_quantizerPath.c_str());
+                    p_bytes.clear();
+                    return false;
+                }
+
+                return true;
+            }
+
+            static std::uint64_t ComputePostingQuantizerFingerprint(const std::vector<char>& p_bytes)
+            {
+                std::uint64_t fingerprint = 14695981039346656037ULL;
+                for (char byte : p_bytes)
+                {
+                    fingerprint ^= static_cast<std::uint8_t>(byte);
+                    fingerprint *= 1099511628211ULL;
+                }
+                return fingerprint;
+            }
+
+            bool LoadRaBitQBatchSidecars(
+                const std::string& p_mainFile,
+                int p_fileID,
+                size_t p_firstList,
+                size_t p_listCount)
+            {
+                auto loadSidecar =
+                    [&](const std::string& p_path,
+                        BatchSidecarKind p_kind,
+                        std::uint64_t p_expectedRecordBytes,
+                        std::shared_ptr<Helper::DiskIO>& p_input,
+                        std::vector<BatchSidecarListInfo>& p_infos) -> bool
+                {
+                    std::error_code ec;
+                    const std::uint64_t fileSize =
+                        std::filesystem::file_size(p_path, ec);
+                    const std::uint64_t metadataBytes =
+                        sizeof(BatchSidecarHeader) +
+                        p_listCount * sizeof(BatchSidecarListInfo);
+                    if (ec || fileSize < metadataBytes)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Missing or truncated STATIC RaBitQ batch sidecar %s.\n",
+                            p_path.c_str());
+                        return false;
+                    }
+
+                    p_input = SPTAG::f_createIO();
+                    if (p_input == nullptr ||
+                        !p_input->Initialize(
+                            p_path.c_str(), std::ios::binary | std::ios::in))
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Failed to open STATIC RaBitQ batch sidecar %s.\n",
+                            p_path.c_str());
+                        return false;
+                    }
+
+                    BatchSidecarHeader header;
+                    if (p_input->ReadBinary(
+                            sizeof(header), reinterpret_cast<char*>(&header)) !=
+                        sizeof(header) ||
+                        header.magic != kBatchSidecarMagic ||
+                        header.version != kBatchSidecarVersion ||
+                        header.kind != static_cast<std::uint32_t>(p_kind) ||
+                        header.layer != static_cast<std::uint32_t>(m_layer) ||
+                        header.fileID != static_cast<std::uint32_t>(p_fileID) ||
+                        header.listCount != p_listCount ||
+                        header.dimension !=
+                            static_cast<std::uint32_t>(m_opt->m_dim) ||
+                        header.batchSize != m_splitBatchLayout.batchSize ||
+                        header.postingQuantizerFingerprint !=
+                            m_postingQuantizerFingerprint ||
+                        header.dataBytesPerRecord != p_expectedRecordBytes)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Invalid STATIC RaBitQ batch sidecar header in %s.\n",
+                            p_path.c_str());
+                        return false;
+                    }
+
+                    p_infos.resize(p_listCount);
+                    if (!p_infos.empty() &&
+                        p_input->ReadBinary(
+                            p_infos.size() * sizeof(BatchSidecarListInfo),
+                            reinterpret_cast<char*>(p_infos.data())) !=
+                            p_infos.size() * sizeof(BatchSidecarListInfo))
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Failed to read STATIC RaBitQ batch sidecar metadata from %s.\n",
+                            p_path.c_str());
+                        return false;
+                    }
+
+                    for (size_t i = 0; i < p_infos.size(); ++i)
+                    {
+                        const auto& info = p_infos[i];
+                        const ListInfo& list = m_listInfos[p_firstList + i];
+                        const std::uint64_t expectedBatchCount =
+                            RaBitQBatchCount(info.vectorCount);
+                        const std::uint64_t expectedDataBytes =
+                            p_kind == BatchSidecarKind::Extended
+                            ? expectedBatchCount * m_splitBatchLayout.extendedBytes
+                            : info.vectorCount *
+                                static_cast<std::uint64_t>(m_opt->m_dim) *
+                                sizeof(float);
+                        if (info.vectorCount <
+                                static_cast<std::uint64_t>(list.listEleCount) ||
+                            info.batchCount != expectedBatchCount ||
+                            info.dataBytes != expectedDataBytes ||
+                            (info.dataBytes > 0 && info.dataOffset < metadataBytes) ||
+                            info.dataOffset > fileSize ||
+                            info.dataBytes > fileSize - info.dataOffset)
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Corrupt STATIC RaBitQ batch sidecar entry %zu in %s.\n",
+                                i,
+                                p_path.c_str());
+                            return false;
+                        }
+                        if (p_kind == BatchSidecarKind::Extended &&
+                            info.vectorCount > 0)
+                        {
+                            const std::uint64_t centroidBytes =
+                                static_cast<std::uint64_t>(m_opt->m_dim) *
+                                sizeof(float);
+                            if (info.centroidOffset < metadataBytes ||
+                                info.dataOffset != info.centroidOffset + centroidBytes ||
+                                info.centroidOffset > fileSize ||
+                                centroidBytes >
+                                    fileSize - info.centroidOffset)
+                            {
+                                SPTAGLIB_LOG(
+                                    Helper::LogLevel::LL_Error,
+                                    "Corrupt STATIC RaBitQ centroid entry %zu in %s.\n",
+                                    i,
+                                    p_path.c_str());
+                                return false;
+                            }
+                        }
+                    }
+                    std::vector<std::pair<std::uint64_t, std::uint64_t>> payloadExtents;
+                    payloadExtents.reserve(p_infos.size());
+                    for (const auto& info : p_infos)
+                    {
+                        if (info.vectorCount == 0)
+                        {
+                            continue;
+                        }
+                        const std::uint64_t begin =
+                            p_kind == BatchSidecarKind::Extended
+                            ? info.centroidOffset
+                            : info.dataOffset;
+                        const std::uint64_t centroidBytes =
+                            p_kind == BatchSidecarKind::Extended
+                            ? static_cast<std::uint64_t>(m_opt->m_dim) * sizeof(float)
+                            : 0;
+                        payloadExtents.emplace_back(
+                            begin, info.dataOffset + info.dataBytes);
+                        if (payloadExtents.back().second <
+                            payloadExtents.back().first + centroidBytes)
+                        {
+                            return false;
+                        }
+                    }
+                    std::sort(payloadExtents.begin(), payloadExtents.end());
+                    for (size_t i = 1; i < payloadExtents.size(); ++i)
+                    {
+                        if (payloadExtents[i].first < payloadExtents[i - 1].second)
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Overlapping STATIC RaBitQ batch payloads in %s.\n",
+                                p_path.c_str());
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+
+                std::shared_ptr<Helper::DiskIO> extended;
+                std::vector<BatchSidecarListInfo> extendedInfos;
+                if (!loadSidecar(
+                        p_mainFile + kBatchExtendedSuffix,
+                        BatchSidecarKind::Extended,
+                        m_splitBatchLayout.extendedBytes,
+                        extended,
+                        extendedInfos))
+                {
+                    return false;
+                }
+
+                std::shared_ptr<Helper::DiskIO> raw;
+                std::vector<BatchSidecarListInfo> rawInfos;
+                if (m_opt->m_postingRaBitQRerank > 0 &&
+                    !loadSidecar(
+                        p_mainFile + kBatchRawSuffix,
+                        BatchSidecarKind::Raw,
+                        static_cast<std::uint64_t>(m_opt->m_dim) * sizeof(float),
+                        raw,
+                        rawInfos))
+                {
+                    return false;
+                }
+
+                for (size_t i = 0; i < p_listCount; ++i)
+                {
+                    ListInfo& list = m_listInfos[p_firstList + i];
+                    const auto& extendedInfo = extendedInfos[i];
+                    list.extendedOffset = extendedInfo.dataOffset;
+                    list.extendedBytes = extendedInfo.dataBytes;
+                    if (extendedInfo.vectorCount > 0)
+                    {
+                        list.centroid.resize(static_cast<size_t>(m_opt->m_dim));
+                        const size_t centroidBytes =
+                            list.centroid.size() * sizeof(float);
+                        if (extended->ReadBinary(
+                                centroidBytes,
+                                reinterpret_cast<char*>(list.centroid.data()),
+                                extendedInfo.centroidOffset) != centroidBytes)
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Failed to read STATIC RaBitQ centroid from %s.\n",
+                                p_mainFile.c_str());
+                            return false;
+                        }
+                    }
+                    if (raw != nullptr)
+                    {
+                        list.rawOffset = rawInfos[i].dataOffset;
+                        list.rawBytes = rawInfos[i].dataBytes;
+                    }
+                }
+
+                m_extendedSidecars.emplace_back(std::move(extended));
+                m_rawSidecars.emplace_back(std::move(raw));
+                m_sidecarReadLocks.emplace_back(std::make_unique<std::mutex>());
+                return true;
+            }
+
+            bool LoadPostingQuantizer(const std::string& p_quantizerPath)
+            {
+                std::vector<char> quantizerBytes;
+                if (!ReadPostingQuantizerBytes(p_quantizerPath, quantizerBytes))
+                {
+                    return false;
+                }
+
+                auto quantizerFile = f_createIO();
+                if (quantizerFile == nullptr ||
+                    !quantizerFile->Initialize(
+                        p_quantizerPath.c_str(),
+                        std::ios::binary | std::ios::in))
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Failed to open PostingQuantizerFile %s for checked loading.\n",
+                        p_quantizerPath.c_str());
+                    return false;
+                }
+                auto quantizer =
+                    COMMON::IQuantizer::LoadIQuantizer(quantizerFile);
+                if (quantizer == nullptr ||
+                    quantizer->GetQuantizerType() != QuantizerType::RaBitQQuantizer)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "PostingQuantizerFile %s is not a supported RaBitQ model.\n",
+                                 p_quantizerPath.c_str());
+                    return false;
+                }
+
+                m_postingQuantizer = std::dynamic_pointer_cast<COMMON::RaBitQQuantizer>(quantizer);
+                if (m_postingQuantizer == nullptr || !m_postingQuantizer->Ready())
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "PostingQuantizerFile %s did not load as a ready RaBitQ model.\n",
+                                 p_quantizerPath.c_str());
+                    m_postingQuantizer.reset();
+                    return false;
+                }
+
+                m_postingQuantizerBytes = std::move(quantizerBytes);
+                m_postingQuantizerFingerprint = ComputePostingQuantizerFingerprint(m_postingQuantizerBytes);
+                return true;
+            }
+
+            bool PersistPostingQuantizerCopy(Options& p_opt)
+            {
+                if (!UseRaBitQPosting())
+                {
+                    return true;
+                }
+
+                if (m_postingQuantizerBytes.empty())
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ has no serialized model to persist.\n");
+                    return false;
+                }
+
+                std::error_code ec;
+                if (!p_opt.m_indexDirectory.empty())
+                {
+                    std::filesystem::create_directories(p_opt.m_indexDirectory, ec);
+                }
+                if (ec)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to create index directory %s for PostingQuantizer copy.\n",
+                                 p_opt.m_indexDirectory.c_str());
+                    return false;
+                }
+
+                const auto targetPath =
+                    (std::filesystem::path(p_opt.m_indexDirectory) / kPostingQuantizerIndexFile).string();
+                auto output = f_createIO();
+                if (output == nullptr ||
+                    !output->Initialize(targetPath.c_str(), std::ios::binary | std::ios::out))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to create index-local PostingQuantizerFile %s.\n",
+                                 targetPath.c_str());
+                    return false;
+                }
+
+                const auto serializedBytes = static_cast<std::uint64_t>(m_postingQuantizerBytes.size());
+                if (output->WriteBinary(serializedBytes, m_postingQuantizerBytes.data()) != serializedBytes)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to persist index-local PostingQuantizerFile %s.\n",
+                                 targetPath.c_str());
+                    return false;
+                }
+
+                p_opt.m_postingQuantizerFile = kPostingQuantizerIndexFile;
+                return true;
+            }
+
+            bool ConfigurePostingFormat(Options& p_opt)
+            {
+                m_postingFormat = StaticPostingFormat::LegacyRaw;
+                m_postingQuantizer.reset();
+                m_postingQuantizerBytes.clear();
+                m_postingQuantizerFingerprint = 0;
+                m_splitCodeLayout = {};
+                m_splitBatchLayout = {};
+
+                const bool useLegacyRaBitQ = Helper::StrUtils::StrEqualIgnoreCase(
+                    p_opt.m_postingQuantizer.c_str(), "RaBitQ");
+                const bool useBatchRaBitQ = Helper::StrUtils::StrEqualIgnoreCase(
+                    p_opt.m_postingQuantizer.c_str(), "RaBitQBatch");
+                if (!useLegacyRaBitQ && !useBatchRaBitQ)
+                {
+                    if (p_opt.m_postingRaBitQRerank > 0)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "PostingRaBitQRerank requires STATIC PostingQuantizer=RaBitQBatch.\n");
+                        return false;
+                    }
+                    return true;
+                }
+
+                if (GetEnumValueType<ValueType>() != VectorValueType::Float ||
+                    p_opt.m_valueType != VectorValueType::Float)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ requires Float base/head vectors.\n");
+                    return false;
+                }
+
+                if (!p_opt.m_quantizerFilePath.empty() ||
+                    m_headIndex == nullptr ||
+                    m_headIndex->m_pQuantizer != nullptr)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ does not support a global quantizer.\n");
+                    return false;
+                }
+
+                if (p_opt.m_enableDeltaEncoding)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ does not support delta encoding.\n");
+                    return false;
+                }
+
+                if (p_opt.m_enablePostingListRearrange)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ does not support posting rearrangement.\n");
+                    return false;
+                }
+
+                if (useBatchRaBitQ && p_opt.m_enableDataCompression)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "STATIC PostingQuantizer=RaBitQBatch does not support posting compression.\n");
+                    return false;
+                }
+
+                if (p_opt.m_rerank > 0)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC RaBitQ posting formats do not alter legacy Rerank semantics; set Rerank=0 and use PostingRaBitQRerank with RaBitQBatch.\n");
+                    return false;
+                }
+
+                if (p_opt.m_postingRaBitQRerank < 0 ||
+                    (p_opt.m_postingRaBitQRerank > 0 &&
+                     p_opt.m_postingRaBitQRerank < p_opt.m_searchInternalResultNum))
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "PostingRaBitQRerank must be 0 or at least SearchInternalResultNum (%d).\n",
+                        p_opt.m_searchInternalResultNum);
+                    return false;
+                }
+                if (useLegacyRaBitQ && p_opt.m_postingRaBitQRerank > 0)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "PostingRaBitQRerank is supported only by PostingQuantizer=RaBitQBatch.\n");
+                    return false;
+                }
+
+                if (p_opt.m_postingQuantizerFile.empty())
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ requires PostingQuantizerFile to point to a v3 RaBitQ model.\n");
+                    return false;
+                }
+
+                const std::string postingQuantizerPath = ResolvePostingQuantizerPath(p_opt);
+                if (!LoadPostingQuantizer(postingQuantizerPath)) return false;
+
+                if (m_postingQuantizer->Dimension() != p_opt.m_dim)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "STATIC PostingQuantizer=RaBitQ dimension mismatch: model=%d index=%d.\n",
+                        m_postingQuantizer->Dimension(),
+                        p_opt.m_dim);
+                    return false;
+                }
+
+                if (m_postingQuantizer->GetMetric() != p_opt.m_distCalcMethod)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "STATIC PostingQuantizer=RaBitQ metric mismatch: model=%s index=%s.\n",
+                        Helper::Convert::ConvertToString(m_postingQuantizer->GetMetric()).c_str(),
+                        Helper::Convert::ConvertToString(p_opt.m_distCalcMethod).c_str());
+                    return false;
+                }
+
+                m_splitCodeLayout = m_postingQuantizer->GetSplitCodeLayout();
+                if (m_splitCodeLayout.binaryBytes == 0 || m_splitCodeLayout.totalBytes == 0)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ produced an empty split-code layout.\n");
+                    return false;
+                }
+
+                if (useBatchRaBitQ)
+                {
+                    m_splitBatchLayout = m_postingQuantizer->GetSplitBatchLayout();
+                    if (m_splitBatchLayout.batchSize == 0 ||
+                        m_splitBatchLayout.binaryBytes == 0 ||
+                        ExpectedRaBitQBatchRecordSize() >
+                            static_cast<size_t>((std::numeric_limits<int>::max)()))
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "STATIC PostingQuantizer=RaBitQBatch produced an invalid batch layout.\n");
+                        return false;
+                    }
+                    m_postingFormat = StaticPostingFormat::RaBitQBatch;
+                }
+                else
+                {
+                    m_postingFormat = StaticPostingFormat::RaBitQSplit;
+                }
+                return true;
+            }
+
+            BatchPostingData BuildRaBitQBatchPosting(
+                int p_postingListID,
+                size_t p_postingListSize,
+                Selection& p_selections,
+                const std::shared_ptr<VectorSet>& p_fullVectors,
+                COMMON::Dataset<SizeType>& p_localToGlobal) const
+            {
+                if (!UseRaBitQBatchPosting() || p_fullVectors == nullptr)
+                {
+                    throw std::runtime_error("Invalid STATIC RaBitQ batch posting build");
+                }
+
+                BatchPostingData result;
+                result.centroid.assign(static_cast<size_t>(m_opt->m_dim), 0.0F);
+                std::vector<SizeType> storedIDs(p_postingListSize);
+                std::vector<float> vectors(
+                    p_postingListSize * static_cast<size_t>(m_opt->m_dim));
+                size_t selectionIndex = p_selections.lower_bound(p_postingListID);
+                for (size_t i = 0; i < p_postingListSize; ++i)
+                {
+                    const Edge& selection = p_selections[selectionIndex++];
+                    if (selection.node != p_postingListID)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Selection ID NOT MATCH! node:%d offset:%zu\n",
+                            p_postingListID,
+                            selectionIndex - 1);
+                        throw std::runtime_error("Selection ID mismatch");
+                    }
+
+                    const SizeType localVID = selection.tonode;
+                    const auto* vector = reinterpret_cast<const float*>(
+                        p_fullVectors->GetVector(localVID));
+                    if (vector == nullptr)
+                    {
+                        throw std::runtime_error("Missing STATIC RaBitQ batch source vector");
+                    }
+                    std::copy(
+                        vector,
+                        vector + m_opt->m_dim,
+                        vectors.begin() + i * static_cast<size_t>(m_opt->m_dim));
+                    for (DimensionType dim = 0; dim < m_opt->m_dim; ++dim)
+                    {
+                        result.centroid[static_cast<size_t>(dim)] += vector[dim];
+                    }
+
+                    storedIDs[i] = localVID;
+                    if (p_localToGlobal.R() > 0)
+                    {
+                        storedIDs[i] = *(p_localToGlobal[localVID]);
+                    }
+                }
+
+                if (p_postingListSize > 0)
+                {
+                    const float scale = 1.0F / static_cast<float>(p_postingListSize);
+                    for (float& value : result.centroid) value *= scale;
+                }
+
+                const size_t batchCount = RaBitQBatchCount(p_postingListSize);
+                result.binary.reserve(batchCount * ExpectedRaBitQBatchRecordSize());
+                result.extended.reserve(batchCount * m_splitBatchLayout.extendedBytes);
+                if (m_opt->m_postingRaBitQRerank > 0)
+                {
+                    result.raw.assign(
+                        reinterpret_cast<const char*>(vectors.data()),
+                        vectors.size() * sizeof(float));
+                }
+
+                for (size_t batch = 0; batch < batchCount; ++batch)
+                {
+                    const size_t first = batch * m_splitBatchLayout.batchSize;
+                    const size_t validCount = std::min(
+                        m_splitBatchLayout.batchSize, p_postingListSize - first);
+                    std::vector<std::uint8_t> binary(
+                        m_splitBatchLayout.binaryBytes, 0);
+                    std::vector<std::uint8_t> extended(
+                        m_splitBatchLayout.extendedBytes, 0);
+                    size_t encodedCount = 0;
+                    if (m_postingQuantizer->QuantizeSplitBatch(
+                            vectors.data() + first * static_cast<size_t>(m_opt->m_dim),
+                            validCount,
+                            result.centroid.data(),
+                            binary.data(),
+                            extended.empty() ? nullptr : extended.data(),
+                            encodedCount) != ErrorCode::Success ||
+                        encodedCount != validCount)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Failed to encode STATIC RaBitQ batch posting %d batch %zu.\n",
+                            p_postingListID,
+                            batch);
+                        throw std::runtime_error("Failed STATIC RaBitQ batch encoding");
+                    }
+
+                    BatchRecordHeader recordHeader;
+                    recordHeader.validCount = static_cast<std::uint32_t>(validCount);
+                    result.binary.append(
+                        reinterpret_cast<const char*>(&recordHeader),
+                        sizeof(recordHeader));
+                    for (size_t i = 0; i < m_splitBatchLayout.batchSize; ++i)
+                    {
+                        const SizeType id = i < validCount ? storedIDs[first + i] : -1;
+                        result.binary.append(
+                            reinterpret_cast<const char*>(&id), sizeof(id));
+                    }
+                    result.binary.append(
+                        reinterpret_cast<const char*>(binary.data()), binary.size());
+                    result.extended.append(
+                        reinterpret_cast<const char*>(extended.data()), extended.size());
+                }
+                return result;
+            }
+
+            ErrorCode ProcessRaBitQPostingList(
+                SizeType p_localPostingID,
+                ExtraWorkSpace* p_exWorkSpace,
+                COMMON::QueryResultSet<ValueType>& p_queryResults,
+                ListInfo* p_listInfo,
+                char* p_postingListFullData,
+                std::vector<BasicResult>* p_results = nullptr,
+                std::vector<BatchCandidate>* p_batchCandidates = nullptr,
+                QueryDiskStats* p_diskStats = nullptr) const
+            {
+                if (!UseRaBitQPosting() || m_postingQuantizer == nullptr || p_exWorkSpace == nullptr ||
+                    p_listInfo == nullptr || p_postingListFullData == nullptr)
+                {
+                    return ErrorCode::Fail;
+                }
+                if (UseRaBitQBatchPosting())
+                {
+                    return ProcessRaBitQBatchPostingList(
+                        p_exWorkSpace,
+                        p_queryResults,
+                        p_listInfo,
+                        p_postingListFullData,
+                        p_results,
+                        p_batchCandidates,
+                        p_diskStats);
+                }
+                if (p_queryResults.WithVec())
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "STATIC PostingQuantizer=RaBitQ does not support returning reconstructed vectors.\n");
+                    return ErrorCode::Undefined;
+                }
+
+                auto memoryIndex = m_headIndex->GetMemoryIndex();
+                if (memoryIndex == nullptr)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ could not access the head index.\n");
+                    return ErrorCode::Fail;
+                }
+
+                const auto* localCentroid =
+                    reinterpret_cast<const float*>(memoryIndex->GetSample(p_localPostingID));
+                if (localCentroid == nullptr)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ could not find centroid for posting %d.\n",
+                                 p_localPostingID);
+                    return ErrorCode::Fail;
+                }
+
+                COMMON::RaBitQQuantizer::SplitQueryContext queryContext;
+                if (m_postingQuantizer->PrepareSplitQueryContext(
+                        reinterpret_cast<const float*>(p_queryResults.GetTarget()),
+                        localCentroid,
+                        queryContext) != ErrorCode::Success)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "STATIC PostingQuantizer=RaBitQ failed to prepare query context for posting %d.\n",
+                                 p_localPostingID);
+                    return ErrorCode::Fail;
+                }
+
+                for (int i = 0; i < p_listInfo->listEleCount; ++i)
+                {
+                    const char* record = p_postingListFullData +
+                        static_cast<size_t>(i) * static_cast<size_t>(m_vectorInfoSize);
+                    SizeType vectorID = -1;
+                    std::memcpy(&vectorID, record, sizeof(SizeType));
+
+                    const auto* binaryCode = reinterpret_cast<const std::uint8_t*>(record + sizeof(SizeType));
+                    const auto oneBitEstimate =
+                        m_postingQuantizer->EstimateSplitDistance(queryContext, binaryCode);
+
+                    {
+                        std::lock_guard<std::mutex> guard(p_exWorkSpace->RaBitQPruningLock());
+                        if (p_exWorkSpace->Deduper().CheckAndSet(vectorID)) continue;
+                        if (p_results == nullptr &&
+                            p_exWorkSpace->CanPruneRaBitQCandidateUnlocked(oneBitEstimate.lowerBound))
+                        {
+                            continue;
+                        }
+                    }
+
+                    auto estimate = oneBitEstimate;
+                    if (m_splitCodeLayout.extendedBytes > 0)
+                    {
+                        const auto* extendedCode =
+                            binaryCode + m_splitCodeLayout.binaryBytes;
+                        estimate = m_postingQuantizer->EstimateSplitDistance(
+                            queryContext, binaryCode, extendedCode);
+                    }
+
+                    std::lock_guard<std::mutex> guard(p_exWorkSpace->RaBitQPruningLock());
+                    if (p_results == nullptr)
+                    {
+                        if (p_queryResults.AddPoint(vectorID, estimate.distance, ByteArray::c_empty))
+                        {
+                            p_exWorkSpace->RecordRaBitQCandidateUnlocked(
+                                vectorID, estimate.distance, estimate.upperBound);
+                        }
+                    }
+                    else
+                    {
+                        p_results->emplace_back(
+                            vectorID, estimate.distance, ByteArray::c_empty, ByteArray::c_empty);
+                    }
+                }
+
+                return ErrorCode::Success;
+            }
+
+            ErrorCode ReadBatchSidecar(
+                const std::vector<std::shared_ptr<Helper::DiskIO>>& p_sidecars,
+                int p_fileID,
+                std::uint64_t p_offset,
+                size_t p_bytes,
+                char* p_output,
+                QueryDiskStats* p_diskStats) const
+            {
+                if (p_fileID < 0 ||
+                    static_cast<size_t>(p_fileID) >= p_sidecars.size() ||
+                    p_sidecars[static_cast<size_t>(p_fileID)] == nullptr ||
+                    p_output == nullptr)
+                {
+                    return ErrorCode::DiskIOFail;
+                }
+                std::lock_guard<std::mutex> guard(
+                    *m_sidecarReadLocks[static_cast<size_t>(p_fileID)]);
+                if (p_diskStats != nullptr)
+                {
+                    p_diskStats->RecordRead(p_bytes);
+                }
+                return p_sidecars[static_cast<size_t>(p_fileID)]->ReadBinary(
+                           p_bytes, p_output, p_offset) == p_bytes
+                    ? ErrorCode::Success
+                    : ErrorCode::DiskIOFail;
+            }
+
+            ErrorCode ProcessRaBitQBatchPostingList(
+                ExtraWorkSpace* p_exWorkSpace,
+                COMMON::QueryResultSet<ValueType>& p_queryResults,
+                ListInfo* p_listInfo,
+                const char* p_postingListFullData,
+                std::vector<BasicResult>* p_results,
+                std::vector<BatchCandidate>* p_batchCandidates,
+                QueryDiskStats* p_diskStats) const
+            {
+                if (p_listInfo->listEleCount == 0)
+                {
+                    return ErrorCode::Success;
+                }
+                if (p_listInfo->centroid.size() !=
+                    static_cast<size_t>(m_opt->m_dim))
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Missing STATIC RaBitQ batch centroid for posting.\n");
+                    return ErrorCode::DiskIOFail;
+                }
+                if (p_queryResults.WithVec() &&
+                    m_opt->m_postingRaBitQRerank <= 0)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "STATIC PostingQuantizer=RaBitQBatch requires PostingRaBitQRerank>0 for WithVec.\n");
+                    return ErrorCode::Undefined;
+                }
+
+                COMMON::RaBitQQuantizer::SplitBatchQueryContext queryContext;
+                if (m_postingQuantizer->PrepareSplitBatchQueryContext(
+                        reinterpret_cast<const float*>(p_queryResults.GetTarget()),
+                        p_listInfo->centroid.data(),
+                        queryContext) != ErrorCode::Success)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Failed to prepare STATIC RaBitQ batch query context.\n");
+                    return ErrorCode::Fail;
+                }
+
+                const size_t batchCount =
+                    RaBitQBatchCount(p_listInfo->listEleCount);
+                size_t remaining = static_cast<size_t>(p_listInfo->listEleCount);
+                for (size_t batch = 0; batch < batchCount; ++batch)
+                {
+                    const char* record = p_postingListFullData +
+                        batch * ExpectedRaBitQBatchRecordSize();
+                    BatchRecordHeader recordHeader;
+                    std::memcpy(&recordHeader, record, sizeof(recordHeader));
+                    const size_t expectedValid = std::min(
+                        m_splitBatchLayout.batchSize, remaining);
+                    if (recordHeader.validCount != expectedValid ||
+                        recordHeader.reserved != 0)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Corrupt STATIC RaBitQ batch valid-count metadata.\n");
+                        return ErrorCode::DiskIOFail;
+                    }
+                    remaining -= expectedValid;
+
+                    const char* ids = record + sizeof(BatchRecordHeader);
+                    const auto* binary = reinterpret_cast<const std::uint8_t*>(
+                        ids + m_splitBatchLayout.batchSize * sizeof(SizeType));
+                    COMMON::RaBitQQuantizer::SplitBatchDistanceEstimates estimates;
+                    if (m_postingQuantizer->EstimateSplitBatchDistances(
+                            queryContext,
+                            binary,
+                            expectedValid,
+                            estimates) != ErrorCode::Success)
+                    {
+                        return ErrorCode::Fail;
+                    }
+
+                    struct Survivor
+                    {
+                        size_t index;
+                        SizeType vectorID;
+                    };
+                    std::vector<Survivor> survivors;
+                    survivors.reserve(expectedValid);
+                    for (size_t i = 0; i < expectedValid; ++i)
+                    {
+                        SizeType vectorID = -1;
+                        std::memcpy(
+                            &vectorID,
+                            ids + i * sizeof(SizeType),
+                            sizeof(SizeType));
+                        std::lock_guard<std::mutex> guard(
+                            p_exWorkSpace->RaBitQPruningLock());
+                        if (vectorID < 0 ||
+                            p_exWorkSpace->Deduper().CheckAndSet(vectorID))
+                        {
+                            continue;
+                        }
+                        if (p_results == nullptr &&
+                            p_exWorkSpace->CanPruneRaBitQCandidateUnlocked(
+                                estimates.lowerBounds[i]))
+                        {
+                            continue;
+                        }
+                        survivors.push_back({i, vectorID});
+                    }
+
+                    if (survivors.empty()) continue;
+
+                    std::vector<std::uint8_t> extended;
+                    if (m_splitBatchLayout.extendedBytes > 0)
+                    {
+                        const std::uint64_t relativeOffset =
+                            batch * m_splitBatchLayout.extendedBytes;
+                        if (relativeOffset > p_listInfo->extendedBytes ||
+                            m_splitBatchLayout.extendedBytes >
+                                p_listInfo->extendedBytes - relativeOffset)
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Corrupt STATIC RaBitQ extended sidecar bounds.\n");
+                            return ErrorCode::DiskIOFail;
+                        }
+                        extended.resize(m_splitBatchLayout.extendedBytes);
+                        if (ReadBatchSidecar(
+                                m_extendedSidecars,
+                                p_listInfo->fileID,
+                                p_listInfo->extendedOffset + relativeOffset,
+                                extended.size(),
+                                reinterpret_cast<char*>(extended.data()),
+                                p_diskStats) !=
+                            ErrorCode::Success)
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Failed to read STATIC RaBitQ extended batch.\n");
+                            return ErrorCode::DiskIOFail;
+                        }
+                    }
+
+                    for (const auto& survivor : survivors)
+                    {
+                        COMMON::RaBitQQuantizer::SplitDistanceEstimate estimate;
+                        if (m_postingQuantizer->BoostSplitBatchDistance(
+                                queryContext,
+                                binary,
+                                extended.empty() ? nullptr : extended.data(),
+                                expectedValid,
+                                survivor.index,
+                                estimate) != ErrorCode::Success)
+                        {
+                            return ErrorCode::Fail;
+                        }
+
+                        std::lock_guard<std::mutex> guard(
+                            p_exWorkSpace->RaBitQPruningLock());
+                        if (p_batchCandidates != nullptr)
+                        {
+                            BatchCandidate candidate;
+                            candidate.vectorID = survivor.vectorID;
+                            candidate.distance = estimate.distance;
+                            candidate.upperBound = estimate.upperBound;
+                            candidate.fileID = p_listInfo->fileID;
+                            candidate.rawOffset = p_listInfo->rawOffset +
+                                (batch * m_splitBatchLayout.batchSize +
+                                 survivor.index) *
+                                    static_cast<std::uint64_t>(m_opt->m_dim) *
+                                    sizeof(float);
+                            p_batchCandidates->emplace_back(candidate);
+                        }
+                        else if (p_results != nullptr)
+                        {
+                            p_results->emplace_back(
+                                survivor.vectorID,
+                                estimate.distance,
+                                ByteArray::c_empty,
+                                ByteArray::c_empty);
+                        }
+                        else if (p_queryResults.AddPoint(
+                                     survivor.vectorID,
+                                     estimate.distance,
+                                     ByteArray::c_empty))
+                        {
+                            p_exWorkSpace->RecordRaBitQCandidateUnlocked(
+                                survivor.vectorID,
+                                estimate.distance,
+                                estimate.upperBound);
+                        }
+                    }
+                }
+                return ErrorCode::Success;
+            }
+
+            ErrorCode FinalizeRaBitQBatchRerank(
+                std::vector<BatchCandidate>& p_candidates,
+                ExtraWorkSpace* p_exWorkSpace,
+                COMMON::QueryResultSet<ValueType>& p_queryResults,
+                std::vector<BasicResult>* p_results = nullptr,
+                QueryDiskStats* p_diskStats = nullptr) const
+            {
+                if (m_opt->m_postingRaBitQRerank <= 0) return ErrorCode::Success;
+                std::sort(
+                    p_candidates.begin(),
+                    p_candidates.end(),
+                    [](const BatchCandidate& left, const BatchCandidate& right)
+                    {
+                        return left.distance < right.distance ||
+                            (left.distance == right.distance &&
+                             left.vectorID < right.vectorID);
+                    });
+                if (p_candidates.size() >
+                    static_cast<size_t>(m_opt->m_postingRaBitQRerank))
+                {
+                    p_candidates.resize(
+                        static_cast<size_t>(m_opt->m_postingRaBitQRerank));
+                }
+
+                std::vector<float> raw(static_cast<size_t>(m_opt->m_dim));
+                const auto* query =
+                    reinterpret_cast<const float*>(p_queryResults.GetTarget());
+                for (const auto& candidate : p_candidates)
+                {
+                    if (ReadBatchSidecar(
+                            m_rawSidecars,
+                            candidate.fileID,
+                            candidate.rawOffset,
+                            raw.size() * sizeof(float),
+                            reinterpret_cast<char*>(raw.data()),
+                            p_diskStats) !=
+                        ErrorCode::Success)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Failed to read STATIC RaBitQ raw rerank vector.\n");
+                        return ErrorCode::DiskIOFail;
+                    }
+                    const float exactDistance =
+                        COMMON::DistanceUtils::ComputeDistance(
+                            query,
+                            raw.data(),
+                            m_opt->m_dim,
+                            m_opt->m_distCalcMethod);
+                    ByteArray vector = p_queryResults.WithVec()
+                        ? ByteArray::Alloc(
+                            reinterpret_cast<std::uint8_t*>(raw.data()),
+                            raw.size() * sizeof(float))
+                        : ByteArray::c_empty;
+                    if (p_results != nullptr)
+                    {
+                        p_results->emplace_back(
+                            candidate.vectorID,
+                            exactDistance,
+                            ByteArray::c_empty,
+                            vector);
+                    }
+                    else if (p_queryResults.AddPoint(
+                                 candidate.vectorID, exactDistance, vector))
+                    {
+                        p_exWorkSpace->RecordRaBitQCandidate(
+                            candidate.vectorID, exactDistance, exactDistance);
+                    }
+                }
+                return ErrorCode::Success;
+            }
 
             int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& p_listInfos)
             {
+                std::error_code fileSizeError;
+                const std::uintmax_t rawFileSize =
+                    std::filesystem::file_size(p_file, fileSizeError);
+                if (fileSizeError || rawFileSize == 0 ||
+                    rawFileSize > std::numeric_limits<std::uint64_t>::max())
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Failed to stat posting file %s.\n",
+                        p_file.c_str());
+                    throw std::runtime_error(
+                        "Failed stat file in LoadingHeadInfo");
+                }
+                const std::uint64_t fileSize =
+                    static_cast<std::uint64_t>(rawFileSize);
+
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open file: %s\n", p_file.c_str());
@@ -1246,32 +2901,198 @@ namespace SPTAG
                 SizeType m_listCount;
                 SizeType m_totalDocumentCount;
                 SizeType m_listPageOffset;
+                if (UseRaBitQPosting())
+                {
+                    StaticPostingHeader header;
+                    if (ptr->ReadBinary(sizeof(header), reinterpret_cast<char*>(&header)) != sizeof(header))
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read RaBitQ posting header.\n");
+                        throw std::runtime_error("Failed read RaBitQ posting header");
+                    }
 
-                if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                    const std::uint32_t expectedVersion = UseRaBitQBatchPosting()
+                        ? kStaticBatchPostingHeaderVersion
+                        : kStaticPostingHeaderVersion;
+                    if (header.magic != kStaticPostingHeaderMagic ||
+                        header.version != expectedVersion ||
+                        header.format != static_cast<std::uint32_t>(m_postingFormat) ||
+                        header.reserved != 0)
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Unsupported STATIC RaBitQ posting file format in %s.\n",
+                                     p_file.c_str());
+                        throw std::runtime_error("Unsupported STATIC RaBitQ posting file format");
+                    }
+
+                    if (UseRaBitQBatchPosting())
+                    {
+                        StaticBatchPostingHeader batchHeader;
+                        batchHeader.base = header;
+                        constexpr size_t extraHeaderBytes =
+                            sizeof(StaticBatchPostingHeader) -
+                            sizeof(StaticPostingHeader);
+                        if (ptr->ReadBinary(
+                                extraHeaderBytes,
+                                reinterpret_cast<char*>(&batchHeader) +
+                                    sizeof(StaticPostingHeader)) !=
+                            extraHeaderBytes)
+                        {
+                            throw std::runtime_error(
+                                "Failed read STATIC RaBitQ batch posting header");
+                        }
+                        const std::uint32_t expectedFlags =
+                            m_opt->m_postingRaBitQRerank > 0
+                            ? kBatchPostingRawFlag
+                            : 0U;
+                        if (batchHeader.batchSize != m_splitBatchLayout.batchSize ||
+                            batchHeader.batchRecordBytes !=
+                                ExpectedRaBitQBatchRecordSize() ||
+                            batchHeader.extendedBytesPerVector !=
+                                m_splitBatchLayout.extendedBytesPerVector ||
+                            batchHeader.flags != expectedFlags)
+                        {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "STATIC RaBitQ batch layout/options mismatch in %s.\n",
+                                p_file.c_str());
+                            throw std::runtime_error(
+                                "STATIC RaBitQ batch layout/options mismatch");
+                        }
+                    }
+
+                    m_listCount = header.listCount;
+                    m_totalDocumentCount = header.totalDocumentCount;
+                    m_iDataDimension = header.dataDimension;
+                    m_listPageOffset = header.listPageOffset;
+                    const int expectedVectorInfoSize = static_cast<int>(
+                        UseRaBitQBatchPosting()
+                            ? ExpectedRaBitQBatchRecordSize()
+                            : ExpectedRaBitQVectorInfoSize());
+                    if (header.dataDimension != m_opt->m_dim ||
+                        header.dataDimension != m_postingQuantizer->Dimension())
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "STATIC PostingQuantizer=RaBitQ dimension mismatch while loading %s: file=%d index=%d model=%d.\n",
+                            p_file.c_str(),
+                            header.dataDimension,
+                            m_opt->m_dim,
+                            m_postingQuantizer->Dimension());
+                        throw std::runtime_error("STATIC RaBitQ posting dimension mismatch");
+                    }
+                    if (header.vectorInfoSize != expectedVectorInfoSize)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "STATIC PostingQuantizer=RaBitQ record size mismatch while loading %s: file=%d expected=%d.\n",
+                            p_file.c_str(),
+                            header.vectorInfoSize,
+                            expectedVectorInfoSize);
+                        throw std::runtime_error("STATIC RaBitQ posting record size mismatch");
+                    }
+                    if (m_vectorInfoSize == 0) m_vectorInfoSize = header.vectorInfoSize;
+                    else if (m_vectorInfoSize != header.vectorInfoSize)
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "STATIC PostingQuantizer=RaBitQ record size changed across files.\n");
+                        throw std::runtime_error("STATIC RaBitQ posting record size mismatch");
+                    }
+                    if (header.postingQuantizerFingerprint != m_postingQuantizerFingerprint)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "STATIC PostingQuantizer=RaBitQ fingerprint mismatch while loading %s: file=%llu model=%llu.\n",
+                            p_file.c_str(),
+                            static_cast<unsigned long long>(header.postingQuantizerFingerprint),
+                            static_cast<unsigned long long>(m_postingQuantizerFingerprint));
+                        throw std::runtime_error("STATIC RaBitQ posting quantizer fingerprint mismatch");
+                    }
                 }
-                if (ptr->ReadBinary(sizeof(m_totalDocumentCount), reinterpret_cast<char*>(&m_totalDocumentCount)) != sizeof(m_totalDocumentCount)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
-                }
-                if (ptr->ReadBinary(sizeof(m_iDataDimension), reinterpret_cast<char*>(&m_iDataDimension)) != sizeof(m_iDataDimension)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
-                }
-                if (ptr->ReadBinary(sizeof(m_listPageOffset), reinterpret_cast<char*>(&m_listPageOffset)) != sizeof(m_listPageOffset)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                else
+                {
+                    if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                    }
+                    if (ptr->ReadBinary(sizeof(m_totalDocumentCount), reinterpret_cast<char*>(&m_totalDocumentCount)) != sizeof(m_totalDocumentCount)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                    }
+                    if (ptr->ReadBinary(sizeof(m_iDataDimension), reinterpret_cast<char*>(&m_iDataDimension)) != sizeof(m_iDataDimension)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                    }
+                    if (ptr->ReadBinary(sizeof(m_listPageOffset), reinterpret_cast<char*>(&m_listPageOffset)) != sizeof(m_listPageOffset)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                    }
+
+                    if (m_vectorInfoSize == 0) m_vectorInfoSize = m_iDataDimension * sizeof(ValueType) + sizeof(SizeType);
+                    else if (m_vectorInfoSize != m_iDataDimension * sizeof(ValueType) + sizeof(SizeType)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
+                        throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
+                    }
                 }
 
-                if (m_vectorInfoSize == 0) m_vectorInfoSize = m_iDataDimension * sizeof(ValueType) + sizeof(SizeType);
-                else if (m_vectorInfoSize != m_iDataDimension * sizeof(ValueType) + sizeof(SizeType)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
-                    throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
+                const std::uint64_t headerBytes = UseRaBitQBatchPosting()
+                    ? sizeof(StaticBatchPostingHeader)
+                    : UseRaBitQPosting()
+                        ? sizeof(StaticPostingHeader)
+                        : sizeof(SizeType) * 3 + sizeof(int);
+                const std::uint64_t metadataRecordBytes =
+                    (m_enableDataCompression ? sizeof(size_t) : 0) +
+                    sizeof(int) + sizeof(std::uint16_t) + sizeof(int) +
+                    sizeof(std::uint16_t) + sizeof(SizeType);
+                if (m_listCount < 0 || m_totalDocumentCount < 0 ||
+                    m_listPageOffset < 0 || m_iDataDimension <= 0 ||
+                    m_iDataDimension != m_opt->m_dim ||
+                    m_listCount > m_totalDocumentCount)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Invalid posting header metadata in %s.\n",
+                        p_file.c_str());
+                    throw std::runtime_error(
+                        "Invalid posting header in LoadingHeadInfo");
+                }
+                const std::uint64_t listCount =
+                    static_cast<std::uint64_t>(m_listCount);
+                const std::uint64_t listPageOffset =
+                    static_cast<std::uint64_t>(m_listPageOffset);
+                if (listPageOffset >
+                    (std::numeric_limits<std::uint64_t>::max() >> PageSizeEx))
+                {
+                    throw std::runtime_error(
+                        "Posting data offset overflow in LoadingHeadInfo");
+                }
+                const std::uint64_t postingDataOffset =
+                    listPageOffset << PageSizeEx;
+                if (postingDataOffset > fileSize ||
+                    listCount >
+                        (std::numeric_limits<std::uint64_t>::max() -
+                         headerBytes) /
+                            metadataRecordBytes ||
+                    headerBytes + listCount * metadataRecordBytes >
+                        postingDataOffset)
+                {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Posting metadata exceeds file bounds in %s.\n",
+                        p_file.c_str());
+                    throw std::runtime_error(
+                        "Posting metadata bounds failure in LoadingHeadInfo");
                 }
 
-                size_t totalListCount = p_listInfos.size();
-                p_listInfos.resize(totalListCount + m_listCount);
+                const size_t totalListCount = p_listInfos.size();
+                if (listCount >
+                    p_listInfos.max_size() - totalListCount)
+                {
+                    throw std::runtime_error(
+                        "Posting list count overflow in LoadingHeadInfo");
+                }
+                p_listInfos.resize(
+                    totalListCount + static_cast<size_t>(listCount));
+                std::uint64_t metadataBytesRead = headerBytes;
 
                 size_t totalListElementCount = 0;
 
@@ -1279,46 +3100,162 @@ namespace SPTAG
 
                 size_t biglistCount = 0;
                 size_t biglistElementCount = 0;
-                int pageNum;
                 for (int i = 0; i < m_listCount; ++i)
                 {
                     ListInfo* listInfo = &(p_listInfos[totalListCount + i]);
+                    listInfo->fileID = static_cast<int>(m_indexFiles.size()) - 1;
 
+                    size_t storedListTotalBytes = 0;
                     if (m_enableDataCompression)
                     {
-                        if (ptr->ReadBinary(sizeof(listInfo->listTotalBytes), reinterpret_cast<char*>(&(listInfo->listTotalBytes))) != sizeof(listInfo->listTotalBytes)) {
+                        if (ptr->ReadBinary(sizeof(storedListTotalBytes), reinterpret_cast<char*>(&storedListTotalBytes)) != sizeof(storedListTotalBytes)) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                             throw std::runtime_error("Failed read file in LoadingHeadInfo");
                         }
                     }
-                    if (ptr->ReadBinary(sizeof(pageNum), reinterpret_cast<char*>(&(pageNum))) != sizeof(pageNum)) {
+                    int pageNum = 0;
+                    std::uint16_t pageOffset = 0;
+                    int listEleCount = 0;
+                    std::uint16_t listPageCount = 0;
+                    SizeType globalVectorID = -1;
+                    if (ptr->ReadBinary(sizeof(pageNum), reinterpret_cast<char*>(&pageNum)) != sizeof(pageNum)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    if (ptr->ReadBinary(sizeof(listInfo->pageOffset), reinterpret_cast<char*>(&(listInfo->pageOffset))) != sizeof(listInfo->pageOffset)) {
+                    if (ptr->ReadBinary(sizeof(pageOffset), reinterpret_cast<char*>(&pageOffset)) != sizeof(pageOffset)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    if (ptr->ReadBinary(sizeof(listInfo->listEleCount), reinterpret_cast<char*>(&(listInfo->listEleCount))) != sizeof(listInfo->listEleCount)) {
+                    if (ptr->ReadBinary(sizeof(listEleCount), reinterpret_cast<char*>(&listEleCount)) != sizeof(listEleCount)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    if (ptr->ReadBinary(sizeof(listInfo->listPageCount), reinterpret_cast<char*>(&(listInfo->listPageCount))) != sizeof(listInfo->listPageCount)) {
+                    if (ptr->ReadBinary(sizeof(listPageCount), reinterpret_cast<char*>(&listPageCount)) != sizeof(listPageCount)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    SizeType globalVectorID;
                     if (ptr->ReadBinary(sizeof(globalVectorID), reinterpret_cast<char*>(&(globalVectorID))) != sizeof(globalVectorID)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    m_globalVectorIDToHeadMap.emplace(globalVectorID, totalListCount + i);
-                    listInfo->listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
+                    metadataBytesRead += metadataRecordBytes;
+
+                    if (pageNum < 0 || pageOffset >= PageSize ||
+                        listEleCount < 0 || globalVectorID < 0 ||
+                        (listEleCount == 0 &&
+                         (pageOffset != 0 || listPageCount != 0)) ||
+                        (listEleCount > 0 && listPageCount == 0))
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Invalid posting-list metadata in %s at list %d.\n",
+                            p_file.c_str(),
+                            i);
+                        throw std::runtime_error(
+                            "Invalid list metadata in LoadingHeadInfo");
+                    }
+                    const std::uint64_t pageNumber =
+                        static_cast<std::uint64_t>(pageNum);
+                    if (pageNumber >
+                        (std::numeric_limits<std::uint64_t>::max() >>
+                         PageSizeEx) -
+                            listPageOffset)
+                    {
+                        throw std::runtime_error(
+                            "Posting list offset overflow in LoadingHeadInfo");
+                    }
+                    const std::uint64_t listOffset =
+                        (listPageOffset + pageNumber) << PageSizeEx;
+                    const std::uint64_t listExtent =
+                        static_cast<std::uint64_t>(listPageCount) <<
+                        PageSizeEx;
+                    if (listOffset > fileSize ||
+                        listExtent > fileSize - listOffset)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Posting-list extent exceeds %s at list %d.\n",
+                            p_file.c_str(),
+                            i);
+                        throw std::runtime_error(
+                            "Posting list extent failure in LoadingHeadInfo");
+                    }
+                    const size_t requiredPostingBytes =
+                        m_enableDataCompression
+                        ? storedListTotalBytes
+                        : UseRaBitQBatchPosting()
+                            ? RaBitQBatchPostingBytes(
+                                  static_cast<size_t>(listEleCount))
+                            : static_cast<size_t>(listEleCount) *
+                                  static_cast<size_t>(m_vectorInfoSize);
+                    if (requiredPostingBytes >
+                        listExtent - pageOffset)
+                    {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Posting-list payload exceeds its extent in %s at list %d.\n",
+                            p_file.c_str(),
+                            i);
+                        throw std::runtime_error(
+                            "Posting list payload failure in LoadingHeadInfo");
+                    }
+                    if (!m_globalVectorIDToHeadMap.emplace(
+                            globalVectorID, totalListCount + i).second)
+                    {
+                        throw std::runtime_error(
+                            "Duplicate posting head ID in LoadingHeadInfo");
+                    }
+                    listInfo->listTotalBytes = storedListTotalBytes;
+                    listInfo->pageOffset = pageOffset;
+                    listInfo->listEleCount = listEleCount;
+                    listInfo->listPageCount = listPageCount;
+                    listInfo->listOffset = listOffset;
                     if (!m_enableDataCompression)
                     {
-                        listInfo->listTotalBytes = listInfo->listEleCount * m_vectorInfoSize;
-                        listInfo->listEleCount = min(listInfo->listEleCount, (min(static_cast<int>(listInfo->listPageCount), p_postingPageLimit) << PageSizeEx) / m_vectorInfoSize);
-                        listInfo->listPageCount = static_cast<std::uint16_t>(ceil((m_vectorInfoSize * listInfo->listEleCount + listInfo->pageOffset) * 1.0 / (1 << PageSizeEx)));
+                        if (UseRaBitQBatchPosting())
+                        {
+                            listInfo->listTotalBytes =
+                                RaBitQBatchPostingBytes(listInfo->listEleCount);
+                            const size_t readableBytes =
+                                (static_cast<size_t>(min(
+                                     static_cast<int>(listInfo->listPageCount),
+                                     p_postingPageLimit))
+                                 << PageSizeEx);
+                            const size_t readableRecords =
+                                readableBytes > listInfo->pageOffset
+                                ? (readableBytes - listInfo->pageOffset) /
+                                    static_cast<size_t>(m_vectorInfoSize)
+                                : 0;
+                            listInfo->listEleCount = min(
+                                listInfo->listEleCount,
+                                static_cast<int>(
+                                    readableRecords *
+                                    m_splitBatchLayout.batchSize));
+                            const size_t postingBytes =
+                                RaBitQBatchPostingBytes(listInfo->listEleCount);
+                            listInfo->listPageCount =
+                                static_cast<std::uint16_t>(
+                                    (postingBytes + listInfo->pageOffset +
+                                     PageSize - 1) /
+                                    PageSize);
+                        }
+                        else
+                        {
+                            listInfo->listTotalBytes =
+                                listInfo->listEleCount * m_vectorInfoSize;
+                            listInfo->listEleCount = min(
+                                listInfo->listEleCount,
+                                (min(
+                                     static_cast<int>(listInfo->listPageCount),
+                                     p_postingPageLimit)
+                                 << PageSizeEx) /
+                                    m_vectorInfoSize);
+                            listInfo->listPageCount =
+                                static_cast<std::uint16_t>(ceil(
+                                    (m_vectorInfoSize * listInfo->listEleCount +
+                                     listInfo->pageOffset) *
+                                    1.0 / (1 << PageSizeEx)));
+                        }
                     }
                     totalListElementCount += listInfo->listEleCount;
                     int pageCount = listInfo->listPageCount;
@@ -1341,24 +3278,37 @@ namespace SPTAG
 
                 if (m_enableDataCompression && m_enableDictTraining)
                 {
-                    size_t dictBufferSize;
+                    if (metadataBytesRead + sizeof(size_t) >
+                        postingDataOffset)
+                    {
+                        throw std::runtime_error(
+                            "Compression dictionary metadata exceeds posting header");
+                    }
+                    size_t dictBufferSize = 0;
                     if (ptr->ReadBinary(sizeof(size_t), reinterpret_cast<char*>(&dictBufferSize)) != sizeof(dictBufferSize)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    char* dictBuffer = new char[dictBufferSize];
-                    if (ptr->ReadBinary(dictBufferSize, dictBuffer) != dictBufferSize) {
+                    metadataBytesRead += sizeof(size_t);
+                    if (dictBufferSize >
+                        postingDataOffset - metadataBytesRead)
+                    {
+                        throw std::runtime_error(
+                            "Compression dictionary exceeds posting metadata bounds");
+                    }
+                    std::vector<char> dictBuffer(dictBufferSize);
+                    if (ptr->ReadBinary(dictBufferSize, dictBuffer.data()) != dictBufferSize) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     try {
-                        m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
+                        m_pCompressor->SetDictBuffer(
+                            std::string(dictBuffer.data(), dictBufferSize));
                     }
                     catch (std::runtime_error& err) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file: %s \n", err.what());
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
-                    delete[] dictBuffer;
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
@@ -1503,7 +3453,8 @@ namespace SPTAG
                 const std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                 const std::vector<int>& p_postingOrderInIndex,
                 std::shared_ptr<VectorSet> p_fullVectors, COMMON::Dataset<SizeType>& p_headToLocal, COMMON::Dataset<SizeType>& p_localToGlobal,
-                size_t p_postingListOffset)
+                size_t p_postingListOffset,
+                int p_fileID)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start output...\n");
 
@@ -1522,8 +3473,82 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_outputFile.c_str());
                     throw std::runtime_error("Failed to open file for SSD index save");
                 }
+
+                std::shared_ptr<Helper::DiskIO> extendedOutput;
+                std::shared_ptr<Helper::DiskIO> rawOutput;
+                BatchSidecarHeader extendedHeader;
+                BatchSidecarHeader rawHeader;
+                std::vector<BatchSidecarListInfo> extendedInfos;
+                std::vector<BatchSidecarListInfo> rawInfos;
+                if (UseRaBitQBatchPosting())
+                {
+                    auto initializeSidecar =
+                        [&](const std::string& p_path,
+                            BatchSidecarKind p_kind,
+                            std::uint64_t p_dataBytesPerRecord,
+                            std::shared_ptr<Helper::DiskIO>& p_output,
+                            BatchSidecarHeader& p_header,
+                            std::vector<BatchSidecarListInfo>& p_infos)
+                    {
+                        p_output = SPTAG::f_createIO();
+                        if (p_output == nullptr ||
+                            !p_output->Initialize(
+                                p_path.c_str(), std::ios::binary | std::ios::out))
+                        {
+                            throw std::runtime_error(
+                                "Failed to create STATIC RaBitQ batch sidecar");
+                        }
+                        p_header.magic = kBatchSidecarMagic;
+                        p_header.version = kBatchSidecarVersion;
+                        p_header.kind = static_cast<std::uint32_t>(p_kind);
+                        p_header.layer = static_cast<std::uint32_t>(m_layer);
+                        p_header.fileID = static_cast<std::uint32_t>(p_fileID);
+                        p_header.listCount =
+                            static_cast<std::uint32_t>(p_postingListSizes.size());
+                        p_header.dimension =
+                            static_cast<std::uint32_t>(m_opt->m_dim);
+                        p_header.batchSize =
+                            static_cast<std::uint32_t>(m_splitBatchLayout.batchSize);
+                        p_header.postingQuantizerFingerprint =
+                            m_postingQuantizerFingerprint;
+                        p_header.dataBytesPerRecord = p_dataBytesPerRecord;
+                        p_infos.resize(p_postingListSizes.size());
+                        const size_t metadataBytes = sizeof(BatchSidecarHeader) +
+                            sizeof(BatchSidecarListInfo) * p_infos.size();
+                        std::vector<char> zeros(metadataBytes, 0);
+                        if (p_output->WriteBinary(zeros.size(), zeros.data()) !=
+                            zeros.size())
+                        {
+                            throw std::runtime_error(
+                                "Failed to reserve STATIC RaBitQ batch sidecar metadata");
+                        }
+                    };
+
+                    initializeSidecar(
+                        p_outputFile + kBatchExtendedSuffix,
+                        BatchSidecarKind::Extended,
+                        m_splitBatchLayout.extendedBytes,
+                        extendedOutput,
+                        extendedHeader,
+                        extendedInfos);
+                    if (m_opt->m_postingRaBitQRerank > 0)
+                    {
+                        initializeSidecar(
+                            p_outputFile + kBatchRawSuffix,
+                            BatchSidecarKind::Raw,
+                            static_cast<std::uint64_t>(m_opt->m_dim) *
+                                sizeof(float),
+                            rawOutput,
+                            rawHeader,
+                            rawInfos);
+                    }
+                }
                 // meta size of global info
-                std::uint64_t listOffset = sizeof(SizeType) * 3 + sizeof(int);
+                std::uint64_t listOffset = UseRaBitQBatchPosting()
+                    ? sizeof(StaticBatchPostingHeader)
+                    : UseRaBitQPosting()
+                        ? sizeof(StaticPostingHeader)
+                    : sizeof(SizeType) * 3 + sizeof(int);
                 // meta size of the posting lists
                 listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t) + sizeof(SizeType)) * p_postingListSizes.size();
                 // write listTotalBytes only when enabled data compression
@@ -1552,32 +3577,81 @@ namespace SPTAG
                     listOffset += paddingSize;
                 }
 
-                // Number of posting lists
-                SizeType iVal = static_cast<SizeType>(p_postingListSizes.size());
-                if (ptr->WriteBinary(sizeof(iVal), reinterpret_cast<char*>(&iVal)) != sizeof(iVal)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
+                if (UseRaBitQPosting())
+                {
+                    StaticPostingHeader header;
+                    header.magic = kStaticPostingHeaderMagic;
+                    header.version = UseRaBitQBatchPosting()
+                        ? kStaticBatchPostingHeaderVersion
+                        : kStaticPostingHeaderVersion;
+                    header.format = static_cast<std::uint32_t>(m_postingFormat);
+                    header.reserved = 0;
+                    header.listCount = static_cast<SizeType>(p_postingListSizes.size());
+                    header.totalDocumentCount = static_cast<SizeType>(p_fullVectors->Count());
+                    header.dataDimension = static_cast<int>(p_fullVectors->Dimension());
+                    header.listPageOffset = static_cast<SizeType>(listOffset / PageSize);
+                    header.vectorInfoSize = static_cast<int>(p_spacePerVector);
+                    header.postingQuantizerFingerprint = m_postingQuantizerFingerprint;
+                    if (UseRaBitQBatchPosting())
+                    {
+                        StaticBatchPostingHeader batchHeader;
+                        batchHeader.base = header;
+                        batchHeader.batchSize =
+                            static_cast<std::uint32_t>(m_splitBatchLayout.batchSize);
+                        batchHeader.batchRecordBytes =
+                            static_cast<std::uint32_t>(ExpectedRaBitQBatchRecordSize());
+                        batchHeader.extendedBytesPerVector =
+                            static_cast<std::uint32_t>(
+                                m_splitBatchLayout.extendedBytesPerVector);
+                        batchHeader.flags = m_opt->m_postingRaBitQRerank > 0
+                            ? kBatchPostingRawFlag
+                            : 0U;
+                        if (ptr->WriteBinary(
+                                sizeof(batchHeader),
+                                reinterpret_cast<char*>(&batchHeader)) !=
+                            sizeof(batchHeader))
+                        {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                            throw std::runtime_error("Failed to write SSDIndex File");
+                        }
+                    }
+                    else if (ptr->WriteBinary(
+                                 sizeof(header), reinterpret_cast<char*>(&header)) !=
+                             sizeof(header))
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        throw std::runtime_error("Failed to write SSDIndex File");
+                    }
                 }
+                else
+                {
+                    // Number of posting lists
+                    SizeType iVal = static_cast<SizeType>(p_postingListSizes.size());
+                    if (ptr->WriteBinary(sizeof(iVal), reinterpret_cast<char*>(&iVal)) != sizeof(iVal)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        throw std::runtime_error("Failed to write SSDIndex File");
+                    }
 
-                // Number of vectors
-                iVal = static_cast<SizeType>(p_fullVectors->Count());
-                if (ptr->WriteBinary(sizeof(iVal), reinterpret_cast<char*>(&iVal)) != sizeof(iVal)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
-                }
+                    // Number of vectors
+                    iVal = static_cast<SizeType>(p_fullVectors->Count());
+                    if (ptr->WriteBinary(sizeof(iVal), reinterpret_cast<char*>(&iVal)) != sizeof(iVal)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        throw std::runtime_error("Failed to write SSDIndex File");
+                    }
 
-                // Vector dimension
-                int i32Val = static_cast<int>(p_fullVectors->Dimension());
-                if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
-                }
+                    // Vector dimension
+                    int i32Val = static_cast<int>(p_fullVectors->Dimension());
+                    if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        throw std::runtime_error("Failed to write SSDIndex File");
+                    }
 
-                // Page offset of list content section
-                iVal = static_cast<SizeType>(listOffset / PageSize);
-                if (ptr->WriteBinary(sizeof(iVal), reinterpret_cast<char*>(&iVal)) != sizeof(iVal)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
+                    // Page offset of list content section
+                    iVal = static_cast<SizeType>(listOffset / PageSize);
+                    if (ptr->WriteBinary(sizeof(iVal), reinterpret_cast<char*>(&iVal)) != sizeof(iVal)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        throw std::runtime_error("Failed to write SSDIndex File");
+                    }
                 }
 
                 // Meta of each posting list
@@ -1712,9 +3786,84 @@ namespace SPTAG
                     {
                         headVector = (ValueType *)p_headIndex->GetSample(postingListId);
                     }
-                    std::string postingListFullData = GetPostingListFullData(
-                        postingListId, p_postingListSizes[id], p_postingSelections, p_fullVectors, p_localToGlobal, p_enableDeltaEncoding, p_enablePostingListRearrange, headVector);
-                    size_t postingListFullSize = p_postingListSizes[id] * p_spacePerVector;
+                    BatchPostingData batchPosting;
+                    std::string postingListFullData;
+                    if (UseRaBitQBatchPosting())
+                    {
+                        batchPosting = BuildRaBitQBatchPosting(
+                            postingListId,
+                            static_cast<size_t>(p_postingListSizes[id]),
+                            p_postingSelections,
+                            p_fullVectors,
+                            p_localToGlobal);
+                        postingListFullData = batchPosting.binary;
+
+                        auto& extendedInfo = extendedInfos[id];
+                        extendedInfo.vectorCount =
+                            static_cast<std::uint64_t>(p_postingListSizes[id]);
+                        extendedInfo.batchCount = static_cast<std::uint64_t>(
+                            RaBitQBatchCount(
+                                static_cast<size_t>(p_postingListSizes[id])));
+                        extendedInfo.centroidOffset =
+                            static_cast<std::uint64_t>(extendedOutput->TellP());
+                        const size_t centroidBytes =
+                            batchPosting.centroid.size() * sizeof(float);
+                        if (extendedOutput->WriteBinary(
+                                centroidBytes,
+                                reinterpret_cast<const char*>(
+                                    batchPosting.centroid.data())) != centroidBytes)
+                        {
+                            throw std::runtime_error(
+                                "Failed to write STATIC RaBitQ batch centroid");
+                        }
+                        extendedInfo.dataOffset =
+                            static_cast<std::uint64_t>(extendedOutput->TellP());
+                        extendedInfo.dataBytes = batchPosting.extended.size();
+                        if (!batchPosting.extended.empty() &&
+                            extendedOutput->WriteBinary(
+                                batchPosting.extended.size(),
+                                batchPosting.extended.data()) !=
+                                batchPosting.extended.size())
+                        {
+                            throw std::runtime_error(
+                                "Failed to write STATIC RaBitQ extended sidecar");
+                        }
+
+                        if (rawOutput != nullptr)
+                        {
+                            auto& rawInfo = rawInfos[id];
+                            rawInfo.vectorCount = extendedInfo.vectorCount;
+                            rawInfo.batchCount = extendedInfo.batchCount;
+                            rawInfo.dataOffset =
+                                static_cast<std::uint64_t>(rawOutput->TellP());
+                            rawInfo.dataBytes = batchPosting.raw.size();
+                            if (rawOutput->WriteBinary(
+                                    batchPosting.raw.size(),
+                                    batchPosting.raw.data()) !=
+                                batchPosting.raw.size())
+                            {
+                                throw std::runtime_error(
+                                    "Failed to write STATIC RaBitQ raw sidecar");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        postingListFullData = GetPostingListFullData(
+                            postingListId,
+                            p_postingListSizes[id],
+                            p_postingSelections,
+                            p_fullVectors,
+                            p_localToGlobal,
+                            p_enableDeltaEncoding,
+                            p_enablePostingListRearrange,
+                            headVector);
+                    }
+                    size_t postingListFullSize = UseRaBitQBatchPosting()
+                        ? RaBitQBatchPostingBytes(
+                            static_cast<size_t>(p_postingListSizes[id]))
+                        : static_cast<size_t>(p_postingListSizes[id]) *
+                            p_spacePerVector;
                     if (postingListFullSize != postingListFullData.size())
                     {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "posting list full data size NOT MATCH! postingListFullData.size(): %zu postingListFullSize: %zu \n", postingListFullData.size(), postingListFullSize);
@@ -1767,6 +3916,36 @@ namespace SPTAG
                     }
                 }
 
+                if (UseRaBitQBatchPosting())
+                {
+                    auto finalizeSidecar =
+                        [](const std::shared_ptr<Helper::DiskIO>& p_output,
+                           BatchSidecarHeader& p_header,
+                           std::vector<BatchSidecarListInfo>& p_infos)
+                    {
+                        if (p_output->WriteBinary(
+                                sizeof(p_header),
+                                reinterpret_cast<const char*>(&p_header),
+                                0) != sizeof(p_header) ||
+                            (!p_infos.empty() &&
+                             p_output->WriteBinary(
+                                 sizeof(BatchSidecarListInfo) * p_infos.size(),
+                                 reinterpret_cast<const char*>(p_infos.data()),
+                                 sizeof(BatchSidecarHeader)) !=
+                                 sizeof(BatchSidecarListInfo) * p_infos.size()))
+                        {
+                            throw std::runtime_error(
+                                "Failed to finalize STATIC RaBitQ batch sidecar");
+                        }
+                    };
+                    finalizeSidecar(
+                        extendedOutput, extendedHeader, extendedInfos);
+                    if (rawOutput != nullptr)
+                    {
+                        finalizeSidecar(rawOutput, rawHeader, rawInfos);
+                    }
+                }
+
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Padded Size: %llu, final total size: %llu.\n", paddedSize, listOffset);
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Output done...\n");
@@ -1784,7 +3963,10 @@ namespace SPTAG
                 pid = it->second;
                 ListInfo* listInfo = &(m_listInfos[pid]);
                 size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
-                size_t realBytes = listInfo->listEleCount * m_vectorInfoSize;
+                size_t realBytes = UseRaBitQBatchPosting()
+                    ? RaBitQBatchPostingBytes(listInfo->listEleCount)
+                    : static_cast<size_t>(listInfo->listEleCount) *
+                        m_vectorInfoSize;
                 posting.resize(totalBytes);
                 int fileid = m_oneContext? 0: pid / m_listPerFile;
                 Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
@@ -1796,6 +3978,57 @@ namespace SPTAG
                 char* ptr = (char*)(posting.c_str());
                 memcpy(ptr, posting.c_str() + listInfo->pageOffset, realBytes);
                 posting.resize(realBytes);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Checkpoint(std::string p_prefix) override
+            {
+                if (p_prefix.empty()) return ErrorCode::FailedOpenFile;
+                std::error_code ec;
+                std::filesystem::create_directories(p_prefix, ec);
+                if (ec) return ErrorCode::FailedOpenFile;
+
+                auto copyFile = [&](const std::string& p_source) -> bool
+                {
+                    const std::filesystem::path source(p_source);
+                    const std::filesystem::path destination =
+                        std::filesystem::path(p_prefix) / source.filename();
+                    std::error_code compareError;
+                    if (std::filesystem::equivalent(
+                            source, destination, compareError) &&
+                        !compareError)
+                    {
+                        return true;
+                    }
+                    std::error_code copyError;
+                    return std::filesystem::copy_file(
+                        source,
+                        destination,
+                        std::filesystem::copy_options::overwrite_existing,
+                        copyError);
+                };
+
+                for (const auto& indexFile : m_indexFilePaths)
+                {
+                    if (!copyFile(indexFile)) return ErrorCode::DiskIOFail;
+                    if (UseRaBitQBatchPosting())
+                    {
+                        if (!copyFile(indexFile + kBatchExtendedSuffix))
+                        {
+                            return ErrorCode::DiskIOFail;
+                        }
+                        if (m_opt->m_postingRaBitQRerank > 0 &&
+                            !copyFile(indexFile + kBatchRawSuffix))
+                        {
+                            return ErrorCode::DiskIOFail;
+                        }
+                    }
+                }
+                if (UseRaBitQPosting() &&
+                    !copyFile(ResolvePostingQuantizerPath(*m_opt)))
+                {
+                    return ErrorCode::DiskIOFail;
+                }
                 return ErrorCode::Success;
             }
 
@@ -1816,6 +4049,16 @@ namespace SPTAG
             bool m_enablePostingListRearrange;
             bool m_enableDataCompression;
             bool m_enableDictTraining;
+            StaticPostingFormat m_postingFormat = StaticPostingFormat::LegacyRaw;
+            std::shared_ptr<COMMON::RaBitQQuantizer> m_postingQuantizer;
+            std::vector<char> m_postingQuantizerBytes;
+            std::uint64_t m_postingQuantizerFingerprint = 0;
+            COMMON::RaBitQQuantizer::SplitCodeLayout m_splitCodeLayout;
+            COMMON::RaBitQQuantizer::SplitBatchLayout m_splitBatchLayout;
+            std::vector<std::shared_ptr<Helper::DiskIO>> m_extendedSidecars;
+            std::vector<std::shared_ptr<Helper::DiskIO>> m_rawSidecars;
+            std::vector<std::unique_ptr<std::mutex>> m_sidecarReadLocks;
+            std::vector<std::string> m_indexFilePaths;
             
             void (ExtraStaticSearcher<ValueType>::*m_parsePosting)(uint64_t&, uint64_t&, int, int);
             void (ExtraStaticSearcher<ValueType>::*m_parseEncoding)(ListInfo*, ValueType*);

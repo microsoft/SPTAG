@@ -699,6 +699,12 @@ template <typename T>
 ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, int p_tolayer, ExtraWorkSpace *p_exWorkSpace) const
 {
     if (m_extraSearchers.size() == 0) return ErrorCode::EmptyIndex;
+    if (p_stats)
+    {
+        p_stats->m_totalListElementsCount = 0;
+        p_stats->m_diskIOCount = 0;
+        p_stats->m_diskAccessCount = 0;
+    }
 
     COMMON::QueryResultSet<T> *p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     std::unique_ptr<ExtraWorkSpace> workSpace;
@@ -758,6 +764,14 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 
             p_exWorkSpace->m_postingIDs.emplace_back(res->VID);
 
+        }
+        p_exWorkSpace->ResetRaBitQPruning(m_options.m_searchInternalResultNum);
+        if (isTargetLayer)
+        {
+            for (const auto& head : headCandidates)
+            {
+                p_exWorkSpace->RecordRaBitQCandidate(head.VID, head.Dist, head.Dist);
+            }
         }
         auto setupEnd = std::chrono::high_resolution_clock::now();
         double setupLatency = (double)std::chrono::duration_cast<std::chrono::microseconds>(setupEnd - setupStart).count() / 1000;
@@ -1709,6 +1723,11 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     {
         vectorSet->Normalize(m_options.m_iSSDNumberOfThreads);
     }
+
+    m_options.m_valueType = GetEnumValueType<T>();
+    m_options.m_dim = p_dimension;
+    m_options.m_vectorSize = p_vectorNum;
+
     SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
     std::shared_ptr<Helper::ReaderOptions> vectorOptions(
         new Helper::ReaderOptions(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter,
@@ -1717,10 +1736,6 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(
         vectorOptions,
         vectorSet));
-
-    m_options.m_valueType = GetEnumValueType<T>();
-    m_options.m_dim = p_dimension;
-    m_options.m_vectorSize = p_vectorNum;
 
     return BuildIndexInternal(vectorReader, vectorOptions);
 }

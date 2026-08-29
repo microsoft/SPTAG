@@ -1,10 +1,15 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include "inc/Helper/AsyncFileReader.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Test.h"
 
+#include <cstdio>
+#include <fstream>
 #include <memory>
+#include <string>
+#include <vector>
 
 BOOST_AUTO_TEST_SUITE(CommonHelperTest)
 
@@ -77,5 +82,56 @@ BOOST_AUTO_TEST_CASE(StrEqualIgnoreCaseTest)
     BOOST_CHECK(!StrEqualIgnoreCase("Abcd", " abcd"));
     BOOST_CHECK(!StrEqualIgnoreCase("000", "OOO"));
 }
+
+#ifndef _MSC_VER
+BOOST_AUTO_TEST_CASE(LinuxAsyncBatchReadReportsShortCompletion)
+{
+    const std::string path = "async_batch_short_completion_test.bin";
+    struct FileCleanup
+    {
+        const std::string& path;
+        ~FileCleanup() { std::remove(path.c_str()); }
+    } cleanup{path};
+
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        BOOST_REQUIRE(output.good());
+        const std::vector<char> contents(SPTAG::PageSize, 'x');
+        output.write(
+            contents.data(),
+            static_cast<std::streamsize>(contents.size()));
+        BOOST_REQUIRE(output.good());
+    }
+
+    auto handler = std::make_shared<SPTAG::Helper::AsyncFileIO>();
+    BOOST_REQUIRE(handler->Initialize(
+        path.c_str(), O_RDONLY | O_DIRECT, 1, 2, 2, 1));
+    std::vector<std::shared_ptr<SPTAG::Helper::DiskIO>> handlers{
+        handler};
+
+    SPTAG::Helper::PageBuffer<char> buffer;
+    buffer.ReservePageBuffer(2 * SPTAG::PageSize);
+    SPTAG::Helper::AsyncReadRequest request;
+    request.m_buffer = buffer.GetBuffer();
+    request.m_offset = 0;
+    request.m_readSize = 2 * SPTAG::PageSize;
+    request.m_status = 0;
+    int callbackCount = 0;
+    bool callbackSuccess = true;
+    request.m_callback =
+        [&](bool success)
+        {
+            ++callbackCount;
+            callbackSuccess = success;
+        };
+
+    BOOST_REQUIRE(
+        SPTAG::Helper::BatchReadFileAsync(
+            handlers, &request, 1));
+    BOOST_CHECK_EQUAL(callbackCount, 1);
+    BOOST_CHECK(!callbackSuccess);
+    handler->ShutDown();
+}
+#endif
 
 BOOST_AUTO_TEST_SUITE_END()

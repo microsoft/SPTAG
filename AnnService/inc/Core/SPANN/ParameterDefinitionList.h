@@ -99,6 +99,7 @@ DefineSSDParameter(m_postingQuantizer, std::string, std::string("None"), "Postin
 DefineSSDParameter(m_postingQuantizerFile, std::string, std::string(""), "PostingQuantizerFile")
 DefineSSDParameter(m_postingQuantBits, int, 3, "PostingQuantBits")
 DefineSSDParameter(m_postingQuantizerTrainingSamples, int, 1000000, "PostingQuantizerTrainingSamples")
+DefineSSDParameter(m_postingRaBitQRerank, int, 0, "PostingRaBitQRerank")
 DefineSSDParameter(m_fullDeletedIDFile, std::string, std::string("fulldeleted"), "FullDeletedIDFile")
 DefineSSDParameter(m_storage, SPTAG::Storage, SPTAG::Storage::STATIC, "Storage")
 DefineSSDParameter(m_spdkBatchSize, int, 64, "SpdkBatchSize")

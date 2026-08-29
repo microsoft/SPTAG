@@ -255,8 +255,44 @@ Release/quantizer \
   -i sift1m/sift_base.fvecs \
   -o sift1m/sift_base.rabitq3.u8bin \
   -oq sift1m/official_rabitq3_global.bin \
-  -qt RaBitQQuantizer -qd 3 -ts 1000000
+  -qt RaBitQQuantizer -qd 3 -ts 1000000 \
+  -m L2 -rqm exact
 ```
+
+`-m` selects the persisted RaBitQ search metric (`L2`, `Cosine`, or
+`InnerProduct`). Cosine normalizes vectors and uses the official `METRIC_IP`
+estimator path. `InnerProduct` uses the same official estimator without
+normalizing vectors; the existing `IQuantizer` selector routes both
+inner-product metrics through `CosineDistance`. `-rqm` selects the quantization mode:
+`exact` is the default and keeps the official `RabitqConfig` untouched, while
+`fast` uses `faster_config(...)` for faster encoding.
+The model also stores the sampled `FhtKacRotator` state, so base vectors,
+queries, and the centroid are rotated consistently after reload. Version-2
+RaBitQ models are rejected because they do not persist the official rotator
+state; existing codes cannot be migrated to a rotated v3 model, so re-encoding
+and index rebuild are required. The official FhtKac implementation supports
+dimensions from 64 through 4095; unsupported dimensions are rejected before
+constructing the rotator. If the quantizer is trained with cosine, set
+`DistCalcMethod=Cosine` in the SPANN configuration as well.
+Reconstruction returns original-space Float coordinates by applying the
+transpose of a basis-materialized projection derived from the persisted
+official rotator state.
+`RaBitQQuantizer` also provides the split-code helpers used by STATIC SPANN
+posting quantization. In that split API, cosine normalizes raw data/query
+vectors before rotation, but local centroids stay unnormalized and are only
+padded and rotated; fast query prep uses the official 4-bit
+`SplitSingleQuery` config.
+When you reuse an existing RaBitQ model with `Release/quantizer`, omit `-qd` to
+keep the model’s persisted bit width, and note that encoding follows the
+persisted normalization behavior without a second CLI normalization step.
+
+For raw-Float STATIC postings, `PostingQuantizer=RaBitQ` keeps the per-vector
+split-code format. `PostingQuantizer=RaBitQBatch` instead keeps SPANN routing
+unchanged while using an independent mean centroid per posting, the official
+batch FastScan layout, and a separately read `.rabitq.ext` sidecar. Optional
+exact raw-vector reranking is enabled with `PostingRaBitQRerank=N`; it also
+enables `WithVec` through the `.rabitq.raw` sidecar. `InnerProduct` is supported
+without normalization, while `Cosine` remains normalized.
 
 The recommended SIFT1M SPANN configuration uses STATIC posting storage:
 
@@ -332,6 +368,32 @@ MaxCheck=2048
 MaxDistRatio=8.0
 SearchPostingPageLimit=12
 ```
+
+### **STATIC RaBitQ posting quantizer**
+
+STATIC SPANN can quantize posting payloads with a RaBitQ v3 model while keeping
+the base vectors and head vectors as raw `Float`. Configure
+`PostingQuantizer=RaBitQ` and `PostingQuantizerFile=<model>` in
+`[BuildSSDIndex]`, and do **not** set `QuantizerFilePath`. Each posting uses
+its head vector as the local centroid and stores `[VID | official split binary
+blob | official split extended blob]`; the persisted record width is derived
+from `GetSplitCodeLayout()` and saved in the posting file header. Build also
+copies the exact posting model into the index directory and persists its
+serialized fingerprint in the posting header, so relocated indexes reload from
+their own local copy and reject same-shape model replacement without a rebuild.
+
+This path is not exact raw-vector rerank. Search performs adaptive official
+lower-bound/full-bit boosting: it evaluates the official 1-bit estimate first,
+uses its lower bound to skip candidates that cannot beat the current top-K
+worst distance, and only runs the full-bit estimate when needed. The current
+STATIC layout keeps binary and extended bytes co-located, so this is
+incremental compute pruning rather than separate ex-bit I/O. Unsupported
+combinations are rejected explicitly: non-Float vectors, global quantizers,
+dimension/metric mismatches, delta encoding, posting rearrangement, and
+`Rerank>0`.
+
+See `Script_AE/iniFile/build_SPANN_sift1m_raw_static_rabitq3.ini` for the raw
+Float SIFT1M example.
 
 `SearchSSDIndex.InternalResultNum` is the SPANN equivalent of `nprobe`.
 The recommended value is 32. On SIFT1M with one search thread, the measured
