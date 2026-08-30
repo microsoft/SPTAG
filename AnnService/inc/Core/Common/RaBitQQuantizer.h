@@ -134,6 +134,8 @@ public:
                     QuantizationMode p_quantization_mode = QuantizationMode::Exact);
 
     ErrorCode Train(const std::shared_ptr<VectorSet>& p_vectors);
+    ErrorCode SetDeterministicRotation(std::uint64_t p_seed);
+    std::shared_ptr<RaBitQQuantizer> CloneWithBits(int p_bits) const;
 
     float L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
@@ -195,6 +197,7 @@ public:
     int Bits() const { return m_bits; }
     DistCalcMethod GetMetric() const { return m_metric; }
     QuantizationMode GetQuantizationMode() const { return m_quantization_mode; }
+    bool IsNormalizationEnabled() const { return m_normalize; }
     bool Ready() const;
 
 private:

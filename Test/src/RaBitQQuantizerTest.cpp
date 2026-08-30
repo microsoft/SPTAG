@@ -276,6 +276,34 @@ BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQRotationAffectsCodesAndSaveLoadStaysSt
     std::remove(kQuantizerFile);
 }
 
+BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQCloneReusesCentroidAndRotation)
+{
+    const auto raw = MakeRawVectors();
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+        kDimension,
+        5,
+        false,
+        DistCalcMethod::L2,
+        COMMON::RaBitQQuantizer::QuantizationMode::Exact);
+    BOOST_REQUIRE(
+        quantizer->SetDeterministicRotation(123456789ULL) ==
+        ErrorCode::Success);
+    BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
+
+    auto clone = quantizer->CloneWithBits(2);
+    BOOST_REQUIRE(clone != nullptr);
+    BOOST_CHECK_EQUAL(clone->Bits(), 2);
+    BOOST_CHECK_EQUAL(clone->Dimension(), quantizer->Dimension());
+    BOOST_CHECK(clone->GetMetric() == quantizer->GetMetric());
+
+    SavedRaBitQModelHeader originalHeader{};
+    const auto originalState = ExtractRotatorState(quantizer, originalHeader);
+    SavedRaBitQModelHeader cloneHeader{};
+    const auto cloneState = ExtractRotatorState(clone, cloneHeader);
+    BOOST_CHECK(originalState == cloneState);
+    BOOST_CHECK_EQUAL(originalHeader.paddedDimension, cloneHeader.paddedDimension);
+}
+
 BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQReconstructsOriginalSpaceForPaddedDimensions)
 {
     constexpr DimensionType odd_dimension = 65;

@@ -382,6 +382,106 @@ copies the exact posting model into the index directory and persists its
 serialized fingerprint in the posting header, so relocated indexes reload from
 their own local copy and reject same-shape model replacement without a rebuild.
 
+The supported posting modes are:
+
+| `PostingQuantizer` | Posting representation | Extended data | Exact rerank |
+| --- | --- | --- | --- |
+| `RaBitQ` | Official split single-vector code | Co-located with each posting record | Not supported |
+| `RaBitQBatch` | Official batch FastScan layout | `.rabitq.ext` sidecar, read for surviving batches | `PostingRaBitQRerank=N` through `.rabitq.raw` |
+
+Both modes support `L2`, normalized `Cosine`, and unnormalized
+`InnerProduct`. They require raw `Float` base/head vectors, `Storage=STATIC`,
+and a version-3 `PostingQuantizerFile`. Do not also set the global
+`QuantizerFilePath`.
+
+Fixed-width example:
+
+```ini
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+Storage=STATIC
+PostingQuantizer=RaBitQBatch
+PostingQuantizerFile=/path/to/rabitq3-model.bin
+PostingQuantBits=3
+PostingRaBitQRerank=0
+EnableDeltaEncoding=false
+EnablePostingListRearrange=false
+EnableDataCompression=false
+Rerank=0
+```
+
+Positive `PostingQuantBits` values retain fixed-bit behavior. Setting
+`PostingQuantBits=0` or `-1` enables pre-build adaptive calibration for
+`RaBitQ` and `RaBitQBatch`; it selects the smallest official width from `1..8`
+whose intrinsic mean Recall@K loss is within
+`PostingQuantizerTargetRecallError`. Calibration uses the configured Base query
+and ordered truth files to measure full-code global RaBitQ ranking. It
+intentionally ignores SPANN routing, posting assignment, and local-centroid
+split-code quality. Width quality is assumed to be monotonic, so certified
+lower-bound acceptance and measured-recall decisions drive a lazy binary
+boundary search rather than evaluating all widths. The official bound never
+rejects a width.
+See [`RaBitQ_Global_Quantizer.md`](RaBitQ_Global_Quantizer.md#adaptive-posting-bit-calibration)
+for the artifact, reuse, and validation parameters.
+
+Complete adaptive-width example:
+
+```ini
+[Base]
+ValueType=Float
+DistCalcMethod=L2
+Dim=128
+VectorPath=/data/sift_base.fvecs
+VectorType=XVEC
+VectorSize=1000000
+QueryPath=/data/sift_query.fvecs
+QueryType=XVEC
+TruthPath=/data/sift_query_top1000.ivecs
+TruthType=XVEC
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+Storage=STATIC
+PostingQuantizer=RaBitQBatch
+PostingQuantBits=0
+PostingQuantizerTargetRecallError=0.01
+PostingQuantizerRecallAt=10
+PostingQuantizerTrainingQueryCount=1000
+PostingQuantizerTrainingTruthDepth=1000
+PostingQuantizerTrainingDataFile=/index/rabitq-training-data.bin
+PostingQuantizerTrainingResultFile=/index/rabitq-training-result.bin
+PostingQuantizerFile=/index/selected-rabitq-model.bin
+PostingRaBitQRerank=0
+```
+
+`PostingQuantizerTargetRecallError=0.01` means that the selected width must
+reach mean intrinsic `Recall@10 >= 0.99` over the calibration queries. This
+measurement reranks each query's exact top-1000 candidates with the full-code
+RaBitQ estimator. It deliberately measures only RaBitQ ordering loss; it does
+not include SPANN routing or posting-local centroid effects.
+
+The configured truth file must already contain at least
+`PostingQuantizerTrainingTruthDepth` ordered neighbors. Adaptive calibration
+does not generate billion-scale ground truth. On its first run it writes
+`PostingQuantizerTrainingDataFile`, containing the sampled raw queries, ordered
+neighbor IDs, and required raw candidate vectors. This file can be reused to
+try another target without reading the original base corpus.
+
+After selection, `PostingQuantizerTrainingResultFile` is the completion marker
+and `PostingQuantizerFile` contains the selected model. A later build validates
+and directly reuses those files instead of recalibrating. If the result is
+absent but the training-data file exists, calibration is replayed from that
+artifact. Corrupt or configuration-mismatched artifacts fail explicitly rather
+than being silently overwritten.
+
+The width search assumes expected Recall is monotonic with increasing bit
+width. It probes only the binary-search boundary, normally at most five of the
+eight official widths. `certifiedRecallLowerBound` may accept a width early and
+skip larger widths; it is intentionally one-sided. A width is rejected only
+when its measured Recall is below the target.
+
 This path is not exact raw-vector rerank. Search performs adaptive official
 lower-bound/full-bit boosting: it evaluates the official 1-bit estimate first,
 uses its lower bound to skip candidates that cannot beat the current top-K
@@ -393,7 +493,10 @@ dimension/metric mismatches, delta encoding, posting rearrangement, and
 `Rerank>0`.
 
 See `Script_AE/iniFile/build_SPANN_sift1m_raw_static_rabitq3.ini` for the raw
-Float SIFT1M example.
+Float split-code SIFT1M example and
+`Script_AE/iniFile/build_SPANN_sift1m_raw_static_rabitq3_batch.ini` for the
+batch FastScan example. Both retain fixed 3-bit defaults and include commented
+adaptive settings.
 
 `SearchSSDIndex.InternalResultNum` is the SPANN equivalent of `nprobe`.
 The recommended value is 32. On SIFT1M with one search thread, the measured

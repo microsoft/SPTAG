@@ -117,6 +117,64 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
     return ErrorCode::Success;
 }
 
+ErrorCode RaBitQQuantizer::SetDeterministicRotation(std::uint64_t p_seed)
+{
+    if (!Ready()) {
+        return ErrorCode::Fail;
+    }
+
+    std::vector<char> state(m_rotator->dump_bytes(), 0);
+    std::uint64_t value = p_seed;
+    for (char& byte : state) {
+        value += 0x9e3779b97f4a7c15ULL;
+        std::uint64_t mixed = value;
+        mixed = (mixed ^ (mixed >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+        mixed = (mixed ^ (mixed >> 27U)) * 0x94d049bb133111ebULL;
+        mixed ^= mixed >> 31U;
+        byte = static_cast<char>(mixed & 0xffU);
+    }
+    m_rotator->load(state.data());
+    BuildInverseProjection();
+    return ErrorCode::Success;
+}
+
+std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CloneWithBits(int p_bits) const
+{
+    if (!Ready() || p_bits < 1 || p_bits > 8) {
+        return nullptr;
+    }
+
+    auto clone = std::make_shared<RaBitQQuantizer>();
+    clone->m_dimension = m_dimension;
+    clone->m_padded_dimension = m_padded_dimension;
+    clone->m_bits = p_bits;
+    clone->m_normalize = m_normalize;
+    clone->m_enable_adc = false;
+    clone->m_metric = m_metric;
+    clone->m_quantization_mode = m_quantization_mode;
+    clone->m_rotator.reset(rabitqlib::choose_rotator<float>(
+        static_cast<std::size_t>(m_dimension),
+        rabitqlib::RotatorType::FhtKacRotator,
+        static_cast<std::size_t>(m_padded_dimension)));
+    if (!clone->m_rotator) {
+        return nullptr;
+    }
+    std::vector<char> state(m_rotator->dump_bytes(), 0);
+    m_rotator->save(state.data());
+    clone->m_rotator->load(state.data());
+    clone->m_centroid = m_centroid;
+    clone->m_inverse_projection = m_inverse_projection;
+    clone->m_quantizer_config =
+        (m_quantization_mode == QuantizationMode::Fast)
+        ? rabitqlib::quant::faster_config(
+              static_cast<std::size_t>(m_padded_dimension),
+              static_cast<std::size_t>(p_bits))
+        : rabitqlib::quant::RabitqConfig();
+    clone->m_ip_func =
+        rabitqlib::select_excode_ipfunc(static_cast<std::size_t>(p_bits));
+    return clone;
+}
+
 float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
     if (m_metric != DistCalcMethod::L2) {

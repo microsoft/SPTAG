@@ -352,6 +352,101 @@ void WriteBinaryFile(const std::string& path, const std::vector<char>& bytes)
     BOOST_REQUIRE(output.good());
 }
 
+void WriteAdaptiveInputs(const std::shared_ptr<VectorSet>& vectors,
+                         const std::string& queryPath,
+                         const std::string& truthPath,
+                         int queryCount,
+                         int truthDepth)
+{
+    std::vector<float> queries(
+        static_cast<std::size_t>(queryCount) * kDimension, 0.0F);
+    std::vector<std::int32_t> truth(
+        static_cast<std::size_t>(queryCount) * truthDepth, -1);
+    for (int query = 0; query < queryCount; ++query)
+    {
+        const auto* source =
+            static_cast<const float*>(vectors->GetVector(query * 11 + 3));
+        std::copy(
+            source,
+            source + kDimension,
+            queries.begin() + static_cast<std::size_t>(query) * kDimension);
+
+        std::vector<std::pair<float, SizeType>> distances;
+        distances.reserve(static_cast<std::size_t>(vectors->Count()));
+        for (SizeType id = 0; id < vectors->Count(); ++id)
+        {
+            const auto* candidate =
+                static_cast<const float*>(vectors->GetVector(id));
+            float distance = 0.0F;
+            for (DimensionType dim = 0; dim < kDimension; ++dim)
+            {
+                const float difference = source[dim] - candidate[dim];
+                distance += difference * difference;
+            }
+            distances.emplace_back(distance, id);
+        }
+        std::sort(distances.begin(), distances.end());
+        for (int rank = 0; rank < truthDepth; ++rank)
+        {
+            truth[static_cast<std::size_t>(query) * truthDepth + rank] =
+                static_cast<std::int32_t>(
+                    distances[static_cast<std::size_t>(rank)].second);
+        }
+    }
+
+    {
+        std::ofstream output(queryPath, std::ios::binary | std::ios::trunc);
+        BOOST_REQUIRE(output.good());
+        const SizeType rows = queryCount;
+        output.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+        output.write(reinterpret_cast<const char*>(&kDimension), sizeof(kDimension));
+        output.write(
+            reinterpret_cast<const char*>(queries.data()),
+            static_cast<std::streamsize>(queries.size() * sizeof(float)));
+        BOOST_REQUIRE(output.good());
+    }
+    {
+        std::ofstream output(truthPath, std::ios::binary | std::ios::trunc);
+        BOOST_REQUIRE(output.good());
+        const std::int32_t rows = queryCount;
+        const std::int32_t depth = truthDepth;
+        output.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+        output.write(reinterpret_cast<const char*>(&depth), sizeof(depth));
+        output.write(
+            reinterpret_cast<const char*>(truth.data()),
+            static_cast<std::streamsize>(truth.size() * sizeof(std::int32_t)));
+        std::vector<float> distances(truth.size(), 0.0F);
+        output.write(
+            reinterpret_cast<const char*>(distances.data()),
+            static_cast<std::streamsize>(distances.size() * sizeof(float)));
+        BOOST_REQUIRE(output.good());
+    }
+}
+
+void ConfigureAdaptiveCalibration(const std::shared_ptr<VectorIndex>& index,
+                                  const std::string& queryPath,
+                                  const std::string& truthPath,
+                                  const std::string& trainingPath,
+                                  const std::string& resultPath)
+{
+    index->SetParameter("QueryPath", queryPath, "Base");
+    index->SetParameter("QueryType", "DEFAULT", "Base");
+    index->SetParameter("TruthPath", truthPath, "Base");
+    index->SetParameter("TruthType", "DEFAULT", "Base");
+    index->SetParameter("PostingQuantBits", "0", "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTargetRecallError", "0.8", "BuildSSDIndex");
+    index->SetParameter("PostingQuantizerRecallAt", "1", "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTrainingQueryCount", "3", "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTrainingTruthDepth", "16", "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTrainingDataFile", trainingPath, "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTrainingResultFile", resultPath, "BuildSSDIndex");
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(SPANNRaBitQStaticPostingTest)
@@ -1615,6 +1710,73 @@ BOOST_AUTO_TEST_CASE(StaticSpannRaBitQPostingRejectsIncompatibleConfigs)
             4);
         BOOST_CHECK(index->BuildIndex(vectors, nullptr) == ErrorCode::Fail);
     }
+}
+
+BOOST_AUTO_TEST_CASE(StaticSpannAdaptiveRaBitQCreatesAndReusesCalibration)
+{
+    const std::string firstIndexDir = "spann_rabitq_adaptive_first";
+    const std::string secondIndexDir = "spann_rabitq_adaptive_second";
+    const std::string queryPath = "spann_rabitq_adaptive.queries";
+    const std::string truthPath = "spann_rabitq_adaptive.truth";
+    const std::string trainingPath = "spann_rabitq_adaptive.training";
+    const std::string resultPath = "spann_rabitq_adaptive.result";
+    const std::string modelPath =
+        std::filesystem::absolute("spann_rabitq_adaptive.model").string();
+    ScopedCleanup cleanup({
+        firstIndexDir,
+        secondIndexDir,
+        queryPath,
+        truthPath,
+        trainingPath,
+        resultPath,
+        modelPath,
+    });
+
+    const auto vectors = MakeVectors();
+    WriteAdaptiveInputs(vectors, queryPath, truthPath, 3, 16);
+    auto first =
+        MakeStaticSpannIndex(firstIndexDir, modelPath, DistCalcMethod::L2);
+    ConfigureAdaptiveCalibration(
+        first, queryPath, truthPath, trainingPath, resultPath);
+    BOOST_REQUIRE(first->BuildIndex(vectors, nullptr) == ErrorCode::Success);
+    const int selectedBits =
+        std::stoi(first->GetParameter("PostingQuantBits", "BuildSSDIndex"));
+    BOOST_CHECK(selectedBits >= 1 && selectedBits <= 8);
+    BOOST_CHECK(std::filesystem::exists(trainingPath));
+    BOOST_CHECK(std::filesystem::exists(resultPath));
+    BOOST_CHECK(std::filesystem::exists(modelPath));
+
+    std::filesystem::remove(queryPath);
+    std::filesystem::remove(truthPath);
+    auto second =
+        MakeStaticSpannIndex(secondIndexDir, modelPath, DistCalcMethod::L2);
+    ConfigureAdaptiveCalibration(
+        second, queryPath, truthPath, trainingPath, resultPath);
+    BOOST_REQUIRE(second->BuildIndex(vectors, nullptr) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        std::stoi(second->GetParameter("PostingQuantBits", "BuildSSDIndex")),
+        selectedBits);
+}
+
+BOOST_AUTO_TEST_CASE(StaticSpannFixedPostingBitsSkipAdaptiveCalibration)
+{
+    const std::string indexDir = "spann_rabitq_fixed_skips_adaptive";
+    const std::string modelPath = "spann_rabitq_fixed_skips_adaptive.model";
+    const std::string trainingPath = "spann_rabitq_fixed_skips_adaptive.training";
+    const std::string resultPath = "spann_rabitq_fixed_skips_adaptive.result";
+    ScopedCleanup cleanup({indexDir, modelPath, trainingPath, resultPath});
+
+    const auto vectors = MakeVectors();
+    TrainAndSaveRaBitQModel(vectors, modelPath, DistCalcMethod::L2);
+    auto index = MakeStaticSpannIndex(indexDir, modelPath, DistCalcMethod::L2);
+    index->SetParameter("PostingQuantBits", "3", "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTrainingDataFile", trainingPath, "BuildSSDIndex");
+    index->SetParameter(
+        "PostingQuantizerTrainingResultFile", resultPath, "BuildSSDIndex");
+    BOOST_REQUIRE(index->BuildIndex(vectors, nullptr) == ErrorCode::Success);
+    BOOST_CHECK(!std::filesystem::exists(trainingPath));
+    BOOST_CHECK(!std::filesystem::exists(resultPath));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

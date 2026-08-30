@@ -124,3 +124,63 @@ global-quantizer SIFT1M example. For raw-Float STATIC postings with local
 RaBitQ codes, use `Script_AE/iniFile/build_SPANN_sift1m_raw_static_rabitq3.ini`.
 For official batch scanning and split extended-code I/O, use
 `Script_AE/iniFile/build_SPANN_sift1m_raw_static_rabitq3_batch.ini`.
+
+## Adaptive posting bit calibration
+
+`PostingQuantBits` keeps its existing fixed-mode behavior when it is positive.
+Set it to `0` or `-1` with `PostingQuantizer=RaBitQ` or `RaBitQBatch` to run
+adaptive calibration once, before SPANN selects or builds any heads:
+
+```ini
+[BuildSSDIndex]
+PostingQuantizer=RaBitQBatch
+PostingQuantBits=0
+PostingQuantizerTargetRecallError=0.01
+PostingQuantizerRecallAt=10
+PostingQuantizerTrainingQueryCount=1000
+PostingQuantizerTrainingTruthDepth=1000
+PostingQuantizerTrainingDataFile=/path/to/rabitq-calibration-data.bin
+PostingQuantizerTrainingResultFile=/path/to/rabitq-calibration-result.bin
+PostingQuantizerFile=/path/to/selected-rabitq-v3-model.bin
+```
+
+The target is intrinsic quantizer recall only: a maximum error of `0.01` means
+mean Recall@10 must be at least `0.99` when the ordered exact neighbors are
+reranked solely with official RaBitQ `DistanceWithError` estimates. SPANN head
+routing, posting assignment, and per-posting local centroids are intentionally
+not part of this measurement: calibration ranks full-code global RaBitQ
+distances and does not model split-posting quality. Candidate widths are the
+official `1..8` range. Calibration assumes their expected monotonic quality,
+probes widths lazily, and binary-searches a failing/meeting boundary. A
+`certifiedRecallLowerBound` at or above the target proves that width meets the
+target and skips larger widths. Otherwise measured Recall@K alone decides the
+probe: a width is accepted when measured recall meets the target and rejected
+when it does not. The official error bound never rejects a width, so a low-bit
+rejection is an empirical calibration result rather than a certification. The
+selected width and its immediate predecessor are always evaluated, normally
+requiring at most five widths. Only each evaluated width's measured recall and
+certified recall lower bound are stored, sorted by width. Cosine models enable
+RaBitQ's internal normalization; L2 and InnerProduct models do not. The final
+model is always version 3 in Exact mode.
+
+The training-data artifact contains the raw sampled queries, ordered truth IDs,
+and deduplicated raw Float vectors for every truth candidate. It can therefore
+replay calibration without the base, query, or truth files. When it must be
+created, `QueryType`, `TruthType`, and `VectorType` must be `DEFAULT` or `XVEC`;
+TXT is rejected explicitly. The configured truth must already contain at least
+`PostingQuantizerTrainingTruthDepth` ordered neighbors--calibration never
+generates brute-force truth. Base candidates are gathered with fixed-offset
+reads instead of loading the complete base corpus.
+
+The version-3 result is the completion marker and binds the calibration
+settings, training-artifact fingerprint, sparse evaluated metrics, and complete
+selected-model fingerprint. Its sparse metrics must exactly match the lazy
+binary-search probe path. When it exists, the result checksum and model are
+validated directly without reading the source query, truth, base, or training
+payload. A missing training artifact is allowed for completed reuse; when the
+artifact remains, only its header metadata, file length, and recorded
+fingerprint are checked against the result. If the result is absent, an existing
+training artifact is still loaded and fully fingerprinted before recalibration.
+Missing, stale, truncated, or mismatched required files fail rather than
+silently recalibrating. Each artifact is written to a sibling `.writing` file
+and atomically renamed only after the complete payload has been flushed.

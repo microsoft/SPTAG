@@ -11,6 +11,9 @@
  </p>
 
 ## What's NEW
+* Official RaBitQ integration for global vector quantization and STATIC SPANN
+  postings, including batch FastScan, split-code I/O, optional exact reranking,
+  and target-recall adaptive bit selection
 * Result Iterator with Relaxed Monotonicity Signal Support
 * New Research Paper [SPFresh: Incremental In-Place Update for Billion-Scale Vector Search](https://dl.acm.org/doi/10.1145/3600006.3613166) - _published in SOSP 2023_
 * New Research Paper [VBASE: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity](https://www.usenix.org/system/files/osdi23-zhang-qianxi_1.pdf) - _published in OSDI 2023_
@@ -38,6 +41,43 @@ The searches in the trees and the graph are iteratively conducted.
  ## **Highlights**
   * Fresh update: Support online vector deletion and insertion
   * Distributed serving: Search over multiple machines
+  * RaBitQ quantization: Official rotated full-code and split-code estimators for
+    `L2`, normalized `Cosine`, and unnormalized `InnerProduct`
+
+## **RaBitQ support**
+
+SPTAG integrates the pinned official RaBitQ implementation from
+`ThirdParty/RaBitQOfficial` without modifying the submodule. The integration
+persists the official `FhtKacRotator` state so the same random rotation is
+applied to base vectors, queries, and centroids after reload. Version-3 models
+support dimensions from 64 through 4095 and bit widths from 1 through 8.
+
+Two deployment modes are available:
+
+| Mode | Configuration | Behavior |
+| --- | --- | --- |
+| Global quantizer | `QuantizerFilePath=<model>` | Encodes the complete base before building the regular SPTAG/SPANN index |
+| STATIC SPANN posting quantizer | `PostingQuantizer=RaBitQ` or `RaBitQBatch` | Keeps base/head vectors as `Float` and quantizes posting payloads |
+
+`RaBitQ` uses the official per-vector split representation. `RaBitQBatch` uses
+the official batch FastScan layout, stores extended codes in a
+`.rabitq.ext` sidecar, and can persist raw vectors for exact candidate reranking
+with `PostingRaBitQRerank=N`. SPANN head selection and posting routing remain
+unchanged.
+
+Posting bit width can be fixed with `PostingQuantBits=1..8`, or selected before
+SPANN construction by setting `PostingQuantBits=0` or `-1`. Adaptive selection
+uses sampled queries and ordered exact top-neighbor data to choose the smallest
+width whose measured intrinsic RaBitQ Recall@K satisfies
+`1 - PostingQuantizerTargetRecallError`. The official distance error bound is
+used only to certify that a width is sufficient; insufficient widths are
+rejected by measured recall. Calibration inputs, the selected result, and the
+version-3 model are persisted as reusable, fingerprint-validated files.
+
+See [Get started](docs/GettingStart.md#static-rabitq-posting-quantizer) for
+configuration examples and
+[Global RaBitQ quantizer](docs/RaBitQ_Global_Quantizer.md) for format and API
+details.
 
  ## **Build**
 
