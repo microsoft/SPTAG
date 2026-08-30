@@ -840,7 +840,11 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     m_threadPool.init();
 
     auto t1 = std::chrono::high_resolution_clock::now();
-    m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, m_iNumberOfThreads);
+    if (m_pTrees.m_parallelBuild) {
+        m_pTrees.BuildTreesParallel<T>(m_pSamples, m_iDistCalcMethod, m_iNumberOfThreads);
+    } else {
+        m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, m_iNumberOfThreads);
+    }
     auto t2 = std::chrono::high_resolution_clock::now();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n",
                  std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
