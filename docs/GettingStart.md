@@ -316,7 +316,6 @@ TmpDir=/tmp/sift1m-spann-rabitq3
 EnableDeltaEncoding=false
 EnablePostingListRearrange=false
 EnableDataCompression=false
-PostingQuantizer=None
 Rerank=0
 EnableADC=true
 

@@ -386,7 +386,7 @@ def train_rabitq(args):
     os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
 
     if args.quan_test > 0:
-        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
+        queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}
@@ -508,7 +508,7 @@ def train_pq(args):
     os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
 
     if args.quan_test > 0:
-        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
+        queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}
@@ -644,7 +644,7 @@ def train_opq(args):
     os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
 
     if args.quan_test > 0:
-        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
+        queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}
