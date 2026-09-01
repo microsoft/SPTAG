@@ -24,7 +24,7 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader> &vectorRead
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving vector batch starting at %d\n", i);
         }
         std::shared_ptr<VectorSet> quantized_vectors;
-        if (options->m_normalized)
+        if (ShouldOuterNormalizeForQuantizeAndSave(options, quantizer))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Normalizing vectors.\n");
             set->Normalize(options->m_threadNum);
@@ -118,12 +118,22 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader> &vectorRead
 int main(int argc, char *argv[])
 {
     std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(
-        10000, true, 0.0f, SPTAG::QuantizerType::None, std::string(), -1, std::string(), std::string());
+        10000,
+        true,
+        0.0f,
+        SPTAG::QuantizerType::None,
+        std::string(),
+        -1,
+        std::string(),
+        std::string(),
+        DistCalcMethod::L2,
+        "exact");
 
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
     }
+    CaptureExplicitQuantizerOptions(options, argc - 1, argv + 1);
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
     if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
     {
@@ -249,7 +259,6 @@ int main(int argc, char *argv[])
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RaBitQ global quantization requires Float input vectors.\n");
             exit(1);
         }
-
         std::shared_ptr<COMMON::IQuantizer> quantizer;
         auto fp_load = SPTAG::f_createIO();
         if (fp_load == nullptr ||
@@ -279,6 +288,17 @@ int main(int argc, char *argv[])
             quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
             if (!quantizer || quantizer->GetQuantizerType() != QuantizerType::RaBitQQuantizer) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load RaBitQ quantizer.\n");
+                exit(1);
+            }
+            const auto loaded_rabitq =
+                std::dynamic_pointer_cast<COMMON::RaBitQQuantizer>(quantizer);
+            const auto input_sample = vectorReader->GetVectorSet(0, 1);
+            if (!loaded_rabitq || !input_sample || input_sample->Count() <= 0 ||
+                !ValidateLoadedRaBitQQuantizer(
+                    loaded_rabitq, options, input_sample->Dimension())) {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Loaded RaBitQ quantizer does not match the current input/options.\n");
                 exit(1);
             }
         }

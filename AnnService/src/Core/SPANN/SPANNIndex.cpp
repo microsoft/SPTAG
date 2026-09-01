@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/SPANN/Index.h"
+#include "inc/Core/Common/RaBitQAdaptiveBitTrainer.h"
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
@@ -699,6 +700,12 @@ template <typename T>
 ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, int p_tolayer, ExtraWorkSpace *p_exWorkSpace) const
 {
     if (m_extraSearchers.size() == 0) return ErrorCode::EmptyIndex;
+    if (p_stats)
+    {
+        p_stats->m_totalListElementsCount = 0;
+        p_stats->m_diskIOCount = 0;
+        p_stats->m_diskAccessCount = 0;
+    }
 
     COMMON::QueryResultSet<T> *p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     std::unique_ptr<ExtraWorkSpace> workSpace;
@@ -758,6 +765,14 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 
             p_exWorkSpace->m_postingIDs.emplace_back(res->VID);
 
+        }
+        p_exWorkSpace->ResetRaBitQPruning(m_options.m_searchInternalResultNum);
+        if (isTargetLayer)
+        {
+            for (const auto& head : headCandidates)
+            {
+                p_exWorkSpace->RecordRaBitQCandidate(head.VID, head.Dist, head.Dist);
+            }
         }
         auto setupEnd = std::chrono::high_resolution_clock::now();
         double setupLatency = (double)std::chrono::duration_cast<std::chrono::microseconds>(setupEnd - setupStart).count() / 1000;
@@ -1659,6 +1674,62 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     return ErrorCode::Success;
 }
 
+template <typename T>
+ErrorCode Index<T>::PrepareAdaptivePostingQuantizer(
+    const std::shared_ptr<VectorSet>& p_memoryVectors)
+{
+    const bool useRaBitQ =
+        Helper::StrUtils::StrEqualIgnoreCase(
+            m_options.m_postingQuantizer.c_str(), "RaBitQ") ||
+        Helper::StrUtils::StrEqualIgnoreCase(
+            m_options.m_postingQuantizer.c_str(), "RaBitQBatch");
+    if (!useRaBitQ || m_options.m_postingQuantBits > 0)
+    {
+        return ErrorCode::Success;
+    }
+    if (m_options.m_postingQuantBits != 0 &&
+        m_options.m_postingQuantBits != -1)
+    {
+        SPTAGLIB_LOG(
+            Helper::LogLevel::LL_Error,
+            "PostingQuantBits must be positive for fixed mode or 0/-1 for adaptive RaBitQ calibration.\n");
+        return ErrorCode::FailedParseValue;
+    }
+
+    COMMON::RaBitQAdaptiveBitTrainer::Config config;
+    config.dimension = m_options.m_dim;
+    config.metric = m_options.m_distCalcMethod;
+    config.baseCount = m_options.m_vectorSize;
+    config.queryCount = m_options.m_postingQuantizerTrainingQueryCount;
+    config.truthDepth = m_options.m_postingQuantizerTrainingTruthDepth;
+    config.recallAt = m_options.m_postingQuantizerRecallAt;
+    config.targetRecallError = m_options.m_postingQuantizerTargetRecallError;
+    config.queryPath = m_options.m_queryPath;
+    config.queryType = m_options.m_queryType;
+    config.truthPath = m_options.m_truthPath;
+    config.truthType = m_options.m_truthType;
+    config.basePath = m_options.m_vectorPath;
+    config.baseType = m_options.m_vectorType;
+    config.trainingDataFile = m_options.m_postingQuantizerTrainingDataFile;
+    config.trainingResultFile = m_options.m_postingQuantizerTrainingResultFile;
+    std::filesystem::path modelPath(m_options.m_postingQuantizerFile);
+    if (modelPath.is_relative() && !m_options.m_indexDirectory.empty())
+    {
+        modelPath = std::filesystem::path(m_options.m_indexDirectory) / modelPath;
+    }
+    config.modelFile = modelPath.string();
+
+    COMMON::RaBitQAdaptiveBitTrainer::Result result;
+    const ErrorCode status =
+        COMMON::RaBitQAdaptiveBitTrainer::Run(config, p_memoryVectors, result);
+    if (status != ErrorCode::Success)
+    {
+        return status;
+    }
+    m_options.m_postingQuantBits = result.selectedBits;
+    return ErrorCode::Success;
+}
+
 template <typename T> ErrorCode Index<T>::BuildIndex(bool p_normalized)
 {
     SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
@@ -1667,6 +1738,11 @@ template <typename T> ErrorCode Index<T>::BuildIndex(bool p_normalized)
         new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter,
                                   m_options.m_iSSDNumberOfThreads, p_normalized));
     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
+    const ErrorCode calibrationStatus = PrepareAdaptivePostingQuantizer(nullptr);
+    if (calibrationStatus != ErrorCode::Success)
+    {
+        return calibrationStatus;
+    }
     if (m_options.m_vectorPath.empty())
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
@@ -1705,10 +1781,21 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
         vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
     }
 
+    m_options.m_valueType = GetEnumValueType<T>();
+    m_options.m_dim = p_dimension;
+    m_options.m_vectorSize = p_vectorNum;
+
+    const ErrorCode calibrationStatus = PrepareAdaptivePostingQuantizer(vectorSet);
+    if (calibrationStatus != ErrorCode::Success)
+    {
+        return calibrationStatus;
+    }
+
     if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized)
     {
         vectorSet->Normalize(m_options.m_iSSDNumberOfThreads);
     }
+
     SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
     std::shared_ptr<Helper::ReaderOptions> vectorOptions(
         new Helper::ReaderOptions(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter,
@@ -1717,10 +1804,6 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(
         vectorOptions,
         vectorSet));
-
-    m_options.m_valueType = GetEnumValueType<T>();
-    m_options.m_dim = p_dimension;
-    m_options.m_vectorSize = p_vectorNum;
 
     return BuildIndexInternal(vectorReader, vectorOptions);
 }

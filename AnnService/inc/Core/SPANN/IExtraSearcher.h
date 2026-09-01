@@ -17,6 +17,10 @@
 #include <chrono>
 #include <atomic>
 #include <array>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <mutex>
 #include <set>
 
 namespace SPTAG {
@@ -512,7 +516,122 @@ namespace SPTAG {
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
+                DisableRaBitQPruning();
                 m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
+            }
+
+            struct RaBitQRetainedCandidate
+            {
+                SizeType m_vid = -1;
+                float m_distance = MaxDist;
+                float m_upperBound = MaxDist;
+            };
+
+            void ResetRaBitQPruning(int p_capacity)
+            {
+                std::lock_guard<std::mutex> guard(m_rabitQPruningLock);
+                m_rabitQPruningCapacity = p_capacity;
+                m_rabitQRetainedCandidates.clear();
+            }
+
+            void DisableRaBitQPruning()
+            {
+                std::lock_guard<std::mutex> guard(m_rabitQPruningLock);
+                m_rabitQPruningCapacity = 0;
+                m_rabitQRetainedCandidates.clear();
+            }
+
+            bool CanPruneRaBitQCandidate(float p_lowerBound) const
+            {
+                std::lock_guard<std::mutex> guard(m_rabitQPruningLock);
+                return CanPruneRaBitQCandidateUnlocked(p_lowerBound);
+            }
+
+            void RecordRaBitQCandidate(SizeType p_vid, float p_distance, float p_upperBound)
+            {
+                std::lock_guard<std::mutex> guard(m_rabitQPruningLock);
+                RecordRaBitQCandidateUnlocked(p_vid, p_distance, p_upperBound);
+            }
+
+            std::mutex& RaBitQPruningLock()
+            {
+                return m_rabitQPruningLock;
+            }
+
+            bool CanPruneRaBitQCandidateUnlocked(float p_lowerBound) const
+            {
+                if (m_rabitQPruningCapacity <= 0 ||
+                    static_cast<int>(m_rabitQRetainedCandidates.size()) < m_rabitQPruningCapacity ||
+                    !std::isfinite(p_lowerBound))
+                {
+                    return false;
+                }
+
+                float maxUpperBound = -std::numeric_limits<float>::infinity();
+                for (const auto& candidate : m_rabitQRetainedCandidates)
+                {
+                    if (!std::isfinite(candidate.m_upperBound))
+                    {
+                        return false;
+                    }
+                    maxUpperBound = std::max(maxUpperBound, candidate.m_upperBound);
+                }
+
+                return p_lowerBound > maxUpperBound;
+            }
+
+            void RecordRaBitQCandidateUnlocked(SizeType p_vid, float p_distance, float p_upperBound)
+            {
+                if (m_rabitQPruningCapacity <= 0 ||
+                    !std::isfinite(p_distance) ||
+                    !std::isfinite(p_upperBound))
+                {
+                    return;
+                }
+
+                for (auto& candidate : m_rabitQRetainedCandidates)
+                {
+                    if (candidate.m_vid != p_vid)
+                    {
+                        continue;
+                    }
+
+                    if ((p_distance < candidate.m_distance) ||
+                        (p_distance == candidate.m_distance && p_vid < candidate.m_vid))
+                    {
+                        candidate.m_distance = p_distance;
+                        candidate.m_upperBound = p_upperBound;
+                    }
+                    else if (p_upperBound < candidate.m_upperBound)
+                    {
+                        candidate.m_upperBound = p_upperBound;
+                    }
+                    return;
+                }
+
+                if (static_cast<int>(m_rabitQRetainedCandidates.size()) < m_rabitQPruningCapacity)
+                {
+                    m_rabitQRetainedCandidates.push_back({p_vid, p_distance, p_upperBound});
+                    return;
+                }
+
+                auto worstCandidate = m_rabitQRetainedCandidates.begin();
+                for (auto iter = m_rabitQRetainedCandidates.begin() + 1;
+                     iter != m_rabitQRetainedCandidates.end();
+                     ++iter)
+                {
+                    if ((worstCandidate->m_distance < iter->m_distance) ||
+                        (worstCandidate->m_distance == iter->m_distance && worstCandidate->m_vid < iter->m_vid))
+                    {
+                        worstCandidate = iter;
+                    }
+                }
+
+                if ((p_distance < worstCandidate->m_distance) ||
+                    (p_distance == worstCandidate->m_distance && p_vid < worstCandidate->m_vid))
+                {
+                    *worstCandidate = {p_vid, p_distance, p_upperBound};
+                }
             }
 
             std::vector<SizeType> m_postingIDs;
@@ -616,6 +735,10 @@ namespace SPTAG {
             std::function<bool(const ByteArray&)> m_filterFunc;
 
             std::function<void()> m_callback;
+
+            mutable std::mutex m_rabitQPruningLock;
+            int m_rabitQPruningCapacity = 0;
+            std::vector<RaBitQRetainedCandidate> m_rabitQRetainedCandidates;
         };
 
         class IExtraSearcher

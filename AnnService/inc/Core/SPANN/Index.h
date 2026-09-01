@@ -333,8 +333,9 @@ namespace SPTAG
             bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
             ErrorCode BuildIndexInternalLayer(std::shared_ptr<Helper::VectorSetReader>& p_reader);
-
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<Helper::ReaderOptions> &vectorOptions);
+            ErrorCode PrepareAdaptivePostingQuantizer(
+                const std::shared_ptr<VectorSet>& p_memoryVectors);
 
         public:
             void PrepareDB(std::shared_ptr<Helper::KeyValueIO>& db, int layer = 0);
