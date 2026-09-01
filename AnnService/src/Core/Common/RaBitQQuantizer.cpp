@@ -70,6 +70,8 @@ ErrorCode RaBitQQuantizer::Initialize(DimensionType p_dimension,
     }
 
     m_dimension = p_dimension;
+    m_padded_dimension = static_cast<DimensionType>(
+        (static_cast<std::size_t>(p_dimension) + 63U) / 64U * 64U);
     m_bits = p_bits;
     m_normalize = p_normalize;
     m_enable_adc = false;
@@ -935,6 +937,8 @@ void RaBitQQuantizer::Decode(const std::uint8_t* p_code, std::vector<float>& p_o
     for (DimensionType i = 0; i < m_padded_dimension; ++i) {
         p_output[static_cast<std::size_t>(i)] += m_centroid[static_cast<std::size_t>(i)];
     }
+    std::fill(
+        p_output.begin() + static_cast<std::size_t>(m_dimension), p_output.end(), 0.0F);
 }
 
 void RaBitQQuantizer::PrepareInput(
@@ -973,6 +977,12 @@ void RaBitQQuantizer::PrepareCentroidInput(
 
 void RaBitQQuantizer::NormalizePrepared(float* p_values) const
 {
+    p_output.assign(static_cast<std::size_t>(m_padded_dimension), 0.0F);
+    std::copy(p_input, p_input + m_dimension, p_output.begin());
+    if (!m_normalize) {
+        return;
+    }
+
     double norm = 0.0;
     for (DimensionType i = 0; i < m_padded_dimension; ++i) {
         norm += static_cast<double>(p_values[i]) * p_values[i];

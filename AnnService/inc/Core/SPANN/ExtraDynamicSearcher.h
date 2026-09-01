@@ -36,7 +36,6 @@
 #include <random>
 #include <deque>
 #include <condition_variable>
-#include <filesystem>
 
 #ifdef SPDK
 #include "ExtraSPDKController.h"
@@ -1266,15 +1265,6 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
-            if (!m_splitThreadPool) {
-                bool expected = false;
-                if (m_warnedMissingAsyncMergePool.compare_exchange_strong(expected, true)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                 "AsyncMergeInSearch requested without an update worker pool; skipping async merges.\n");
-                }
-                return;
-            }
-
             {
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 auto res = m_mergeList.insert(headID);
@@ -3085,7 +3075,6 @@ namespace SPTAG::SPANN {
 
         int m_mergeThreshold = 10;
         ErrorCode m_asyncStatus = ErrorCode::Success;
-        std::atomic_bool m_warnedMissingAsyncMergePool{ false };
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;

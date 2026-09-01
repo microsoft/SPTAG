@@ -22,29 +22,29 @@ namespace SPTAG
             ~FineGrainedLock() {}
 
             std::mutex& operator[](SizeType idx) {
-                unsigned index = hash_func((unsigned)idx);
+                std::uint64_t index = hash_func((std::uint64_t)idx);
                 return m_locks[index];
             }
 
             const std::mutex& operator[](SizeType idx) const {
-                unsigned index = hash_func((unsigned)idx);
+		std::uint64_t index = hash_func((std::uint64_t)idx);
                 return m_locks[index];
             }
 
-            static inline unsigned hash_func(unsigned idx)
+            static inline std::uint64_t hash_func(std::uint64_t idx)
             {
-                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & PoolSize;
+                return (idx * 99991 + _rotl64(idx, 2) + 101) & PoolSize;
             }
 
         private:
-            static const int PoolSize = 32767;
+            static const std::uint64_t PoolSize = 32767;
             std::unique_ptr<std::mutex[]> m_locks;
         };
 
         class FineGrainedRWLock {
         public:
             FineGrainedRWLock() {
-                m_buckets.reset(new Bucket[BucketCount]);
+                m_buckets.reset(new Bucket[BucketSize + 1]);
             }
             ~FineGrainedRWLock() {}
 
@@ -56,10 +56,10 @@ namespace SPTAG
                 return GetLock(idx);
             }
 
-            static inline unsigned hash_func(unsigned idx)
-            {
+	    static inline SizeType hash_func(SizeType idx)
+	    {
                 return idx;
-            }
+	    }
         private:
             struct Bucket {
                 std::mutex mutex;
@@ -76,14 +76,13 @@ namespace SPTAG
                 return *iter->second;
             }
 
-            static inline unsigned BucketIndex(SizeType idx)
+            static inline std::uint64_t BucketIndex(SizeType idx)
             {
-                unsigned key = static_cast<unsigned>(idx);
-                return ((unsigned)(key * 99991) + _rotl(key, 2) + 101) & BucketMask;
+                std::uint64_t key = (std::uint64_t)idx;
+                return (key * 99991 + _rotl64(key, 2) + 101) & BucketSize;
             }
 
-            static const int BucketMask = 32767;
-            static const int BucketCount = BucketMask + 1;
+            static const std::uint64_t BucketSize = 32767;
             mutable std::unique_ptr<Bucket[]> m_buckets;
         };
     }
