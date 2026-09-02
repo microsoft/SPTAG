@@ -3,7 +3,6 @@ import math
 import tqdm
 import time
 from struct import pack, unpack, calcsize
-from struct import pack, unpack, calcsize
 from typing import Dict, List
 import heapq
 import argparse
@@ -380,7 +379,7 @@ def tune_rabitq_bits(args, faiss, training_data, queries, ground_truths):
         trials.append({'bits': bits, 'recall': recall})
         print(f'RaBitQ{bits} Recall@{args.k}: {recall:.6f}')
         if recall >= args.rabitq_target_recall:
-            return bits, candidate, data_count, trials
+            return bits, data_count, trials
 
     measured = ', '.join(f'{trial["bits"]}-bit={trial["recall"]:.6f}' for trial in trials)
     raise RuntimeError(
@@ -412,8 +411,6 @@ def train_rabitq(args):
         raise ValueError('RaBitQ training data is empty')
     print(f'train RaBitQ using {num_training} samples ...')
     faiss.omp_set_num_threads(args.T)
-    trials = []
-    data_count = None
     if args.rabitq_auto_tune:
         if args.quan_test <= 0:
             raise ValueError('rabitq_auto_tune requires quan_test > 0 and a pre-generated ground truth')
@@ -424,7 +421,7 @@ def train_rabitq(args):
         if num_query != args.Q:
             raise ValueError(f'query file contains {num_query} queries, but configured Q is {args.Q}')
         ground_truths = load_ground_truth(args.output_truth, num_query, args.k)
-        bits, faiss_index, data_count, trials = tune_rabitq_bits(
+        bits, data_count, trials = tune_rabitq_bits(
             args, faiss, training_data, queries, ground_truths)
         result = {
             'selected_bits': bits,
@@ -447,7 +444,7 @@ def train_rabitq(args):
         bits = rabitq_bits_from_quantized_dimension(args.dim, args.quan_dim)
         faiss_index = create_rabitq_index(faiss, args.dim, bits, training_data)
         if args.quan_test > 0:
-            data_count = add_rabitq_data(args, faiss_index)
+            add_rabitq_data(args, faiss_index)
 
     if args.quan_test > 0 and not args.rabitq_auto_tune:
         queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
