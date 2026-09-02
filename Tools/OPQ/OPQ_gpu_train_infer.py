@@ -8,6 +8,7 @@ from typing import Dict, List
 import heapq
 import argparse
 import copy
+import json
 from operator import itemgetter
 import os
 import subprocess
@@ -40,13 +41,25 @@ def get_config():
     parser.add_argument('--output_quan_vector_file', type = str, default = "", help='quantized vectors')
     parser.add_argument('--output_rec_vector_file', type = str, default = "", help = "reconstruct vectors")
     parser.add_argument('--quan_test', type = int, default = 0, help='compare with ground truth')
+    parser.add_argument('--rabitq_auto_tune', action = 'store_true', help='select the minimum RaBitQ storage bits before encoding')
+    parser.add_argument('--rabitq_target_recall', type = float, default = 0.95, help='minimum Recall@k for RaBitQ auto tuning')
+    parser.add_argument('--rabitq_min_bits', type = int, default = 1, help='minimum RaBitQ storage bits to evaluate')
+    parser.add_argument('--rabitq_max_bits', type = int, default = 8, help='maximum RaBitQ storage bits to evaluate')
+    parser.add_argument('--rabitq_tuning_result', type = str, default = 'rabitq_auto_tuning.json', help='auto-tuning result file under output_dir')
     args = parser.parse_args()
     return args
+
+def is_binary_vector_file(filename):
+    suffixes = ('.bin', '.fbin', '.u8bin', '.i8bin')
+    if filename.endswith(suffixes):
+        return True
+    stem, separator, shard = filename.rpartition('.')
+    return separator != '' and shard.isdigit() and stem.endswith(suffixes)
 
 class DataReader:
     def __init__(self, filename, featuredim, batchsize, normalize, datatype, targettype='float32'):
         self.mytype = targettype
-        if filename.find('.bin') >= 0:
+        if is_binary_vector_file(filename):
             self.fin = open(filename, 'rb')
             R = unpack('i', self.fin.read(4))[0]
             self.featuredim = unpack('i', self.fin.read(4))[0]
@@ -287,110 +300,161 @@ def evaluate(retrieve_results: List[List[int]],
 
     return MRR, Recall
 
+def sptag_rabitq_storage_bytes(dim, bits):
+    if dim <= 0:
+        raise ValueError('RaBitQ dimension must be positive')
+    if bits < 1 or bits > 8:
+        raise ValueError(f'RaBitQ bits must be in [1, 8], got {bits}')
+    padded_dimension = ((dim + 63) // 64) * 64
+    return padded_dimension * bits // 8 + 5 * np.dtype(np.float32).itemsize
+
+def rabitq_bits_from_quantized_dimension(dim, quan_dim):
+    total_bits = quan_dim * 8
+    if dim <= 0 or quan_dim <= 0 or total_bits % dim != 0:
+        raise ValueError(f'quan_dim={quan_dim} does not represent an integral RaBitQ bit count for dimension {dim}')
+    bits = total_bits // dim
+    if bits < 1 or bits > 8:
+        raise ValueError(f'RaBitQ bits must be in [1, 8], got {bits}')
+    return bits
+
+def load_ground_truth(path, query_count, topk):
+    ground_truths = []
+    with open(path, 'r') as truth_file:
+        for query_id in range(query_count):
+            line = truth_file.readline()
+            if not line:
+                raise ValueError(f'ground truth contains only {query_id} queries, expected {query_count}')
+            neighbors = line.strip().split()
+            if len(neighbors) < topk:
+                raise ValueError(
+                    f'ground truth query {query_id} contains {len(neighbors)} neighbors, expected at least {topk}')
+            ground_truths.append(set(int(neighbor) for neighbor in neighbors[:topk]))
+    return ground_truths
+
+def recall_at_k(faiss_index, queries, ground_truths, topk, batch_size=64):
+    if len(queries) != len(ground_truths):
+        raise ValueError('query and ground-truth counts differ')
+    if len(queries) == 0:
+        raise ValueError('at least one query is required')
+    recall_sum = 0.0
+    for start in tqdm.tqdm(range(0, len(queries), batch_size)):
+        end = min(start + batch_size, len(queries))
+        _, results = faiss_index.search(np.asarray(queries[start:end]), topk)
+        for offset, candidates in enumerate(results):
+            truth = ground_truths[start + offset]
+            recall_sum += len(truth.intersection(int(candidate) for candidate in candidates if candidate >= 0)) / len(truth)
+    return recall_sum / len(queries)
+
+def create_rabitq_index(faiss, dim, bits, training_data):
+    faiss_index = faiss.index_factory(dim, f"RaBitQ{bits}", faiss.METRIC_L2)
+    faiss_index.train(training_data)
+    return faiss_index
+
+def add_rabitq_data(args, faiss_index):
+    datareader = DataReader(
+        args.data_file, args.dim, args.B, args.data_normalize, args.data_type, args.target_type)
+    total = 0
+    while True:
+        num_data, data = datareader.readbatch()
+        if num_data == 0:
+            break
+        faiss_index.add(data)
+        total += num_data
+    datareader.close()
+    if total == 0:
+        raise ValueError('RaBitQ input data is empty')
+    return total
+
+def tune_rabitq_bits(args, faiss, training_data, queries, ground_truths):
+    if not 0.0 < args.rabitq_target_recall <= 1.0:
+        raise ValueError('rabitq_target_recall must be in (0, 1]')
+    if args.rabitq_min_bits < 1 or args.rabitq_max_bits > 8 or args.rabitq_min_bits > args.rabitq_max_bits:
+        raise ValueError('RaBitQ tuning range must satisfy 1 <= min_bits <= max_bits <= 8')
+
+    trials = []
+    for bits in range(args.rabitq_min_bits, args.rabitq_max_bits + 1):
+        print(f'Auto tuning RaBitQ{bits} for Recall@{args.k} >= {args.rabitq_target_recall:.6f}')
+        candidate = create_rabitq_index(faiss, args.dim, bits, training_data)
+        data_count = add_rabitq_data(args, candidate)
+        recall = recall_at_k(candidate, queries, ground_truths, args.k)
+        trials.append({'bits': bits, 'recall': recall})
+        print(f'RaBitQ{bits} Recall@{args.k}: {recall:.6f}')
+        if recall >= args.rabitq_target_recall:
+            return bits, candidate, data_count, trials
+
+    measured = ', '.join(f'{trial["bits"]}-bit={trial["recall"]:.6f}' for trial in trials)
+    raise RuntimeError(
+        f'No RaBitQ bit count in [{args.rabitq_min_bits}, {args.rabitq_max_bits}] '
+        f'reached Recall@{args.k} >= {args.rabitq_target_recall:.6f}; {measured}')
+
 def train_rabitq(args):
     import faiss
 
     output_dir = args.output_dir
 
-    if args.train_samples > args.B: args.train_samples = args.B
-
-    datareader = DataReader(args.data_file, args.dim, args.B, args.data_normalize, args.data_type, args.target_type)
-
-    print (f'train RabitQ using {args.train_samples} samples ...')
-
-    numData, data = datareader.readbatch()
-
+    if args.D not in ('L2', 'Cosine'):
+        raise ValueError('RaBitQ training supports only L2, or Cosine with normalized data and queries')
+    if args.D == 'Cosine' and (args.data_normalize == 0 or args.query_normalize == 0):
+        raise ValueError('Cosine RaBitQ tuning requires data_normalize=1 and query_normalize=1')
+    if args.train_samples <= 0:
+        raise ValueError('train_samples must be positive')
+    if args.k <= 0 or args.Q <= 0:
+        raise ValueError('k and Q must be positive')
+    if len(args.output_quan_vector_file) > 0 or len(args.output_rec_vector_file) > 0:
+        raise ValueError(
+            'RaBitQ vectors must be generated by the native SPTAG quantizer after tuning; '
+            'do not use output_quan_vector_file or output_rec_vector_file')
+    training_reader = DataReader(
+        args.data_file, args.dim, args.train_samples, args.data_normalize, args.data_type, args.target_type)
+    num_training, training_data = training_reader.readbatch()
+    training_reader.close()
+    if num_training == 0:
+        raise ValueError('RaBitQ training data is empty')
+    print(f'train RaBitQ using {num_training} samples ...')
     faiss.omp_set_num_threads(args.T)
-    nbytes = int(args.quan_dim * 8 // args.dim)
-    print (f'nbytes:{nbytes}')
-    faiss_index = faiss.index_factory(len(data[0]), f"RaBitQ{nbytes}", faiss.METRIC_L2)
-    print('Training the index with doc embeddings')
+    trials = []
+    data_count = None
+    if args.rabitq_auto_tune:
+        if args.quan_test <= 0:
+            raise ValueError('rabitq_auto_tune requires quan_test > 0 and a pre-generated ground truth')
+        queryreader = DataReader(
+            args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
+        num_query, queries = queryreader.readbatch()
+        queryreader.close()
+        if num_query != args.Q:
+            raise ValueError(f'query file contains {num_query} queries, but configured Q is {args.Q}')
+        ground_truths = load_ground_truth(args.output_truth, num_query, args.k)
+        bits, faiss_index, data_count, trials = tune_rabitq_bits(
+            args, faiss, training_data, queries, ground_truths)
+        result = {
+            'selected_bits': bits,
+            'native_quantizer_qd': bits,
+            'storage_bytes_per_vector': sptag_rabitq_storage_bytes(args.dim, bits),
+            'target_recall': args.rabitq_target_recall,
+            'recall_at': args.k,
+            'query_count': num_query,
+            'data_count': data_count,
+            'trials': trials,
+        }
+        result_path = os.path.join(output_dir, args.rabitq_tuning_result)
+        temporary_result_path = result_path + '.tmp'
+        with open(temporary_result_path, 'w') as result_file:
+            json.dump(result, result_file, indent=2)
+            result_file.write('\n')
+        os.replace(temporary_result_path, result_path)
+        print(f'Selected RaBitQ storage bits: {bits}; result: {result_path}')
+    else:
+        bits = rabitq_bits_from_quantized_dimension(args.dim, args.quan_dim)
+        faiss_index = create_rabitq_index(faiss, args.dim, bits, training_data)
+        if args.quan_test > 0:
+            data_count = add_rabitq_data(args, faiss_index)
 
-    faiss_index.train(data[0:args.train_samples])
-
-    rtype = np.uint8(0)
-    if args.data_type == 'uint8':
-        rtype = np.uint8(1)
-    elif args.data_type == 'int16':
-        rtype = np.uint8(2)
-    elif args.data_type == 'float32':
-        rtype = np.uint8(3)
-
-    ivf_index = faiss.downcast_index(faiss_index)
-    #centroid_embedings = faiss.vector_to_array(ivf_index.pq.centroids)
-    #codebooks = centroid_embedings.reshape(ivf_index.pq.M, ivf_index.pq.ksub, ivf_index.pq.dsub)
-    #print ('codebooks shape:')
-    #print (codebooks.shape)
-
-    #codebooks = codebooks.astype(np.float32)
-    #with open(os.path.join(output_dir, args.output_quantizer + '.' + str(args.task)),'wb') as f:
-    #    f.write(pack('B', 1))
-    #    f.write(pack('B', rtype))
-    #    f.write(pack('i', codebooks.shape[0]))
-    #    f.write(pack('i', codebooks.shape[1]))
-    #    f.write(pack('i', codebooks.shape[2]))
-    #    f.write(codebooks.tobytes())
-
-    if args.quan_test == 0 and len(args.output_quan_vector_file) == 0 and len(args.output_rec_vector_file) == 0:
-        os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
-        return
-
-    if len(args.output_quan_vector_file) > 0:
-        fquan = open(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task) + '.tmp'), 'wb')
-        fquan.write(pack('i', 0))
-        fquan.write(pack('i', args.quan_dim))
-
-    if len(args.output_rec_vector_file) > 0:
-        frec = open(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task) + '.tmp'), 'wb')
-        frec.write(pack('i', 0))
-        frec.write(pack('i', data.shape[1]))
-
-    writeitems = 0
-    while numData > 0:
-        if args.quan_test > 0: faiss_index.add(data)
-
-        if len(args.output_quan_vector_file) > 0:
-            codes = ivf_index.pq.compute_codes(data)
-            print ('codes shape:')
-            print (codes.shape)
-            fquan.write(codes.tobytes())
-
-        if len(args.output_rec_vector_file) > 0:
-            reconstructed = ivf_index.pq.decode(codes).astype(args.data_type)
-            frec.write(reconstructed.tobytes())
-
-        writeitems += numData
-        numData, data = datareader.readbatch()
-
-    datareader.close()
-
-    if len(args.output_quan_vector_file) > 0:
-        p = fquan.tell()
-        fquan.seek(0)
-        fquan.write(pack('i', writeitems))
-        fquan.seek(p)
-        fquan.close()
-        if os.path.exists(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task))):
-            os.remove(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task)))
-        os.rename(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task) + '.tmp'), os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task)))
-    if len(args.output_rec_vector_file) > 0:
-        p = frec.tell()
-        frec.seek(0)
-        frec.write(pack('i', writeitems))
-        frec.seek(p)
-        frec.close()
-        if os.path.exists(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task))):
-            os.remove(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task)))
-        os.rename(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task) + '.tmp'), os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task)))
-
-    os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
-
-    if args.quan_test > 0:
+    if args.quan_test > 0 and not args.rabitq_auto_tune:
         queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}
-        f = open(os.path.join(output_dir, 'truth.txt.' + str(args.task)), 'r')
+        f = open(args.output_truth, 'r')
         for i in range(numQuery):
             items = f.readline()[0:-1].strip().split(' ')
             qid2ground_truths[i] = set([int(gt) for gt in items])
