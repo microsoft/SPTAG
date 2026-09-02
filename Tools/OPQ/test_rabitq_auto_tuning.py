@@ -54,9 +54,24 @@ class RaBitQAutoTuningTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'truth.txt'
             path.write_text('1 2 3\n4 5 6\n', encoding='ascii')
-            self.assertEqual([{1, 2}, {4, 5}], MODULE.load_ground_truth(path, 2, 2))
+            truths, topk = MODULE.load_ground_truth(path, 2)
+            self.assertEqual(3, topk)
+            self.assertEqual([{1, 2, 3}, {4, 5, 6}], truths)
+            truths, topk = MODULE.load_ground_truth(path, 2, 2)
+            self.assertEqual(2, topk)
+            self.assertEqual([{1, 2}, {4, 5}], truths)
             with self.assertRaises(ValueError):
                 MODULE.load_ground_truth(path, 3, 2)
+
+    def test_inferred_ground_truth_topk_requires_uniform_unique_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'truth.txt'
+            path.write_text('1 2\n3 4 5\n', encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.load_ground_truth(path, 2)
+            path.write_text('1 2\n3 3\n', encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.load_ground_truth(path, 2)
 
     def test_recall_is_query_equal_weighted(self):
         index = FakeIndex([[1, 9], [4, 5]])
@@ -79,7 +94,6 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
                 'OutputDir=tuning\n'
-                'RecallAt=1000\n'
                 'TargetRecall=0.97\n'
                 'MinBits=2\n'
                 'MaxBits=7\n'
@@ -90,7 +104,7 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             args = MODULE.get_config(['--config', str(path)])
             self.assertTrue(args.rabitq_auto_tune)
             self.assertEqual(10000, args.Q)
-            self.assertEqual(1000, args.k)
+            self.assertIsNone(args.k)
             self.assertEqual(0.97, args.rabitq_target_recall)
             self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
             self.assertEqual('base.bin', args.data_file)
@@ -115,7 +129,6 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
                 'OutputDir=tuning\n'
-                'RecallAt=1000\n'
                 'QueryCount=10000\n'
                 'TypoTargetRecal=0.95\n',
                 encoding='ascii')
@@ -140,7 +153,6 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
                 'OutputDir=tuning\n'
-                'RecallAt=1000\n'
                 '\n'
                 '[SearchSSDIndex]\n'
                 'QueryCountLimit=10000\n',

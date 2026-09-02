@@ -272,7 +272,6 @@ isExecute=true
 OutputDir=sift1m/rabitq_tuning
 TargetType=float32
 DataBatchSize=1000000
-RecallAt=1000
 Threads=46
 TrainingSamples=1000000
 TargetRecall=0.95
@@ -294,8 +293,11 @@ python3 Tools/OPQ/OPQ_gpu_train_infer.py \
 
 The tuner evaluates bit counts in ascending order using exactly the configured
 `SearchSSDIndex.QueryCountLimit` queries and selects the first bit count meeting
-`Recall@1000 >= 0.95`. When `--config` is used, additional command-line
-parameters are rejected, so they cannot override the INI. A
+the target Recall. The Recall cutoff is inferred from the exact ground-truth
+width: 1,000 neighbor IDs per query means `Recall@1000`, so there is no second
+top-k setting. All consumed ground-truth rows must have exactly that width with
+no duplicate IDs. When `--config` is used, additional command-line parameters
+are rejected, so they cannot override the INI. A
 `RaBitQAutoTune.QueryCount` may be set explicitly only when the tuning query
 count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
 also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.
