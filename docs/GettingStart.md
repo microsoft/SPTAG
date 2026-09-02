@@ -270,10 +270,6 @@ TruthType=DEFAULT
 [RaBitQAutoTune]
 isExecute=true
 OutputDir=sift1m/rabitq_tuning
-TargetType=float32
-DataBatchSize=1000000
-Threads=46
-TrainingSamples=1000000
 TargetRecall=0.95
 MinBits=1
 MaxBits=8
@@ -306,6 +302,8 @@ cannot override the INI. A
 `RaBitQAutoTune.QueryCount` may be set explicitly only when the tuning query
 count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
 also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.
+Faiss input is always Float32; batching and centroid training use internal
+one-million-vector batches, and Faiss/OpenMP controls its own worker count.
 It fails if fewer queries/ground-truth rows are available or no candidate
 qualifies. The ground truth is not moved or modified. Results are written
 atomically to `sift1m/rabitq_tuning/rabitq_auto_tuning.json`; use

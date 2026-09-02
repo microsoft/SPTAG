@@ -129,6 +129,30 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 MODULE.get_config(['--config', str(path)])
 
+    def test_ini_rejects_removed_execution_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'build.ini'
+            path.write_text(
+                '[Base]\n'
+                'ValueType=Float\n'
+                'DistCalcMethod=L2\n'
+                'Dim=128\n'
+                'VectorPath=base.bin\n'
+                'QueryPath=query.bin\n'
+                'TruthPath=truth.txt\n'
+                '\n'
+                '[RaBitQAutoTune]\n'
+                'isExecute=true\n'
+                'OutputDir=tuning\n'
+                'Threads=46\n'
+                '\n'
+                '[SearchSSDIndex]\n'
+                'QueryCountLimit=10000\n'
+                'ResultNum=100\n',
+                encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.get_config(['--config', str(path)])
+
     def test_ini_rejects_inherited_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'build.ini'

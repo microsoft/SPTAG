@@ -14,6 +14,8 @@ import os
 import subprocess
 import sys
 
+RABITQ_BATCH_SIZE = 1000000
+
 def get_cli_parser():
     parser = argparse.ArgumentParser(description ='implementation of nnsearch.')
     parser.add_argument('--config', type = str, help='native INI containing [RaBitQAutoTune]')
@@ -63,8 +65,7 @@ def load_rabitq_auto_tune_ini(path):
         raise ValueError('INI file is missing [Base]')
     section = config[section_name]
     allowed_keys = {
-        'isexecute', 'outputdir', 'targettype', 'databatchsize', 'querycount',
-        'threads', 'trainingsamples', 'targetrecall',
+        'isexecute', 'outputdir', 'querycount', 'targetrecall',
         'minbits', 'maxbits', 'tuningresult', 'datanormalize', 'querynormalize',
         'dataformat', 'task',
     }
@@ -113,10 +114,10 @@ def load_rabitq_auto_tune_ini(path):
         data_normalize=section.getint('DataNormalize', fallback=0),
         query_normalize=section.getint('QueryNormalize', fallback=0),
         data_type=value_types[value_type],
-        target_type=section.get('TargetType', fallback='float32'),
+        target_type='float32',
         k=config.getint('SearchSSDIndex', 'ResultNum'),
         dim=base.getint('Dim'),
-        B=section.getint('DataBatchSize', fallback=-1),
+        B=RABITQ_BATCH_SIZE,
         Q=query_count,
         S=1000,
         D=base['DistCalcMethod'],
@@ -124,8 +125,8 @@ def load_rabitq_auto_tune_ini(path):
         data_format=section.get('DataFormat', fallback='DEFAULT'),
         task=section.getint('Task', fallback=0),
         log_dir='',
-        T=section.getint('Threads', fallback=32),
-        train_samples=section.getint('TrainingSamples', fallback=1000000),
+        T=None,
+        train_samples=RABITQ_BATCH_SIZE,
         quan_type='rabitq',
         quan_dim=-1,
         output_dir=section['OutputDir'],
@@ -179,7 +180,10 @@ class DataReader:
             self.isbinary = False
             self.type = self.mytype
 
-        if batchsize <= 0: batchsize = R
+        if batchsize <= 0:
+            batchsize = R
+        else:
+            batchsize = min(batchsize, R)
         self.query = np.zeros([batchsize, self.featuredim], dtype=self.mytype)
         self.normalize = normalize
 
@@ -539,7 +543,8 @@ def train_rabitq(args):
     if num_training == 0:
         raise ValueError('RaBitQ training data is empty')
     print(f'train RaBitQ using {num_training} samples ...')
-    faiss.omp_set_num_threads(args.T)
+    if args.T is not None:
+        faiss.omp_set_num_threads(args.T)
     if args.rabitq_auto_tune:
         if args.quan_test <= 0:
             raise ValueError('rabitq_auto_tune requires quan_test > 0 and a pre-generated ground truth')
