@@ -88,8 +88,6 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 'isExecute=true\n'
                 'OutputDir=tuning\n'
                 'TargetRecall=0.97\n'
-                'MinBits=2\n'
-                'MaxBits=7\n'
                 '\n'
                 '[BuildSSDIndex]\n'
                 'NumberOfThreads=46\n'
@@ -106,7 +104,6 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             self.assertEqual('float32', args.target_type)
             self.assertIsNone(args.train_samples)
             self.assertEqual(0.97, args.rabitq_target_recall)
-            self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
             self.assertEqual('base.bin', args.data_file)
             self.assertEqual('query.bin', args.query_file)
             self.assertEqual('truth.txt', args.output_truth)
@@ -153,7 +150,7 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 MODULE.get_config(['--config', str(path)])
 
-    def test_ini_rejects_removed_execution_parameters(self):
+    def test_ini_rejects_configurable_bit_range(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'build.ini'
             path.write_text(
@@ -168,7 +165,8 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
                 'OutputDir=tuning\n'
-                'Threads=46\n'
+                'MinBits=2\n'
+                'MaxBits=7\n'
                 '\n'
                 '[SearchSSDIndex]\n'
                 'QueryCountLimit=10000\n'

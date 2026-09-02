@@ -15,6 +15,8 @@ import subprocess
 import sys
 
 RABITQ_BATCH_SIZE = 1000000
+RABITQ_MIN_BITS = 1
+RABITQ_MAX_BITS = 8
 
 def get_cli_parser():
     parser = argparse.ArgumentParser(description ='implementation of nnsearch.')
@@ -47,8 +49,6 @@ def get_cli_parser():
     parser.add_argument('--quan_test', type = int, default = 0, help='compare with ground truth')
     parser.add_argument('--rabitq_auto_tune', action = 'store_true', help='select the minimum RaBitQ storage bits before encoding')
     parser.add_argument('--rabitq_target_recall', type = float, default = 0.95, help='minimum Recall@k for RaBitQ auto tuning')
-    parser.add_argument('--rabitq_min_bits', type = int, default = 1, help='minimum RaBitQ storage bits to evaluate')
-    parser.add_argument('--rabitq_max_bits', type = int, default = 8, help='maximum RaBitQ storage bits to evaluate')
     parser.add_argument('--rabitq_tuning_result', type = str, default = 'rabitq_auto_tuning.json', help='auto-tuning result file under output_dir')
     return parser
 
@@ -66,7 +66,7 @@ def load_rabitq_auto_tune_ini(path):
     section = config[section_name]
     allowed_keys = {
         'isexecute', 'outputdir', 'querycount', 'targetrecall',
-        'minbits', 'maxbits', 'tuningresult', 'dataformat', 'task',
+        'tuningresult', 'dataformat', 'task',
     }
     unknown_keys = set(section.keys()) - allowed_keys
     if unknown_keys:
@@ -141,8 +141,6 @@ def load_rabitq_auto_tune_ini(path):
         quan_test=1,
         rabitq_auto_tune=True,
         rabitq_target_recall=section.getfloat('TargetRecall', fallback=0.95),
-        rabitq_min_bits=section.getint('MinBits', fallback=1),
-        rabitq_max_bits=section.getint('MaxBits', fallback=8),
         rabitq_tuning_result=section.get(
             'TuningResult', fallback='rabitq_auto_tuning.json'),
     )
@@ -521,11 +519,9 @@ def add_rabitq_data(args, faiss_index):
 def tune_rabitq_bits(args, faiss, centroid, centroid_vector_count, queries, ground_truth_candidates):
     if not 0.0 < args.rabitq_target_recall <= 1.0:
         raise ValueError('rabitq_target_recall must be in (0, 1]')
-    if args.rabitq_min_bits < 1 or args.rabitq_max_bits > 8 or args.rabitq_min_bits > args.rabitq_max_bits:
-        raise ValueError('RaBitQ tuning range must satisfy 1 <= min_bits <= max_bits <= 8')
 
     trials = []
-    for bits in range(args.rabitq_min_bits, args.rabitq_max_bits + 1):
+    for bits in range(RABITQ_MIN_BITS, RABITQ_MAX_BITS + 1):
         print(f'Auto tuning RaBitQ{bits} for Recall@{args.k} >= {args.rabitq_target_recall:.6f}')
         candidate = create_rabitq_index(faiss, args.dim, bits, centroid)
         data_count = add_rabitq_data(args, candidate)
@@ -541,7 +537,7 @@ def tune_rabitq_bits(args, faiss, centroid, centroid_vector_count, queries, grou
 
     measured = ', '.join(f'{trial["bits"]}-bit={trial["recall"]:.6f}' for trial in trials)
     raise RuntimeError(
-        f'No RaBitQ bit count in [{args.rabitq_min_bits}, {args.rabitq_max_bits}] '
+        f'No RaBitQ bit count in [{RABITQ_MIN_BITS}, {RABITQ_MAX_BITS}] '
         f'reached Recall@{args.k} >= {args.rabitq_target_recall:.6f}; {measured}')
 
 def train_rabitq(args):

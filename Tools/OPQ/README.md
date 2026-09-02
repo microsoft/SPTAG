@@ -24,8 +24,8 @@ uses the centroid streamed over the complete base file, the same configured
 RaBitQ distance and its first K IDs are compared with the exact first K.
 
 The command fails instead of silently choosing a bit count when the configured
-query/ground-truth count is unavailable or no candidate in
-`[--rabitq_min_bits, --rabitq_max_bits]` reaches the target. The selected storage
+query/ground-truth count is unavailable or no candidate in RaBitQ's fixed
+1-through-8-bit range reaches the target. The selected storage
 bit count, actual SPTAG byte width (including padded dimensions and five Float
 factors), measured recalls, and sample counts are written atomically to
 `<output_dir>/rabitq_auto_tuning.json`. Use `native_quantizer_qd` as `-qd` for the

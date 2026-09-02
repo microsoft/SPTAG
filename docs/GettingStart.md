@@ -271,8 +271,6 @@ TruthType=DEFAULT
 isExecute=true
 OutputDir=sift1m/rabitq_tuning
 TargetRecall=0.95
-MinBits=1
-MaxBits=8
 
 [BuildSSDIndex]
 NumberOfThreads=46
@@ -291,7 +289,8 @@ python3 Tools/OPQ/OPQ_gpu_train_infer.py \
 
 The tuner evaluates bit counts in ascending order using exactly the configured
 `SearchSSDIndex.QueryCountLimit` queries and selects the first bit count meeting
-the target Recall. `SearchSSDIndex.ResultNum` is the expected result K. The
+the target Recall. The supported 1 through 8 bit range is fixed by RaBitQ and is
+always evaluated from the minimum upward. `SearchSSDIndex.ResultNum` is the expected result K. The
 ground-truth width is a separate, deeper reranking candidate pool: with
 `ResultNum=100` and 1,000 exact IDs per query, each RaBitQ candidate reranks
 those 1,000 IDs and is evaluated as `Recall@100` against the exact first 100.
