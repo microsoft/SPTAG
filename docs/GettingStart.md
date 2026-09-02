@@ -282,6 +282,7 @@ QueryNormalize=0
 
 [SearchSSDIndex]
 QueryCountLimit=10000
+ResultNum=100
 ```
 
 Run the pre-build tuning stage with only the INI path:
@@ -293,11 +294,15 @@ python3 Tools/OPQ/OPQ_gpu_train_infer.py \
 
 The tuner evaluates bit counts in ascending order using exactly the configured
 `SearchSSDIndex.QueryCountLimit` queries and selects the first bit count meeting
-the target Recall. The Recall cutoff is inferred from the exact ground-truth
-width: 1,000 neighbor IDs per query means `Recall@1000`, so there is no second
-top-k setting. All consumed ground-truth rows must have exactly that width with
-no duplicate IDs. When `--config` is used, additional command-line parameters
-are rejected, so they cannot override the INI. A
+the target Recall. `SearchSSDIndex.ResultNum` is the expected result K. The
+ground-truth width is a separate, deeper reranking candidate pool: with
+`ResultNum=100` and 1,000 exact IDs per query, each RaBitQ candidate reranks
+those 1,000 IDs and is evaluated as `Recall@100` against the exact first 100.
+The candidate depth must be strictly greater than `ResultNum`; this prevents a
+top100 ground truth from being used to evaluate K=100. All consumed
+ground-truth rows must have exactly the same width with no duplicate IDs. When
+`--config` is used, additional command-line parameters are rejected, so they
+cannot override the INI. A
 `RaBitQAutoTune.QueryCount` may be set explicitly only when the tuning query
 count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
 also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.

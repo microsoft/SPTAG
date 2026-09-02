@@ -12,17 +12,6 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-class FakeIndex:
-    def __init__(self, results):
-        self.results = np.asarray(results, dtype=np.int64)
-
-    def search(self, queries, topk):
-        count = len(queries)
-        results = self.results[:count, :topk]
-        self.results = self.results[count:]
-        return np.zeros(results.shape, dtype=np.float32), results
-
-
 class RaBitQAutoTuningTest(unittest.TestCase):
     def test_data_reader_accepts_fbin(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -54,14 +43,10 @@ class RaBitQAutoTuningTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'truth.txt'
             path.write_text('1 2 3\n4 5 6\n', encoding='ascii')
-            truths, topk = MODULE.load_ground_truth(path, 2)
-            self.assertEqual(3, topk)
-            self.assertEqual([{1, 2, 3}, {4, 5, 6}], truths)
-            truths, topk = MODULE.load_ground_truth(path, 2, 2)
-            self.assertEqual(2, topk)
-            self.assertEqual([{1, 2}, {4, 5}], truths)
+            truths = MODULE.load_ground_truth(path, 2)
+            np.testing.assert_array_equal(truths, [[1, 2, 3], [4, 5, 6]])
             with self.assertRaises(ValueError):
-                MODULE.load_ground_truth(path, 3, 2)
+                MODULE.load_ground_truth(path, 3)
 
     def test_inferred_ground_truth_topk_requires_uniform_unique_rows(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -73,11 +58,19 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 MODULE.load_ground_truth(path, 2)
 
-    def test_recall_is_query_equal_weighted(self):
-        index = FakeIndex([[1, 9], [4, 5]])
-        queries = np.zeros((2, 4), dtype=np.float32)
-        recall = MODULE.recall_at_k(index, queries, [{1, 2}, {3, 4}], 2, batch_size=2)
-        self.assertEqual(0.5, recall)
+    def test_reranking_recall_uses_result_num_with_deeper_candidates(self):
+        import faiss
+        base = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=np.float32)
+        queries = np.asarray([[0.1]], dtype=np.float32)
+        index = faiss.IndexFlatL2(1)
+        index.add(base)
+        candidates = np.asarray([[0, 1, 2, 3]], dtype=np.int64)
+        recall = MODULE.reranking_recall_at_k(
+            faiss, index, queries, candidates, 2)
+        self.assertEqual(1.0, recall)
+        with self.assertRaises(ValueError):
+            MODULE.reranking_recall_at_k(
+                faiss, index, queries, candidates[:, :2], 2)
 
     def test_ini_is_authoritative_and_reuses_query_count_limit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -99,12 +92,13 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 'MaxBits=7\n'
                 '\n'
                 '[SearchSSDIndex]\n'
-                'QueryCountLimit=10000\n',
+                'QueryCountLimit=10000\n'
+                'ResultNum=100\n',
                 encoding='ascii')
             args = MODULE.get_config(['--config', str(path)])
             self.assertTrue(args.rabitq_auto_tune)
             self.assertEqual(10000, args.Q)
-            self.assertIsNone(args.k)
+            self.assertEqual(100, args.k)
             self.assertEqual(0.97, args.rabitq_target_recall)
             self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
             self.assertEqual('base.bin', args.data_file)
@@ -155,7 +149,8 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 'OutputDir=tuning\n'
                 '\n'
                 '[SearchSSDIndex]\n'
-                'QueryCountLimit=10000\n',
+                'QueryCountLimit=10000\n'
+                'ResultNum=100\n',
                 encoding='ascii')
             with self.assertRaises(ValueError):
                 MODULE.get_config(['--config', str(path)])

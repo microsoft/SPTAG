@@ -103,6 +103,8 @@ def load_rabitq_auto_tune_ini(path):
                 f'query count must be set by [{section_name}] QueryCount or '
                 '[SearchSSDIndex] QueryCountLimit')
         query_count = config.getint('SearchSSDIndex', 'QueryCountLimit')
+    if not config.has_option('SearchSSDIndex', 'ResultNum'):
+        raise ValueError('[SearchSSDIndex] ResultNum is required for RaBitQ tuning')
 
     return argparse.Namespace(
         config=path,
@@ -112,7 +114,7 @@ def load_rabitq_auto_tune_ini(path):
         query_normalize=section.getint('QueryNormalize', fallback=0),
         data_type=value_types[value_type],
         target_type=section.get('TargetType', fallback='float32'),
-        k=None,
+        k=config.getint('SearchSSDIndex', 'ResultNum'),
         dim=base.getint('Dim'),
         B=section.getint('DataBatchSize', fallback=-1),
         Q=query_count,
@@ -420,43 +422,54 @@ def rabitq_bits_from_quantized_dimension(dim, quan_dim):
         raise ValueError(f'RaBitQ bits must be in [1, 8], got {bits}')
     return bits
 
-def load_ground_truth(path, query_count, topk=None):
-    ground_truths = []
-    infer_topk = topk is None
+def load_ground_truth(path, query_count):
+    rows = []
+    candidate_count = None
     with open(path, 'r') as truth_file:
         for query_id in range(query_count):
             line = truth_file.readline()
             if not line:
                 raise ValueError(f'ground truth contains only {query_id} queries, expected {query_count}')
             neighbors = line.strip().split()
-            if topk is None:
-                topk = len(neighbors)
-                if topk == 0:
+            if candidate_count is None:
+                candidate_count = len(neighbors)
+                if candidate_count == 0:
                     raise ValueError('ground truth query 0 contains no neighbors')
-            if len(neighbors) < topk:
+            if len(neighbors) != candidate_count:
                 raise ValueError(
-                    f'ground truth query {query_id} contains {len(neighbors)} neighbors, expected at least {topk}')
-            if infer_topk and len(neighbors) != topk:
-                raise ValueError(
-                    f'ground truth query {query_id} contains {len(neighbors)} neighbors, expected exactly {topk}')
-            truth = set(int(neighbor) for neighbor in neighbors[:topk])
-            if len(truth) != topk:
+                    f'ground truth query {query_id} contains {len(neighbors)} neighbors, '
+                    f'expected exactly {candidate_count}')
+            row = [int(neighbor) for neighbor in neighbors]
+            if len(set(row)) != candidate_count:
                 raise ValueError(f'ground truth query {query_id} contains duplicate neighbor IDs')
-            ground_truths.append(truth)
-    return ground_truths, topk
+            rows.append(row)
+    return np.asarray(rows, dtype=np.int64)
 
-def recall_at_k(faiss_index, queries, ground_truths, topk, batch_size=64):
-    if len(queries) != len(ground_truths):
+def reranking_recall_at_k(faiss, faiss_index, queries, candidates, topk):
+    if len(queries) != len(candidates):
         raise ValueError('query and ground-truth counts differ')
     if len(queries) == 0:
         raise ValueError('at least one query is required')
+    if topk <= 0:
+        raise ValueError('ResultNum must be positive')
+    candidate_count = candidates.shape[1]
+    if candidate_count <= topk:
+        raise ValueError(
+            f'ground-truth candidate depth must exceed ResultNum: {candidate_count} <= {topk}')
+    if np.any(candidates < 0) or np.any(candidates >= faiss_index.ntotal):
+        raise ValueError('ground truth contains a vector ID outside the base data')
+
     recall_sum = 0.0
-    for start in tqdm.tqdm(range(0, len(queries), batch_size)):
-        end = min(start + batch_size, len(queries))
-        _, results = faiss_index.search(np.asarray(queries[start:end]), topk)
-        for offset, candidates in enumerate(results):
-            truth = ground_truths[start + offset]
-            recall_sum += len(truth.intersection(int(candidate) for candidate in candidates if candidate >= 0)) / len(truth)
+    for query_id in tqdm.tqdm(range(len(queries))):
+        candidate_ids = np.ascontiguousarray(candidates[query_id])
+        parameters = faiss.SearchParameters()
+        parameters.sel = faiss.IDSelectorArray(
+            candidate_count, faiss.swig_ptr(candidate_ids))
+        _, results = faiss_index.search(
+            np.ascontiguousarray(queries[query_id:query_id + 1]), topk,
+            params=parameters)
+        expected = set(int(candidate) for candidate in candidate_ids[:topk])
+        recall_sum += len(expected.intersection(int(candidate) for candidate in results[0])) / topk
     return recall_sum / len(queries)
 
 def create_rabitq_index(faiss, dim, bits, training_data):
@@ -479,7 +492,7 @@ def add_rabitq_data(args, faiss_index):
         raise ValueError('RaBitQ input data is empty')
     return total
 
-def tune_rabitq_bits(args, faiss, training_data, queries, ground_truths):
+def tune_rabitq_bits(args, faiss, training_data, queries, ground_truth_candidates):
     if not 0.0 < args.rabitq_target_recall <= 1.0:
         raise ValueError('rabitq_target_recall must be in (0, 1]')
     if args.rabitq_min_bits < 1 or args.rabitq_max_bits > 8 or args.rabitq_min_bits > args.rabitq_max_bits:
@@ -490,7 +503,8 @@ def tune_rabitq_bits(args, faiss, training_data, queries, ground_truths):
         print(f'Auto tuning RaBitQ{bits} for Recall@{args.k} >= {args.rabitq_target_recall:.6f}')
         candidate = create_rabitq_index(faiss, args.dim, bits, training_data)
         data_count = add_rabitq_data(args, candidate)
-        recall = recall_at_k(candidate, queries, ground_truths, args.k)
+        recall = reranking_recall_at_k(
+            faiss, candidate, queries, ground_truth_candidates, args.k)
         trials.append({'bits': bits, 'recall': recall})
         print(f'RaBitQ{bits} Recall@{args.k}: {recall:.6f}')
         if recall >= args.rabitq_target_recall:
@@ -512,10 +526,8 @@ def train_rabitq(args):
         raise ValueError('Cosine RaBitQ tuning requires data_normalize=1 and query_normalize=1')
     if args.train_samples <= 0:
         raise ValueError('train_samples must be positive')
-    if args.Q <= 0:
-        raise ValueError('Q must be positive')
-    if not args.rabitq_auto_tune and (args.k is None or args.k <= 0):
-        raise ValueError('k must be positive')
+    if args.Q <= 0 or args.k <= 0:
+        raise ValueError('Q and k must be positive')
     if len(args.output_quan_vector_file) > 0 or len(args.output_rec_vector_file) > 0:
         raise ValueError(
             'RaBitQ vectors must be generated by the native SPTAG quantizer after tuning; '
@@ -537,18 +549,17 @@ def train_rabitq(args):
         queryreader.close()
         if num_query != args.Q:
             raise ValueError(f'query file contains {num_query} queries, but configured Q is {args.Q}')
-        ground_truths, truth_topk = load_ground_truth(
-            args.output_truth, num_query, args.k)
-        if args.k is None:
-            args.k = truth_topk
+        ground_truth_candidates = load_ground_truth(
+            args.output_truth, num_query)
         bits, data_count, trials = tune_rabitq_bits(
-            args, faiss, training_data, queries, ground_truths)
+            args, faiss, training_data, queries, ground_truth_candidates)
         result = {
             'selected_bits': bits,
             'native_quantizer_qd': bits,
             'storage_bytes_per_vector': sptag_rabitq_storage_bytes(args.dim, bits),
             'target_recall': args.rabitq_target_recall,
             'recall_at': args.k,
+            'rerank_candidate_count': ground_truth_candidates.shape[1],
             'query_count': num_query,
             'data_count': data_count,
             'trials': trials,

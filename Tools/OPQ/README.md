@@ -19,9 +19,11 @@ python3 OPQ_gpu_train_infer.py --data_file openai_5M.bin --query_file openai_tes
 
 `--rabitq_auto_tune` runs before vector encoding or index construction. It evaluates
 RaBitQ bit counts in ascending order and selects the first (therefore minimum)
-count whose exhaustive `Recall@k` reaches `--rabitq_target_recall`. Every candidate
+count whose reranking Recall reaches `--rabitq_target_recall`. Every candidate
 uses the same first `--train_samples` vectors, the same configured `--Q` queries,
-and the pre-generated `--output_truth` top-`k` neighbors.
+and the full pre-generated ground-truth candidate pool. In INI mode,
+`[SearchSSDIndex] ResultNum` supplies K: the candidate pool is reranked by
+RaBitQ distance and its first K IDs are compared with the exact first K.
 
 The command fails instead of silently choosing a bit count when the configured
 query/ground-truth count is unavailable or no candidate in
