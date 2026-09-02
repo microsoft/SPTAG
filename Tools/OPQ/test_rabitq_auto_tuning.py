@@ -64,6 +64,75 @@ class RaBitQAutoTuningTest(unittest.TestCase):
         recall = MODULE.recall_at_k(index, queries, [{1, 2}, {3, 4}], 2, batch_size=2)
         self.assertEqual(0.5, recall)
 
+    def test_ini_is_authoritative_and_reuses_query_count_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'build.ini'
+            path.write_text(
+                '[RaBitQAutoTune]\n'
+                'isExecute=true\n'
+                'DataFile=base.bin\n'
+                'QueryFile=query.bin\n'
+                'TruthFile=truth.txt\n'
+                'OutputDir=tuning\n'
+                'Dimension=128\n'
+                'RecallAt=1000\n'
+                'TargetRecall=0.97\n'
+                'MinBits=2\n'
+                'MaxBits=7\n'
+                '\n'
+                '[SearchSSDIndex]\n'
+                'QueryCountLimit=10000\n',
+                encoding='ascii')
+            args = MODULE.get_config(['--config', str(path)])
+            self.assertTrue(args.rabitq_auto_tune)
+            self.assertEqual(10000, args.Q)
+            self.assertEqual(1000, args.k)
+            self.assertEqual(0.97, args.rabitq_target_recall)
+            self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
+
+            with self.assertRaises(ValueError):
+                MODULE.get_config(['--config', str(path), '--Q', '1'])
+
+    def test_ini_rejects_unknown_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'build.ini'
+            path.write_text(
+                '[RaBitQAutoTune]\n'
+                'isExecute=true\n'
+                'DataFile=base.bin\n'
+                'QueryFile=query.bin\n'
+                'TruthFile=truth.txt\n'
+                'OutputDir=tuning\n'
+                'Dimension=128\n'
+                'RecallAt=1000\n'
+                'QueryCount=10000\n'
+                'TypoTargetRecal=0.95\n',
+                encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.get_config(['--config', str(path)])
+
+    def test_ini_rejects_inherited_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'build.ini'
+            path.write_text(
+                '[DEFAULT]\n'
+                'QueryCount=1\n'
+                '\n'
+                '[RaBitQAutoTune]\n'
+                'isExecute=true\n'
+                'DataFile=base.bin\n'
+                'QueryFile=query.bin\n'
+                'TruthFile=truth.txt\n'
+                'OutputDir=tuning\n'
+                'Dimension=128\n'
+                'RecallAt=1000\n'
+                '\n'
+                '[SearchSSDIndex]\n'
+                'QueryCountLimit=10000\n',
+                encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.get_config(['--config', str(path)])
+
 
 if __name__ == '__main__':
     unittest.main()

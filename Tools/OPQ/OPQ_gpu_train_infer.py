@@ -7,13 +7,16 @@ from typing import Dict, List
 import heapq
 import argparse
 import copy
+import configparser
 import json
 from operator import itemgetter
 import os
 import subprocess
+import sys
 
-def get_config():
+def get_cli_parser():
     parser = argparse.ArgumentParser(description ='implementation of nnsearch.')
+    parser.add_argument('--config', type = str, help='native INI containing [RaBitQAutoTune]')
     parser.add_argument('--data_file', default = 'traindata', type = str, help = 'binary data file')
     parser.add_argument('--query_file', default = 'query.tsv', type= str, help='query tsv file')
     parser.add_argument('--data_normalize', default = 0, type = int, help='normalize data vectors')
@@ -45,8 +48,92 @@ def get_config():
     parser.add_argument('--rabitq_min_bits', type = int, default = 1, help='minimum RaBitQ storage bits to evaluate')
     parser.add_argument('--rabitq_max_bits', type = int, default = 8, help='maximum RaBitQ storage bits to evaluate')
     parser.add_argument('--rabitq_tuning_result', type = str, default = 'rabitq_auto_tuning.json', help='auto-tuning result file under output_dir')
-    args = parser.parse_args()
-    return args
+    return parser
+
+def load_rabitq_auto_tune_ini(path):
+    config = configparser.ConfigParser(interpolation=None)
+    if not config.read(path):
+        raise ValueError(f'cannot read INI file: {path}')
+    if config.defaults():
+        raise ValueError('[DEFAULT] parameters are forbidden in strict RaBitQ INI mode')
+    section_name = 'RaBitQAutoTune'
+    if not config.has_section(section_name):
+        raise ValueError(f'INI file is missing [{section_name}]')
+    section = config[section_name]
+    allowed_keys = {
+        'isexecute', 'datafile', 'queryfile', 'truthfile', 'outputdir',
+        'datatype', 'targettype', 'dimension', 'databatchsize', 'querycount',
+        'recallat', 'distance', 'threads', 'trainingsamples', 'targetrecall',
+        'minbits', 'maxbits', 'tuningresult', 'datanormalize', 'querynormalize',
+        'dataformat', 'task',
+    }
+    unknown_keys = set(section.keys()) - allowed_keys
+    if unknown_keys:
+        raise ValueError(
+            f'unknown [{section_name}] parameter(s): {", ".join(sorted(unknown_keys))}')
+    required_keys = ('DataFile', 'QueryFile', 'TruthFile', 'OutputDir', 'Dimension', 'RecallAt')
+    missing_keys = [key for key in required_keys if not section.get(key)]
+    if missing_keys:
+        raise ValueError(
+            f'[{section_name}] is missing required parameter(s): {", ".join(missing_keys)}')
+    if not section.getboolean('isExecute', fallback=False):
+        raise ValueError(f'[{section_name}] isExecute must be true')
+
+    query_count = section.getint('QueryCount', fallback=None)
+    if query_count is None:
+        if not config.has_option('SearchSSDIndex', 'QueryCountLimit'):
+            raise ValueError(
+                f'query count must be set by [{section_name}] QueryCount or '
+                '[SearchSSDIndex] QueryCountLimit')
+        query_count = config.getint('SearchSSDIndex', 'QueryCountLimit')
+
+    return argparse.Namespace(
+        config=path,
+        data_file=section['DataFile'],
+        query_file=section['QueryFile'],
+        data_normalize=section.getint('DataNormalize', fallback=0),
+        query_normalize=section.getint('QueryNormalize', fallback=0),
+        data_type=section.get('DataType', fallback='float32'),
+        target_type=section.get('TargetType', fallback='float32'),
+        k=section.getint('RecallAt'),
+        dim=section.getint('Dimension'),
+        B=section.getint('DataBatchSize', fallback=-1),
+        Q=query_count,
+        S=1000,
+        D=section.get('Distance', fallback='L2'),
+        output_truth=section['TruthFile'],
+        data_format=section.get('DataFormat', fallback='DEFAULT'),
+        task=section.getint('Task', fallback=0),
+        log_dir='',
+        T=section.getint('Threads', fallback=32),
+        train_samples=section.getint('TrainingSamples', fallback=1000000),
+        quan_type='rabitq',
+        quan_dim=-1,
+        output_dir=section['OutputDir'],
+        output_quantizer='quantizer.bin',
+        output_quan_vector_file='',
+        output_rec_vector_file='',
+        quan_test=1,
+        rabitq_auto_tune=True,
+        rabitq_target_recall=section.getfloat('TargetRecall', fallback=0.95),
+        rabitq_min_bits=section.getint('MinBits', fallback=1),
+        rabitq_max_bits=section.getint('MaxBits', fallback=8),
+        rabitq_tuning_result=section.get(
+            'TuningResult', fallback='rabitq_auto_tuning.json'),
+    )
+
+def get_config(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    config_probe = argparse.ArgumentParser(add_help=False)
+    config_probe.add_argument('--config')
+    config_args, remaining = config_probe.parse_known_args(argv)
+    if config_args.config is not None:
+        if remaining:
+            raise ValueError(
+                'INI mode accepts only --config; command-line parameter overrides are forbidden')
+        return load_rabitq_auto_tune_ini(config_args.config)
+    return get_cli_parser().parse_args(argv)
 
 def is_binary_vector_file(filename):
     suffixes = ('.bin', '.fbin', '.u8bin', '.i8bin')

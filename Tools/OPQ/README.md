@@ -32,3 +32,15 @@ factors), measured recalls, and sample counts are written atomically to
 native SPTAG `quantizer` command that generates the quantizer and vectors consumed
 by the subsequent index build. The tuner deliberately does not emit Faiss codes:
 their persisted layout is not the SPTAG global RaBitQ format.
+
+The same parameters can be supplied exclusively through the
+`[RaBitQAutoTune]` section of an INI:
+
+```bash
+python3 Tools/OPQ/OPQ_gpu_train_infer.py \
+  --config Script_AE/iniFile/rabitq_auto_tune_sift1m.ini
+```
+
+In INI mode no additional CLI parameters are accepted. `QueryCount` defaults to
+`[SearchSSDIndex] QueryCountLimit`, keeping the configured query count in one
+place.

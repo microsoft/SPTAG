@@ -247,27 +247,51 @@ use the generated model through `QuantizerFilePath` in the normal SPANN
 workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
 `Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
 
-To select the minimum storage bit count before building the index, run the
-RaBitQ tuner against a pre-generated exact top-`k` ground truth. The tuning
-inputs below use SPTAG `DEFAULT` binary files (`int32 count`, `int32 dimension`,
-then vector payload) and a text ground-truth file containing one
-space-separated neighbor-ID list per query:
+To select the minimum storage bit count before building the index, add a
+`[RaBitQAutoTune]` section to the SPANN INI. The tuner uses a pre-generated
+exact top-`k` ground truth. Its vector inputs use SPTAG `DEFAULT` binary files
+(`int32 count`, `int32 dimension`, then vector payload), and its text
+ground-truth file contains one space-separated neighbor-ID list per query:
+
+```ini
+[RaBitQAutoTune]
+isExecute=true
+DataFile=sift1m/sift_base.bin
+QueryFile=sift1m/sift_query.bin
+TruthFile=sift1m/sift_groundtruth_top1000.txt
+OutputDir=sift1m/rabitq_tuning
+DataType=float32
+TargetType=float32
+Dimension=128
+DataBatchSize=1000000
+RecallAt=1000
+Distance=L2
+Threads=46
+TrainingSamples=1000000
+TargetRecall=0.95
+MinBits=1
+MaxBits=8
+DataNormalize=0
+QueryNormalize=0
+
+[SearchSSDIndex]
+QueryCountLimit=10000
+```
+
+Run the pre-build tuning stage with only the INI path:
 
 ```bash
 python3 Tools/OPQ/OPQ_gpu_train_infer.py \
-  --data_file sift1m/sift_base.bin \
-  --query_file sift1m/sift_query.bin \
-  --output_truth sift1m/sift_groundtruth_top1000.txt \
-  --output_dir sift1m/rabitq_tuning \
-  --data_type float32 --target_type float32 \
-  --dim 128 --B 1000000 --Q 10000 --k 1000 --D L2 --T 46 \
-  --train_samples 1000000 --quan_type rabitq --quan_test 1 \
-  --rabitq_auto_tune --rabitq_target_recall 0.95 \
-  --rabitq_min_bits 1 --rabitq_max_bits 8
+  --config Script_AE/iniFile/rabitq_auto_tune_sift1m.ini
 ```
 
 The tuner evaluates bit counts in ascending order using exactly the configured
-10,000 queries and selects the first bit count meeting `Recall@1000 >= 0.95`.
+`SearchSSDIndex.QueryCountLimit` queries and selects the first bit count meeting
+`Recall@1000 >= 0.95`. When `--config` is used, additional command-line
+parameters are rejected, so they cannot override the INI. A
+`RaBitQAutoTune.QueryCount` may be set explicitly only when the tuning query
+count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
+also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.
 It fails if fewer queries/ground-truth rows are available or no candidate
 qualifies. The ground truth is not moved or modified. Results are written
 atomically to `sift1m/rabitq_tuning/rabitq_auto_tuning.json`; use
