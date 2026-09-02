@@ -273,8 +273,6 @@ OutputDir=sift1m/rabitq_tuning
 TargetRecall=0.95
 MinBits=1
 MaxBits=8
-DataNormalize=0
-QueryNormalize=0
 
 [BuildSSDIndex]
 NumberOfThreads=46
@@ -306,8 +304,9 @@ cannot override the INI. A
 count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
 also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.
 The tuner reads the type from `[Base].ValueType`; global RaBitQ currently
-requires `Float`. It computes the centroid over the complete base file in
-bounded one-million-vector batches, so there is no training-sample parameter.
+requires `Float` and `[Base].DistCalcMethod=L2`. It does not independently
+normalize data or queries. It computes the centroid over the complete base file
+in bounded one-million-vector batches, so there is no training-sample parameter.
 Faiss/OpenMP uses the existing
 `BuildSSDIndex.NumberOfThreads` value; there is no separate tuner thread setting.
 It fails if fewer queries/ground-truth rows are available or no candidate

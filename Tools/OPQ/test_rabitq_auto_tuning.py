@@ -177,6 +177,39 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 MODULE.get_config(['--config', str(path)])
 
+    def test_ini_rejects_normalization_and_non_l2_metric(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'build.ini'
+            config = (
+                '[Base]\n'
+                'ValueType=Float\n'
+                'DistCalcMethod=L2\n'
+                'Dim=128\n'
+                'VectorPath=base.bin\n'
+                'QueryPath=query.bin\n'
+                'TruthPath=truth.txt\n'
+                '\n'
+                '[RaBitQAutoTune]\n'
+                'isExecute=true\n'
+                'OutputDir=tuning\n'
+                'DataNormalize=1\n'
+                '\n'
+                '[BuildSSDIndex]\n'
+                'NumberOfThreads=46\n'
+                '\n'
+                '[SearchSSDIndex]\n'
+                'QueryCountLimit=10000\n'
+                'ResultNum=100\n')
+            path.write_text(config, encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.get_config(['--config', str(path)])
+            path.write_text(
+                config.replace('DistCalcMethod=L2', 'DistCalcMethod=Cosine')
+                      .replace('DataNormalize=1\n', ''),
+                encoding='ascii')
+            with self.assertRaises(ValueError):
+                MODULE.get_config(['--config', str(path)])
+
     def test_ini_rejects_inherited_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'build.ini'

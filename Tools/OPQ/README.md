@@ -43,4 +43,6 @@ python3 Tools/OPQ/OPQ_gpu_train_infer.py \
 
 In INI mode no additional CLI parameters are accepted. `QueryCount` defaults to
 `[SearchSSDIndex] QueryCountLimit`, keeping the configured query count in one
-place. Faiss/OpenMP reuses `[BuildSSDIndex] NumberOfThreads`.
+place. Faiss/OpenMP reuses `[BuildSSDIndex] NumberOfThreads`. Global RaBitQ
+tuning requires `[Base] ValueType=Float` and `DistCalcMethod=L2`; there are no
+separate data/query normalization settings.

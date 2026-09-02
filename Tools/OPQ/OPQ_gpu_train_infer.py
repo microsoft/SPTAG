@@ -66,8 +66,7 @@ def load_rabitq_auto_tune_ini(path):
     section = config[section_name]
     allowed_keys = {
         'isexecute', 'outputdir', 'querycount', 'targetrecall',
-        'minbits', 'maxbits', 'tuningresult', 'datanormalize', 'querynormalize',
-        'dataformat', 'task',
+        'minbits', 'maxbits', 'tuningresult', 'dataformat', 'task',
     }
     unknown_keys = set(section.keys()) - allowed_keys
     if unknown_keys:
@@ -98,6 +97,8 @@ def load_rabitq_auto_tune_ini(path):
         raise ValueError(f'unsupported [Base] ValueType for RaBitQ tuning: {base["ValueType"]}')
     if value_type != 'float':
         raise ValueError('RaBitQ tuning requires [Base] ValueType=Float')
+    if base['DistCalcMethod'].lower() != 'l2':
+        raise ValueError('RaBitQ tuning requires [Base] DistCalcMethod=L2')
 
     query_count = section.getint('QueryCount', fallback=None)
     if query_count is None:
@@ -115,8 +116,8 @@ def load_rabitq_auto_tune_ini(path):
         config=path,
         data_file=base['VectorPath'],
         query_file=base['QueryPath'],
-        data_normalize=section.getint('DataNormalize', fallback=0),
-        query_normalize=section.getint('QueryNormalize', fallback=0),
+        data_normalize=0,
+        query_normalize=0,
         data_type=value_types[value_type],
         target_type=value_types[value_type],
         k=config.getint('SearchSSDIndex', 'ResultNum'),
@@ -548,10 +549,8 @@ def train_rabitq(args):
 
     output_dir = args.output_dir
 
-    if args.D not in ('L2', 'Cosine'):
-        raise ValueError('RaBitQ training supports only L2, or Cosine with normalized data and queries')
-    if args.D == 'Cosine' and (args.data_normalize == 0 or args.query_normalize == 0):
-        raise ValueError('Cosine RaBitQ tuning requires data_normalize=1 and query_normalize=1')
+    if args.D != 'L2':
+        raise ValueError('SPTAG global RaBitQ tuning requires [Base] DistCalcMethod=L2')
     if args.Q <= 0 or args.k <= 0:
         raise ValueError('Q and k must be positive')
     if len(args.output_quan_vector_file) > 0 or len(args.output_rec_vector_file) > 0:
