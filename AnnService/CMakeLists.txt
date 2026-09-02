@@ -144,17 +144,23 @@ if (RABITQ)
 else()
     list(REMOVE_ITEM HDR_FILES
 	    ${AnnService}/inc/Core/Common/RaBitQQuantizer.h
+	    ${AnnService}/inc/Core/Common/RaBitQAutoTuner.h
     )
 
     list(REMOVE_ITEM SRC_FILES
 	    ${AnnService}/src/Core/Common/RaBitQQuantizer.cpp
+	    ${AnnService}/src/Core/Common/RaBitQAutoTuner.cpp
     )
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLib DistanceUtils ${RabitQ_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLibStatic DistanceUtils ${RabitQ_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+if (RABITQ)
+    target_link_libraries(SPTAGLib RaBitQOfficialCore)
+    target_link_libraries(SPTAGLibStatic RaBitQOfficialCore)
+endif()
 
 if (MSVC)
     # SPANNIndex.cpp can exceed COFF section limits in Debug without /bigobj.

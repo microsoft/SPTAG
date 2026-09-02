@@ -241,100 +241,56 @@ SearchPostingPageLimit=12
 
 ### **Global RaBitQ Quantizer**
 
-RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the
-official model and encode base vectors with `Release/quantizer`, then
-use the generated model through `QuantizerFilePath` in the normal SPANN
-workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
-`Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
-
-To select the minimum storage bit count before building the index, add a
-`[RaBitQAutoTune]` section to a pre-build INI. `[Base]` is the single source for
-the raw vector, query, ground-truth, dimension, value type, and distance. The
-tuner uses a pre-generated exact top-`k` ground truth. Vector inputs use SPTAG
-`DEFAULT` binary files (`int32 count`, `int32 dimension`, then vector payload),
-and the text ground-truth file contains one space-separated neighbor-ID list
-per query:
+RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. A build
+configured with `-DRABITQ=ON` can select its bit width, train the official
+model, encode the complete base set, and continue SPANN construction in one
+`indexbuilder` invocation. Add only this tuner-specific section to the normal
+native build INI:
 
 ```ini
-[Base]
-ValueType=Float
-DistCalcMethod=L2
-Dim=128
-VectorPath=sift1m/sift_base.bin
-VectorType=DEFAULT
-QueryPath=sift1m/sift_query.bin
-QueryType=DEFAULT
-TruthPath=sift1m/sift_groundtruth_top1000.txt
-TruthType=DEFAULT
-
 [RaBitQAutoTune]
 isExecute=true
-OutputDir=sift1m/rabitq_tuning
 TargetRecall=0.95
-
-[BuildSSDIndex]
-NumberOfThreads=46
-
-[SearchSSDIndex]
-QueryCountLimit=10000
-ResultNum=100
 ```
 
-Run the pre-build tuning stage with only the INI path:
+The tuner takes all shared settings from the existing INI:
 
-```bash
-python3 Tools/OPQ/OPQ_gpu_train_infer.py \
-  --config Script_AE/iniFile/rabitq_auto_tune_sift1m.ini
-```
+* `[Base]` supplies `VectorPath`, `QueryPath`, `TruthPath`, `VectorType`,
+  `QueryType`, `TruthType`, `ValueType`, `Dim`, and `DistCalcMethod`.
+* `[SearchSSDIndex]` supplies `QueryCountLimit` and `ResultNum`.
+* `[BuildSSDIndex]` supplies `NumberOfThreads`.
 
-The tuner evaluates bit counts in ascending order using exactly the configured
-`SearchSSDIndex.QueryCountLimit` queries and selects the first bit count meeting
-the target Recall. The supported 1 through 8 bit range is fixed by RaBitQ and is
-always evaluated from the minimum upward. `SearchSSDIndex.ResultNum` is the expected result K. The
-ground-truth width is a separate, deeper reranking candidate pool: with
-`ResultNum=100` and 1,000 exact IDs per query, each RaBitQ candidate reranks
-those 1,000 IDs and is evaluated as `Recall@100` against the exact first 100.
-The candidate depth must be strictly greater than `ResultNum`; this prevents a
-top100 ground truth from being used to evaluate K=100. All consumed
-ground-truth rows must have exactly the same width with no duplicate IDs. When
-`--config` is used, additional command-line parameters are rejected, so they
-cannot override the INI. A
-`RaBitQAutoTune.QueryCount` may be set explicitly only when the tuning query
-count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
-also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.
-The tuner reads the type from `[Base].ValueType`; global RaBitQ currently
-requires `Float` and `[Base].DistCalcMethod=L2`. It does not independently
-normalize data or queries. It computes the centroid over the complete base file
-in bounded one-million-vector batches, so there is no training-sample parameter.
-Faiss/OpenMP uses the existing
-`BuildSSDIndex.NumberOfThreads` value; there is no separate tuner thread setting.
-It fails if fewer queries/ground-truth rows are available or no candidate
-qualifies. The ground truth is not moved or modified. Results are written
-atomically to `sift1m/rabitq_tuning/rabitq_auto_tuning.json`; use
-`native_quantizer_qd` for `-qd` and `storage_bytes_per_vector` for the SPANN
-`[Base] Dim`:
+The raw base and queries must be `Float` with `DistCalcMethod=L2`. Exactly
+`QueryCountLimit` queries are evaluated. Each truth row must contain a
+consistent, duplicate-free candidate list deeper than `ResultNum`; the tuner
+reranks the complete candidate list with each native RaBitQ model, compares its
+first `ResultNum` IDs with the first `ResultNum` exact IDs, and averages query
+recalls equally. Bits 1 through 8 are tried in ascending order and the first
+width meeting `TargetRecall` is selected; the build fails if none qualifies.
 
-```bash
-BITS=$(python3 -c \
-  'import json; print(json.load(open("sift1m/rabitq_tuning/rabitq_auto_tuning.json"))["native_quantizer_qd"])')
-STORAGE_DIM=$(python3 -c \
-  'import json; print(json.load(open("sift1m/rabitq_tuning/rabitq_auto_tuning.json"))["storage_bytes_per_vector"])')
+The centroid is computed over every base vector in bounded native reader
+batches. The selected official model and complete DEFAULT-format encoded base
+file are built with the complete index in a unique sibling staging directory
+and published under `[Base] IndexDirectory` only after construction succeeds.
+The published files include `rabitq_auto_quantizer.bin` and
+`rabitq_auto_vectors.bin`; a previous index is restored if directory
+publication fails. `--outputfolder` must name the same directory as
+`[Base] IndexDirectory`, and `--input`, `--quantizer`, and
+`Section.Parameter=value` overrides are rejected in auto-tuning mode. The
+builder internally uses the generated `UInt8` width (obtained from
+`GetNumSubvectors()`), model, and vector path while queries remain raw Float
+vectors through ADC. The original `VectorPath` remains the sole raw source;
+no JSON, environment overrides, manual INI edits, or Python/Faiss step is
+used. If the section is absent or disabled, existing build behavior is
+unchanged.
 
-Release/quantizer \
-  -d 128 -v Float -f XVEC \
-  -i sift1m/sift_base.fvecs \
-  -o "sift1m/sift_base.rabitq${BITS}.u8bin" \
-  -oq "sift1m/official_rabitq${BITS}_global.bin" \
-  -qt RaBitQQuantizer -qd "$BITS" -ts 1000000
-```
+For a manually selected width, train the official model and encode base vectors
+with `Release/quantizer`, then use the generated model through
+`QuantizerFilePath` in the normal SPANN workflow. For 128-dimensional SIFT
+vectors, the encoded `UInt8` vectors use `Dim=68` at 3 bits (48 compact code
+bytes plus five Float factors).
 
-The pre-build INI continues to describe raw Float data. Set `VectorPath` and
-`QuantizerFilePath` to the generated quantized files and set
-`ValueType=UInt8`, `Dim=$STORAGE_DIM` in the subsequent build INI before
-starting SPANN construction. Do not use a manually supplied bit count to
-override an auto-tuning result.
-
-For reference, the fixed 3-bit SIFT1M command is:
+Train and encode SIFT1M:
 
 ```bash
 Release/quantizer \
