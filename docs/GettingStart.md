@@ -247,7 +247,52 @@ use the generated model through `QuantizerFilePath` in the normal SPANN
 workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
 `Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
 
-Train and encode SIFT1M:
+To select the minimum storage bit count before building the index, run the
+RaBitQ tuner against a pre-generated exact top-`k` ground truth. The tuning
+inputs below use SPTAG `DEFAULT` binary files (`int32 count`, `int32 dimension`,
+then vector payload) and a text ground-truth file containing one
+space-separated neighbor-ID list per query:
+
+```bash
+python3 Tools/OPQ/OPQ_gpu_train_infer.py \
+  --data_file sift1m/sift_base.bin \
+  --query_file sift1m/sift_query.bin \
+  --output_truth sift1m/sift_groundtruth_top1000.txt \
+  --output_dir sift1m/rabitq_tuning \
+  --data_type float32 --target_type float32 \
+  --dim 128 --B 1000000 --Q 10000 --k 1000 --D L2 --T 46 \
+  --train_samples 1000000 --quan_type rabitq --quan_test 1 \
+  --rabitq_auto_tune --rabitq_target_recall 0.95 \
+  --rabitq_min_bits 1 --rabitq_max_bits 8
+```
+
+The tuner evaluates bit counts in ascending order using exactly the configured
+10,000 queries and selects the first bit count meeting `Recall@1000 >= 0.95`.
+It fails if fewer queries/ground-truth rows are available or no candidate
+qualifies. The ground truth is not moved or modified. Results are written
+atomically to `sift1m/rabitq_tuning/rabitq_auto_tuning.json`; use
+`native_quantizer_qd` for `-qd` and `storage_bytes_per_vector` for the SPANN
+`[Base] Dim`:
+
+```bash
+BITS=$(python3 -c \
+  'import json; print(json.load(open("sift1m/rabitq_tuning/rabitq_auto_tuning.json"))["native_quantizer_qd"])')
+STORAGE_DIM=$(python3 -c \
+  'import json; print(json.load(open("sift1m/rabitq_tuning/rabitq_auto_tuning.json"))["storage_bytes_per_vector"])')
+
+Release/quantizer \
+  -d 128 -v Float -f XVEC \
+  -i sift1m/sift_base.fvecs \
+  -o "sift1m/sift_base.rabitq${BITS}.u8bin" \
+  -oq "sift1m/official_rabitq${BITS}_global.bin" \
+  -qt RaBitQQuantizer -qd "$BITS" -ts 1000000
+```
+
+Set `VectorPath` and `QuantizerFilePath` to those generated files and set
+`Dim=$STORAGE_DIM` in the build INI before starting SPANN construction. Do not
+use the manually supplied `quan_dim` to override an auto-tuning result.
+
+For reference, the fixed 3-bit SIFT1M command is:
 
 ```bash
 Release/quantizer \
