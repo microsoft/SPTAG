@@ -12,16 +12,14 @@
 
 ## Example
 python3 OPQ_gpu_train_infer.py --data_file perftest_vector.bin --query_file perftest_query.bin --task 0 --data_type float32 --k 5 --dim 64 --B 1000000 --Q 1000 --D L2 --data_format DEFAULT --T 20 --train_samples 1000000 --quan_type opq --quan_dim 32 --output_quantizer quantizer.bin
-python3 OPQ_gpu_train_infer.py --data_file laion_5M.bin --query_file laion_test.bin --output_truth truth.txt --output_dir rabitq_tuned --data_type float32 --target_type float32 --k 100 --dim 768 --B 1000000 --Q 10000 --D L2 --train_samples 1000000 --quan_type rabitq --quan_test 1 --rabitq_auto_tune --rabitq_target_recall 0.95 --rabitq_min_bits 1 --rabitq_max_bits 8
-python3 OPQ_gpu_train_infer.py --data_file openai_5M.bin --query_file openai_test.bin --output_truth truth.txt --output_dir rabitq_tuned --data_type float32 --target_type float32 --k 100 --dim 1536 --B 1000000 --Q 10000 --D Cosine --train_samples 1000000 --quan_type rabitq --quan_test 1 --rabitq_auto_tune --rabitq_target_recall 0.95 --data_normalize 1 --query_normalize 1
 
 ## RaBitQ storage-bit auto tuning
 
 `--rabitq_auto_tune` runs before vector encoding or index construction. It evaluates
 RaBitQ bit counts in ascending order and selects the first (therefore minimum)
 count whose reranking Recall reaches `--rabitq_target_recall`. Every candidate
-uses the same first `--train_samples` vectors, the same configured `--Q` queries,
-and the full pre-generated ground-truth candidate pool. In INI mode,
+uses the centroid streamed over the complete base file, the same configured
+`--Q` queries, and the full pre-generated ground-truth candidate pool. In INI mode,
 `[SearchSSDIndex] ResultNum` supplies K: the candidate pool is reranked by
 RaBitQ distance and its first K IDs are compared with the exact first K.
 

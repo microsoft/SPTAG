@@ -305,8 +305,10 @@ cannot override the INI. A
 `RaBitQAutoTune.QueryCount` may be set explicitly only when the tuning query
 count intentionally differs from `SearchSSDIndex.QueryCountLimit`. Strict mode
 also rejects unknown `[RaBitQAutoTune]` keys and inherited `[DEFAULT]` values.
-Faiss input is always Float32, and batching and centroid training use internal
-one-million-vector batches. Faiss/OpenMP uses the existing
+The tuner reads the type from `[Base].ValueType`; global RaBitQ currently
+requires `Float`. It computes the centroid over the complete base file in
+bounded one-million-vector batches, so there is no training-sample parameter.
+Faiss/OpenMP uses the existing
 `BuildSSDIndex.NumberOfThreads` value; there is no separate tuner thread setting.
 It fails if fewer queries/ground-truth rows are available or no candidate
 qualifies. The ground truth is not moved or modified. Results are written

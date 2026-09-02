@@ -103,6 +103,8 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             self.assertEqual(10000, args.Q)
             self.assertEqual(100, args.k)
             self.assertEqual(46, args.T)
+            self.assertEqual('float32', args.target_type)
+            self.assertIsNone(args.train_samples)
             self.assertEqual(0.97, args.rabitq_target_recall)
             self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
             self.assertEqual('base.bin', args.data_file)
@@ -111,6 +113,24 @@ class RaBitQAutoTuningTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 MODULE.get_config(['--config', str(path), '--Q', '1'])
+
+    def test_streaming_centroid_uses_all_base_vectors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'vectors.bin'
+            vectors = np.arange(20, dtype=np.float32).reshape(5, 4)
+            with path.open('wb') as output:
+                np.asarray([5, 4], dtype=np.int32).tofile(output)
+                vectors.tofile(output)
+            args = type('Args', (), {
+                'data_file': str(path),
+                'dim': 4,
+                'data_normalize': 0,
+                'data_type': 'float32',
+                'target_type': 'float32',
+            })()
+            centroid, count = MODULE.compute_streaming_centroid(args)
+            self.assertEqual(5, count)
+            np.testing.assert_array_equal(centroid, vectors.mean(axis=0))
 
     def test_ini_rejects_unknown_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
