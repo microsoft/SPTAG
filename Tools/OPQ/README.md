@@ -45,4 +45,4 @@ python3 Tools/OPQ/OPQ_gpu_train_infer.py \
 
 In INI mode no additional CLI parameters are accepted. `QueryCount` defaults to
 `[SearchSSDIndex] QueryCountLimit`, keeping the configured query count in one
-place.
+place. Faiss/OpenMP reuses `[BuildSSDIndex] NumberOfThreads`.

@@ -91,6 +91,9 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 'MinBits=2\n'
                 'MaxBits=7\n'
                 '\n'
+                '[BuildSSDIndex]\n'
+                'NumberOfThreads=46\n'
+                '\n'
                 '[SearchSSDIndex]\n'
                 'QueryCountLimit=10000\n'
                 'ResultNum=100\n',
@@ -99,6 +102,7 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             self.assertTrue(args.rabitq_auto_tune)
             self.assertEqual(10000, args.Q)
             self.assertEqual(100, args.k)
+            self.assertEqual(46, args.T)
             self.assertEqual(0.97, args.rabitq_target_recall)
             self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
             self.assertEqual('base.bin', args.data_file)

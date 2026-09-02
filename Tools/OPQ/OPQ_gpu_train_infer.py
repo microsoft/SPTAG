@@ -106,6 +106,8 @@ def load_rabitq_auto_tune_ini(path):
         query_count = config.getint('SearchSSDIndex', 'QueryCountLimit')
     if not config.has_option('SearchSSDIndex', 'ResultNum'):
         raise ValueError('[SearchSSDIndex] ResultNum is required for RaBitQ tuning')
+    if not config.has_option('BuildSSDIndex', 'NumberOfThreads'):
+        raise ValueError('[BuildSSDIndex] NumberOfThreads is required for RaBitQ tuning')
 
     return argparse.Namespace(
         config=path,
@@ -125,7 +127,7 @@ def load_rabitq_auto_tune_ini(path):
         data_format=section.get('DataFormat', fallback='DEFAULT'),
         task=section.getint('Task', fallback=0),
         log_dir='',
-        T=None,
+        T=config.getint('BuildSSDIndex', 'NumberOfThreads'),
         train_samples=RABITQ_BATCH_SIZE,
         quan_type='rabitq',
         quan_dim=-1,
@@ -543,8 +545,9 @@ def train_rabitq(args):
     if num_training == 0:
         raise ValueError('RaBitQ training data is empty')
     print(f'train RaBitQ using {num_training} samples ...')
-    if args.T is not None:
-        faiss.omp_set_num_threads(args.T)
+    if args.T <= 0:
+        raise ValueError('NumberOfThreads must be positive')
+    faiss.omp_set_num_threads(args.T)
     if args.rabitq_auto_tune:
         if args.quan_test <= 0:
             raise ValueError('rabitq_auto_tune requires quan_test > 0 and a pre-generated ground truth')
