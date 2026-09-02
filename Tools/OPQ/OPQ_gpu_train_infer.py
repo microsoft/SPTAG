@@ -59,11 +59,12 @@ def load_rabitq_auto_tune_ini(path):
     section_name = 'RaBitQAutoTune'
     if not config.has_section(section_name):
         raise ValueError(f'INI file is missing [{section_name}]')
+    if not config.has_section('Base'):
+        raise ValueError('INI file is missing [Base]')
     section = config[section_name]
     allowed_keys = {
-        'isexecute', 'datafile', 'queryfile', 'truthfile', 'outputdir',
-        'datatype', 'targettype', 'dimension', 'databatchsize', 'querycount',
-        'recallat', 'distance', 'threads', 'trainingsamples', 'targetrecall',
+        'isexecute', 'outputdir', 'targettype', 'databatchsize', 'querycount',
+        'recallat', 'threads', 'trainingsamples', 'targetrecall',
         'minbits', 'maxbits', 'tuningresult', 'datanormalize', 'querynormalize',
         'dataformat', 'task',
     }
@@ -71,13 +72,29 @@ def load_rabitq_auto_tune_ini(path):
     if unknown_keys:
         raise ValueError(
             f'unknown [{section_name}] parameter(s): {", ".join(sorted(unknown_keys))}')
-    required_keys = ('DataFile', 'QueryFile', 'TruthFile', 'OutputDir', 'Dimension', 'RecallAt')
+    required_keys = ('OutputDir', 'RecallAt')
     missing_keys = [key for key in required_keys if not section.get(key)]
     if missing_keys:
         raise ValueError(
             f'[{section_name}] is missing required parameter(s): {", ".join(missing_keys)}')
     if not section.getboolean('isExecute', fallback=False):
         raise ValueError(f'[{section_name}] isExecute must be true')
+
+    base = config['Base']
+    base_required_keys = ('VectorPath', 'QueryPath', 'TruthPath', 'Dim', 'ValueType', 'DistCalcMethod')
+    missing_base_keys = [key for key in base_required_keys if not base.get(key)]
+    if missing_base_keys:
+        raise ValueError(
+            f'[Base] is missing required parameter(s): {", ".join(missing_base_keys)}')
+    value_types = {
+        'float': 'float32',
+        'int8': 'int8',
+        'uint8': 'uint8',
+        'int16': 'int16',
+    }
+    value_type = base['ValueType'].lower()
+    if value_type not in value_types:
+        raise ValueError(f'unsupported [Base] ValueType for RaBitQ tuning: {base["ValueType"]}')
 
     query_count = section.getint('QueryCount', fallback=None)
     if query_count is None:
@@ -89,19 +106,19 @@ def load_rabitq_auto_tune_ini(path):
 
     return argparse.Namespace(
         config=path,
-        data_file=section['DataFile'],
-        query_file=section['QueryFile'],
+        data_file=base['VectorPath'],
+        query_file=base['QueryPath'],
         data_normalize=section.getint('DataNormalize', fallback=0),
         query_normalize=section.getint('QueryNormalize', fallback=0),
-        data_type=section.get('DataType', fallback='float32'),
+        data_type=value_types[value_type],
         target_type=section.get('TargetType', fallback='float32'),
         k=section.getint('RecallAt'),
-        dim=section.getint('Dimension'),
+        dim=base.getint('Dim'),
         B=section.getint('DataBatchSize', fallback=-1),
         Q=query_count,
         S=1000,
-        D=section.get('Distance', fallback='L2'),
-        output_truth=section['TruthFile'],
+        D=base['DistCalcMethod'],
+        output_truth=base['TruthPath'],
         data_format=section.get('DataFormat', fallback='DEFAULT'),
         task=section.getint('Task', fallback=0),
         log_dir='',

@@ -248,24 +248,31 @@ workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
 `Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
 
 To select the minimum storage bit count before building the index, add a
-`[RaBitQAutoTune]` section to the SPANN INI. The tuner uses a pre-generated
-exact top-`k` ground truth. Its vector inputs use SPTAG `DEFAULT` binary files
-(`int32 count`, `int32 dimension`, then vector payload), and its text
-ground-truth file contains one space-separated neighbor-ID list per query:
+`[RaBitQAutoTune]` section to a pre-build INI. `[Base]` is the single source for
+the raw vector, query, ground-truth, dimension, value type, and distance. The
+tuner uses a pre-generated exact top-`k` ground truth. Vector inputs use SPTAG
+`DEFAULT` binary files (`int32 count`, `int32 dimension`, then vector payload),
+and the text ground-truth file contains one space-separated neighbor-ID list
+per query:
 
 ```ini
+[Base]
+ValueType=Float
+DistCalcMethod=L2
+Dim=128
+VectorPath=sift1m/sift_base.bin
+VectorType=DEFAULT
+QueryPath=sift1m/sift_query.bin
+QueryType=DEFAULT
+TruthPath=sift1m/sift_groundtruth_top1000.txt
+TruthType=DEFAULT
+
 [RaBitQAutoTune]
 isExecute=true
-DataFile=sift1m/sift_base.bin
-QueryFile=sift1m/sift_query.bin
-TruthFile=sift1m/sift_groundtruth_top1000.txt
 OutputDir=sift1m/rabitq_tuning
-DataType=float32
 TargetType=float32
-Dimension=128
 DataBatchSize=1000000
 RecallAt=1000
-Distance=L2
 Threads=46
 TrainingSamples=1000000
 TargetRecall=0.95
@@ -312,9 +319,11 @@ Release/quantizer \
   -qt RaBitQQuantizer -qd "$BITS" -ts 1000000
 ```
 
-Set `VectorPath` and `QuantizerFilePath` to those generated files and set
-`Dim=$STORAGE_DIM` in the build INI before starting SPANN construction. Do not
-use the manually supplied `quan_dim` to override an auto-tuning result.
+The pre-build INI continues to describe raw Float data. Set `VectorPath` and
+`QuantizerFilePath` to the generated quantized files and set
+`ValueType=UInt8`, `Dim=$STORAGE_DIM` in the subsequent build INI before
+starting SPANN construction. Do not use a manually supplied bit count to
+override an auto-tuning result.
 
 For reference, the fixed 3-bit SIFT1M command is:
 

@@ -68,13 +68,17 @@ class RaBitQAutoTuningTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'build.ini'
             path.write_text(
+                '[Base]\n'
+                'ValueType=Float\n'
+                'DistCalcMethod=L2\n'
+                'Dim=128\n'
+                'VectorPath=base.bin\n'
+                'QueryPath=query.bin\n'
+                'TruthPath=truth.txt\n'
+                '\n'
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
-                'DataFile=base.bin\n'
-                'QueryFile=query.bin\n'
-                'TruthFile=truth.txt\n'
                 'OutputDir=tuning\n'
-                'Dimension=128\n'
                 'RecallAt=1000\n'
                 'TargetRecall=0.97\n'
                 'MinBits=2\n'
@@ -89,6 +93,9 @@ class RaBitQAutoTuningTest(unittest.TestCase):
             self.assertEqual(1000, args.k)
             self.assertEqual(0.97, args.rabitq_target_recall)
             self.assertEqual((2, 7), (args.rabitq_min_bits, args.rabitq_max_bits))
+            self.assertEqual('base.bin', args.data_file)
+            self.assertEqual('query.bin', args.query_file)
+            self.assertEqual('truth.txt', args.output_truth)
 
             with self.assertRaises(ValueError):
                 MODULE.get_config(['--config', str(path), '--Q', '1'])
@@ -97,13 +104,17 @@ class RaBitQAutoTuningTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'build.ini'
             path.write_text(
+                '[Base]\n'
+                'ValueType=Float\n'
+                'DistCalcMethod=L2\n'
+                'Dim=128\n'
+                'VectorPath=base.bin\n'
+                'QueryPath=query.bin\n'
+                'TruthPath=truth.txt\n'
+                '\n'
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
-                'DataFile=base.bin\n'
-                'QueryFile=query.bin\n'
-                'TruthFile=truth.txt\n'
                 'OutputDir=tuning\n'
-                'Dimension=128\n'
                 'RecallAt=1000\n'
                 'QueryCount=10000\n'
                 'TypoTargetRecal=0.95\n',
@@ -118,13 +129,17 @@ class RaBitQAutoTuningTest(unittest.TestCase):
                 '[DEFAULT]\n'
                 'QueryCount=1\n'
                 '\n'
+                '[Base]\n'
+                'ValueType=Float\n'
+                'DistCalcMethod=L2\n'
+                'Dim=128\n'
+                'VectorPath=base.bin\n'
+                'QueryPath=query.bin\n'
+                'TruthPath=truth.txt\n'
+                '\n'
                 '[RaBitQAutoTune]\n'
                 'isExecute=true\n'
-                'DataFile=base.bin\n'
-                'QueryFile=query.bin\n'
-                'TruthFile=truth.txt\n'
                 'OutputDir=tuning\n'
-                'Dimension=128\n'
                 'RecallAt=1000\n'
                 '\n'
                 '[SearchSSDIndex]\n'
