@@ -146,13 +146,21 @@ namespace SPTAG
 
             inline void DoubleSize()
             {
+                const std::uint64_t oldPoolSize = m_poolSize;
+                const bool hadSecondHash = m_secondHash;
                 std::uint64_t new_poolSize = ((m_poolSize + 1) << 1) - 1; 
                 SizeType* new_hashTable = new SizeType[(new_poolSize + 1) * 2];
                 memset(new_hashTable, 0, sizeof(SizeType) * (new_poolSize + 1) * 2);
 
                 m_secondHash = false;
-                for (std::uint64_t i = 0; i <= new_poolSize; i++)
+                for (std::uint64_t i = 0; i <= oldPoolSize; i++)
                     if (m_hashTable[i]) _CheckAndSet(new_hashTable, new_poolSize, true, m_hashTable[i]);
+                if (hadSecondHash)
+                {
+                    SizeType* secondHashTable = m_hashTable.get() + oldPoolSize + 1;
+                    for (std::uint64_t i = 0; i <= oldPoolSize; i++)
+                        if (secondHashTable[i]) _CheckAndSet(new_hashTable, new_poolSize, true, secondHashTable[i]);
+                }
 
                 m_exp++;
                 m_poolSize = new_poolSize;

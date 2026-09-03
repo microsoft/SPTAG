@@ -126,7 +126,15 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
             AsyncReadRequest *req = reinterpret_cast<AsyncReadRequest *>((events[i].data));
             if (nullptr != req)
             {
-                req->m_callback(true);
+                const bool success = events[i].res == static_cast<decltype(events[i].res)>(req->m_readSize);
+                if (!success)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Async batch read failed at offset %llu, expected %zu bytes, actual %lld.\n",
+                                 req->m_offset, req->m_readSize, static_cast<long long>(events[i].res));
+                }
+                req->m_success = success;
+                req->m_callback(success);
             }
         }
         totalQueued = totalDone;
@@ -153,7 +161,15 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
         AsyncReadRequest *req = reinterpret_cast<AsyncReadRequest *>((events[i].data));
         if (nullptr != req)
         {
-            req->m_callback(true);
+            const bool success = events[i].res == static_cast<decltype(events[i].res)>(req->m_readSize);
+            if (!success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Async batch read failed at offset %llu, expected %zu bytes, actual %lld.\n",
+                             req->m_offset, req->m_readSize, static_cast<long long>(events[i].res));
+            }
+            req->m_success = success;
+            req->m_callback(success);
         }
     }
     return true;

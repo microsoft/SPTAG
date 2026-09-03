@@ -9,8 +9,9 @@
 using namespace SPTAG;
 using namespace SPTAG::Helper;
 
-ReaderOptions::ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, VectorFileType p_fileType,
-                             std::string p_vectorDelimiter, std::uint32_t p_threadNum, bool p_normalized)
+ReaderOptions::ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension,
+                             VectorFileType p_fileType, std::string p_vectorDelimiter,
+                             std::uint32_t p_threadNum, bool p_normalized)
     : m_inputValueType(p_valueType), m_dimension(p_dimension), m_inputFileType(p_fileType),
       m_vectorDelimiter(p_vectorDelimiter), m_threadNum(p_threadNum), m_normalized(p_normalized)
 {

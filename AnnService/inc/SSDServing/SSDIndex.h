@@ -181,11 +181,18 @@ namespace SPTAG {
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
                 ErrorCode ret;
+                const bool useADC = p_index->m_pQuantizer && p_opts.m_enableADC;
+                const VectorValueType queryValueType = useADC
+                    ? p_index->m_pQuantizer->GetReconstructType()
+                    : p_opts.m_valueType;
+                const DimensionType queryDimension = useADC
+                    ? p_index->m_pQuantizer->ReconstructDim()
+                    : p_opts.m_dim;
 
                 if (!warmupFile.empty())
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading warmup query set...\n");
-                    std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_warmupType, p_opts.m_warmupDelimiter));
+                    std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(queryValueType, queryDimension, p_opts.m_warmupType, p_opts.m_warmupDelimiter));
                     auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                     if (ErrorCode::Success != (ret = queryReader->LoadFile(p_opts.m_warmupPath)))
                     {
@@ -209,7 +216,7 @@ namespace SPTAG {
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
-                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
+                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(queryValueType, queryDimension, p_opts.m_queryType, p_opts.m_queryDelimiter));
                 auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                 if (ErrorCode::Success != (ret = queryReader->LoadFile(p_opts.m_queryPath)))
                 {

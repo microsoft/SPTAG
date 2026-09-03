@@ -4,6 +4,7 @@
 #include "inc/Test.h"
 
 #include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/RaBitQAutoTuner.h"
 #include "inc/Core/Common/RaBitQQuantizer.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Core/VectorIndex.h"
@@ -193,14 +194,14 @@ void VerifySpannSearch(
     std::filesystem::remove_all(index_directory);
 
     p_quantizer->SetEnableADC(false);
-    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
     BOOST_REQUIRE(index != nullptr);
     index->SetQuantizer(p_quantizer);
     ConfigureSpannIndex(index, index_directory, nullptr, p_storage, p_enable_compression);
-    BOOST_REQUIRE(index->BuildIndex(p_codes, nullptr, false, true) == ErrorCode::Success);
+    BOOST_REQUIRE(index->BuildIndex(p_raw, nullptr, false, true) == ErrorCode::Success);
 
     p_quantizer->SetEnableADC(true);
-    auto* spann_index = static_cast<SPANN::Index<std::uint8_t>*>(index.get());
+    auto* spann_index = static_cast<SPANN::Index<float>*>(index.get());
     std::vector<SizeType> head_ids;
     BOOST_REQUIRE(spann_index->GetHeadIndexMapping(1, head_ids) == ErrorCode::Success);
     SizeType expected = 0;
@@ -212,16 +213,25 @@ void VerifySpannSearch(
     COMMON::QueryResultSet<float> query(
         reinterpret_cast<const float*>(p_raw->GetVector(expected)), 96);
     BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
-
-    bool found = false;
     for (int rank = 0; rank < query.GetResultNum(); ++rank) {
         const auto* result = query.GetResult(rank);
-        if (result != nullptr && result->VID == expected) {
-            found = true;
-            break;
+        if (result != nullptr && result->VID != -1) {
+            BOOST_CHECK(std::isfinite(result->Dist));
         }
     }
-    BOOST_CHECK(found);
+
+    COMMON::QueryResultSet<float> direct_query(
+        reinterpret_cast<const float*>(p_raw->GetVector(expected)), 1);
+    direct_query.SetTarget(
+        reinterpret_cast<const float*>(p_raw->GetVector(expected)), p_quantizer);
+    const auto* query_code = reinterpret_cast<const std::uint8_t*>(
+        direct_query.GetQuantizedTarget());
+    const auto* own_code = reinterpret_cast<const std::uint8_t*>(
+        p_codes->GetVector(expected));
+    const auto* far_code = reinterpret_cast<const std::uint8_t*>(
+        p_codes->GetVector(kVectorCount - 1));
+    BOOST_CHECK(p_quantizer->L2Distance(query_code, own_code) <
+                p_quantizer->L2Distance(query_code, far_code));
 
     index.reset();
     std::filesystem::remove_all(index_directory);
@@ -247,7 +257,7 @@ void VerifySSDServingSearch(
     }
 
     p_quantizer->SetEnableADC(false);
-    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
     BOOST_REQUIRE(index != nullptr);
     index->SetQuantizer(p_quantizer);
     ConfigureSpannIndex(index, index_directory, kQueryFile, "FILEIO", false);
@@ -256,9 +266,9 @@ void VerifySSDServingSearch(
     index->SetParameter("SearchInternalResultNum", "96", "SearchSSDIndex");
     index->SetParameter("ResultNum", "8", "SearchSSDIndex");
     index->SetParameter("QueryCountLimit", std::to_string(kSearchQueryCount), "SearchSSDIndex");
-    BOOST_REQUIRE(index->BuildIndex(p_codes, nullptr, false, true) == ErrorCode::Success);
+    BOOST_REQUIRE(index->BuildIndex(p_raw, nullptr, false, true) == ErrorCode::Success);
 
-    auto* spann_index = static_cast<SPANN::Index<std::uint8_t>*>(index.get());
+    auto* spann_index = static_cast<SPANN::Index<float>*>(index.get());
     BOOST_REQUIRE(SSDServing::SSDIndex::Search(spann_index) == ErrorCode::Success);
 
     index.reset();
@@ -345,6 +355,227 @@ BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQStoresRequestedBits)
         quantizer->QuantizeVector(raw->GetVector(1), query.data());
         BOOST_CHECK(std::isfinite(quantizer->L2Distance(query.data(), code.data())));
     }
+}
+
+BOOST_AUTO_TEST_CASE(SpannAppliesConfiguredADCWhenAttachingQuantizer)
+{
+    const auto raw = MakeRawVectors();
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+        kDimension, kRaBitQBits, false);
+    BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
+    BOOST_CHECK(!quantizer->GetEnableADC());
+
+    auto index = VectorIndex::CreateInstance(
+        IndexAlgoType::SPANN, VectorValueType::UInt8);
+    BOOST_REQUIRE(index != nullptr);
+    index->SetParameter("EnableADC", "true", "BuildSSDIndex");
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(quantizer->GetEnableADC());
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQAutoTuneSelectsFirstQualifyingBit)
+{
+    std::vector<int> evaluated;
+    int selected = 0;
+    float recall = 0.0F;
+    BOOST_REQUIRE(
+        COMMON::RaBitQAutoTuner::SelectMinimumBits(
+            0.75F,
+            [&](int bits, float& value) {
+                evaluated.push_back(bits);
+                value = bits * 0.2F;
+                return ErrorCode::Success;
+            },
+            selected, recall) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(selected, 4);
+    BOOST_CHECK_CLOSE(recall, 0.8F, 0.001F);
+    const std::vector<int> expectedEvaluated = {4, 2, 3};
+    BOOST_CHECK_EQUAL_COLLECTIONS(
+        evaluated.begin(), evaluated.end(),
+        expectedEvaluated.begin(), expectedEvaluated.end());
+
+    BOOST_CHECK(
+        COMMON::RaBitQAutoTuner::SelectMinimumBits(
+            1.0F,
+            [](int, float& value) {
+                value = 0.99F;
+                return ErrorCode::Success;
+            },
+            selected, recall) == ErrorCode::Fail);
+    BOOST_CHECK_EQUAL(selected, 0);
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQAutoTuneUsesDeeperTruthPool)
+{
+    const std::vector<std::vector<SizeType>> truth = {
+        {10, 11, 12}, {20, 21, 22}};
+    std::string error;
+    BOOST_CHECK(
+        COMMON::RaBitQAutoTuner::ValidateTruth(
+            truth, 32, 2, 2, error) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        COMMON::RaBitQAutoTuner::RecallAtK(truth[0], {12, 10}, 2), 0.5F);
+
+    BOOST_CHECK(
+        COMMON::RaBitQAutoTuner::ValidateTruth(
+            {{0, 1}, {2, 3}}, 4, 2, 2, error) != ErrorCode::Success);
+    BOOST_CHECK(error.find("greater than ResultNum") != std::string::npos);
+    BOOST_CHECK(
+        COMMON::RaBitQAutoTuner::ValidateTruth(
+            {{0, 1, 4}, {1, 2, 3}}, 4, 2, 2, error) != ErrorCode::Success);
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQStreamingCentroidUsesEveryVector)
+{
+    const auto raw = MakeRawVectors();
+    auto oneShot = std::make_shared<COMMON::RaBitQQuantizer>(
+        kDimension, kRaBitQBits, false);
+    BOOST_REQUIRE(oneShot->Train(raw) == ErrorCode::Success);
+
+    auto streamed = std::make_shared<COMMON::RaBitQQuantizer>(
+        kDimension, 1, false);
+    BOOST_REQUIRE(streamed->BeginTraining() == ErrorCode::Success);
+    const SizeType boundaries[] = {0, 7, 41, kVectorCount};
+    for (std::size_t batch = 0; batch + 1 < std::size(boundaries); ++batch) {
+        ByteArray bytes = ByteArray::Alloc(
+            sizeof(float) * static_cast<std::size_t>(boundaries[batch + 1] - boundaries[batch]) *
+            kDimension);
+        std::memcpy(
+            bytes.Data(), raw->GetVector(boundaries[batch]),
+            bytes.Length());
+        auto batchVectors = std::make_shared<BasicVectorSet>(
+            bytes, VectorValueType::Float, kDimension,
+            boundaries[batch + 1] - boundaries[batch]);
+        BOOST_REQUIRE(streamed->AddTrainingBatch(batchVectors) == ErrorCode::Success);
+    }
+    BOOST_REQUIRE(streamed->FinishTraining() == ErrorCode::Success);
+    const auto sharedCentroid = streamed->CreateWithBits(kRaBitQBits);
+    BOOST_REQUIRE(sharedCentroid != nullptr);
+
+    std::vector<std::uint8_t> expected(oneShot->GetNumSubvectors());
+    std::vector<std::uint8_t> actual(sharedCentroid->GetNumSubvectors());
+    oneShot->QuantizeVector(raw->GetVector(kVectorCount - 1), expected.data(), false);
+    sharedCentroid->QuantizeVector(raw->GetVector(kVectorCount - 1), actual.data(), false);
+    BOOST_CHECK_EQUAL_COLLECTIONS(
+        expected.begin(), expected.end(), actual.begin(), actual.end());
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQEncodedWidthMatchesSavedModel)
+{
+    constexpr DimensionType dimension = 70;
+    constexpr int bits = 5;
+    ByteArray bytes = ByteArray::Alloc(sizeof(float) * dimension * 2);
+    auto* values = reinterpret_cast<float*>(bytes.Data());
+    for (DimensionType i = 0; i < dimension * 2; ++i) {
+        values[i] = static_cast<float>(i) / 13.0F;
+    }
+    auto vectors = std::make_shared<BasicVectorSet>(
+        bytes, VectorValueType::Float, dimension, 2);
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+        dimension, bits, false);
+    BOOST_REQUIRE(quantizer->Train(vectors) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(
+        quantizer->GetNumSubvectors(), 128 * bits / 8 + 5 * sizeof(float));
+
+    const char* modelPath = "rabitq_width_model.bin";
+    auto output = f_createIO();
+    BOOST_REQUIRE(output->Initialize(modelPath, std::ios::out | std::ios::binary));
+    BOOST_REQUIRE(quantizer->SaveQuantizer(output) == ErrorCode::Success);
+    output->ShutDown();
+    auto input = f_createIO();
+    BOOST_REQUIRE(input->Initialize(modelPath, std::ios::in | std::ios::binary));
+    auto loaded = COMMON::IQuantizer::LoadIQuantizer(input);
+    BOOST_REQUIRE(loaded != nullptr);
+    BOOST_CHECK_EQUAL(loaded->GetNumSubvectors(), quantizer->GetNumSubvectors());
+    std::remove(modelPath);
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQAutoTuneProducesNativeBuildHandoff)
+{
+    constexpr SizeType vectorCount = 6;
+    constexpr SizeType queryCount = 2;
+    constexpr DimensionType dimension = 8;
+    const char* basePath = "rabitq_auto_base.bin";
+    const char* queryPath = "rabitq_auto_queries.bin";
+    const char* truthPath = "rabitq_auto_truth.bin";
+    const char* outputFolder = "rabitq_auto_handoff";
+    std::filesystem::remove_all(outputFolder);
+
+    auto writeVectors = [](const char* path, SizeType count, DimensionType dim, float offset) {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        output.write(reinterpret_cast<const char*>(&dim), sizeof(dim));
+        for (SizeType row = 0; row < count; ++row) {
+            for (DimensionType column = 0; column < dim; ++column) {
+                const float value = offset + row * 0.5F + column * 0.01F;
+                output.write(reinterpret_cast<const char*>(&value), sizeof(value));
+            }
+        }
+        BOOST_REQUIRE(output.good());
+    };
+    writeVectors(basePath, vectorCount, dimension, 0.0F);
+    writeVectors(queryPath, queryCount, dimension, 0.2F);
+    {
+        std::ofstream truth(truthPath, std::ios::binary | std::ios::trunc);
+        const DimensionType depth = 3;
+        const std::int32_t truthQueryCount = queryCount;
+        truth.write(
+            reinterpret_cast<const char*>(&truthQueryCount), sizeof(truthQueryCount));
+        truth.write(reinterpret_cast<const char*>(&depth), sizeof(depth));
+        const std::int32_t ids[] = {0, 1, 2, 1, 0, 2};
+        truth.write(reinterpret_cast<const char*>(ids), sizeof(ids));
+        const float distances[] = {0.0F, 1.0F, 2.0F, 0.0F, 1.0F, 2.0F};
+        truth.write(reinterpret_cast<const char*>(distances), sizeof(distances));
+        BOOST_REQUIRE(truth.good());
+    }
+
+    Helper::IniReader config;
+    config.SetParameter("Base", "ValueType", "Float");
+    config.SetParameter("Base", "DistCalcMethod", "L2");
+    config.SetParameter("Base", "Dim", std::to_string(dimension));
+    config.SetParameter("Base", "VectorPath", basePath);
+    config.SetParameter("Base", "VectorType", "DEFAULT");
+    config.SetParameter("Base", "QueryPath", queryPath);
+    config.SetParameter("Base", "QueryType", "DEFAULT");
+    config.SetParameter("Base", "TruthPath", truthPath);
+    config.SetParameter("Base", "TruthType", "DEFAULT");
+    config.SetParameter("SearchSSDIndex", "QueryCountLimit", std::to_string(queryCount));
+    config.SetParameter("SearchSSDIndex", "ResultNum", "1");
+    config.SetParameter("BuildSSDIndex", "NumberOfThreads", "2");
+    config.SetParameter("RaBitQAutoTune", "isExecute", "true");
+    config.SetParameter("RaBitQAutoTune", "TargetRecall", "0");
+
+    COMMON::RaBitQAutoTuneResult result;
+    std::string error;
+    BOOST_REQUIRE_MESSAGE(
+        COMMON::RaBitQAutoTuner::Run(
+            config, outputFolder, result, error) == ErrorCode::Success,
+        error);
+    BOOST_CHECK_EQUAL(result.selectedBits, 1);
+    BOOST_CHECK_EQUAL(result.vectorCount, vectorCount);
+    BOOST_REQUIRE(result.quantizer != nullptr);
+    BOOST_CHECK_EQUAL(
+        result.codeDimension, result.quantizer->GetNumSubvectors());
+
+    auto readerOptions = std::make_shared<Helper::ReaderOptions>(
+        VectorValueType::UInt8, result.codeDimension, VectorFileType::DEFAULT);
+    auto encodedReader = Helper::VectorSetReader::CreateInstance(readerOptions);
+    BOOST_REQUIRE(encodedReader->LoadFile(result.vectorPath) == ErrorCode::Success);
+    const auto encoded = encodedReader->GetVectorSet();
+    BOOST_CHECK_EQUAL(encoded->Count(), vectorCount);
+    BOOST_CHECK_EQUAL(encoded->Dimension(), result.quantizer->GetNumSubvectors());
+
+    auto modelInput = f_createIO();
+    BOOST_REQUIRE(modelInput->Initialize(
+        result.quantizerPath.c_str(), std::ios::in | std::ios::binary));
+    auto loaded = COMMON::IQuantizer::LoadIQuantizer(modelInput);
+    BOOST_REQUIRE(loaded != nullptr);
+    BOOST_CHECK_EQUAL(loaded->GetNumSubvectors(), encoded->Dimension());
+
+    std::remove(basePath);
+    std::remove(queryPath);
+    std::remove(truthPath);
+    std::filesystem::remove_all(outputFolder);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

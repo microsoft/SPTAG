@@ -41,32 +41,81 @@ ErrorCode RaBitQQuantizer::Initialize(DimensionType p_dimension, int p_bits, boo
     m_quantizer_config = rabitqlib::quant::faster_config(
         static_cast<std::size_t>(m_padded_dimension), static_cast<std::size_t>(m_bits));
     m_ip_func = rabitqlib::select_excode_ipfunc(static_cast<std::size_t>(m_bits));
+    m_training_sum.clear();
+    m_training_count = 0;
+    m_trained = false;
     return ErrorCode::Success;
 }
 
 ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
 {
-    if (!Ready() || !p_vectors || p_vectors->GetValueType() != VectorValueType::Float ||
+    ErrorCode status = BeginTraining();
+    if (status == ErrorCode::Success) {
+        status = AddTrainingBatch(p_vectors);
+    }
+    return status == ErrorCode::Success ? FinishTraining() : status;
+}
+
+ErrorCode RaBitQQuantizer::BeginTraining()
+{
+    if (!Ready()) {
+        return ErrorCode::FailedParseValue;
+    }
+    m_training_sum.assign(static_cast<std::size_t>(m_dimension), 0.0);
+    m_training_count = 0;
+    m_trained = false;
+    return ErrorCode::Success;
+}
+
+ErrorCode RaBitQQuantizer::AddTrainingBatch(const std::shared_ptr<VectorSet>& p_vectors)
+{
+    if (!Ready() || m_training_sum.size() != static_cast<std::size_t>(m_dimension) ||
+        !p_vectors || p_vectors->GetValueType() != VectorValueType::Float ||
         p_vectors->Dimension() != m_dimension || p_vectors->Count() <= 0) {
         return ErrorCode::FailedParseValue;
     }
-
-    std::vector<double> accumulator(static_cast<std::size_t>(m_dimension), 0.0);
+    const auto batchCount = static_cast<std::uint64_t>(p_vectors->Count());
+    if (m_training_count > (std::numeric_limits<std::uint64_t>::max)() - batchCount) {
+        return ErrorCode::Fail;
+    }
     std::vector<float> prepared;
     for (SizeType i = 0; i < p_vectors->Count(); ++i) {
         const auto* vector = static_cast<const float*>(p_vectors->GetVector(i));
         PrepareInput(vector, prepared);
         for (DimensionType j = 0; j < m_dimension; ++j) {
-            accumulator[static_cast<std::size_t>(j)] += prepared[static_cast<std::size_t>(j)];
+            m_training_sum[static_cast<std::size_t>(j)] += prepared[static_cast<std::size_t>(j)];
         }
     }
+    m_training_count += batchCount;
+    return ErrorCode::Success;
+}
 
-    const double inverse_count = 1.0 / static_cast<double>(p_vectors->Count());
+ErrorCode RaBitQQuantizer::FinishTraining()
+{
+    if (!Ready() || m_training_count == 0 ||
+        m_training_sum.size() != static_cast<std::size_t>(m_dimension)) {
+        return ErrorCode::FailedParseValue;
+    }
+    const double inverse_count = 1.0 / static_cast<double>(m_training_count);
     for (DimensionType j = 0; j < m_dimension; ++j) {
         m_centroid[static_cast<std::size_t>(j)] =
-            static_cast<float>(accumulator[static_cast<std::size_t>(j)] * inverse_count);
+            static_cast<float>(m_training_sum[static_cast<std::size_t>(j)] * inverse_count);
     }
+    m_training_sum.clear();
+    m_training_count = 0;
+    m_trained = true;
     return ErrorCode::Success;
+}
+
+std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CreateWithBits(int p_bits) const
+{
+    if (!Ready() || !m_trained || p_bits < 1 || p_bits > 8) {
+        return nullptr;
+    }
+    auto quantizer = std::make_shared<RaBitQQuantizer>(m_dimension, p_bits, m_normalize);
+    quantizer->m_centroid = m_centroid;
+    quantizer->m_trained = true;
+    return quantizer;
 }
 
 float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
@@ -246,7 +295,7 @@ std::uint64_t RaBitQQuantizer::BufferSize() const
 
 ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_output) const
 {
-    if (!p_output || !Ready()) {
+    if (!p_output || !Ready() || !m_trained) {
         return ErrorCode::Fail;
     }
 
@@ -283,6 +332,7 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_input
             m_centroid.size() * sizeof(float)) {
         return ErrorCode::FailedParseValue;
     }
+    m_trained = true;
     return ErrorCode::Success;
 }
 
@@ -299,6 +349,7 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::uint8_t* p_raw_bytes)
     }
     p_raw_bytes += sizeof(header);
     std::memcpy(m_centroid.data(), p_raw_bytes, m_centroid.size() * sizeof(float));
+    m_trained = true;
     return ErrorCode::Success;
 }
 
