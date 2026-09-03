@@ -58,10 +58,20 @@ template <typename T> void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON:
     if (m_pQuantizer)
     {
         m_pQuantizer->SetEnableADC(m_options.m_enableADC);
-        m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(m_options.m_distCalcMethod);
-        m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
-                            ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase()
-                            : 1;
+        if (UseQuantizerForIndexBuild())
+        {
+            m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+            m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
+                                ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase()
+                                : 1;
+        }
+        else
+        {
+            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+            m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
+                                ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>()
+                                : 1;
+        }
     }
     else
     {
@@ -104,7 +114,10 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
 template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray> &p_indexBlobs)
 {
     /** Need to modify **/
-    m_topIndex->SetQuantizer(m_pQuantizer);
+    if (UseQuantizerForIndexBuild())
+    {
+        m_topIndex->SetQuantizer(m_pQuantizer);
+    }
     if (!m_options.m_persistentBufferPath.empty() && !direxists(m_options.m_persistentBufferPath.c_str()))
         mkdir(m_options.m_persistentBufferPath.c_str());
 
@@ -157,7 +170,10 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
 template <typename T>
 ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams)
 {
-    m_topIndex->SetQuantizer(m_pQuantizer);
+    if (UseQuantizerForIndexBuild())
+    {
+        m_topIndex->SetQuantizer(m_pQuantizer);
+    }
     if (!m_options.m_persistentBufferPath.empty() && !direxists(m_options.m_persistentBufferPath.c_str()))
         mkdir(m_options.m_persistentBufferPath.c_str());
 
@@ -340,8 +356,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, Sear
     if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
         p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     else
+    {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
+        if (m_pQuantizer)
+        {
+            p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
+        }
+    }
 
     ErrorCode ret;
     auto searchStart = std::chrono::high_resolution_clock::now();
@@ -668,8 +690,14 @@ ErrorCode Index<T>::SearchHeadIndex(QueryResult& p_query, int p_tolayer, ExtraWo
     if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
         p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     else
+    {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
+        if (m_pQuantizer)
+        {
+            p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
+        }
+    }
 
     ErrorCode ret;
     if ((ret = m_topIndex->SearchIndex(*p_queryResults)) != ErrorCode::Success)
@@ -723,7 +751,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
     COMMON::QueryResultSet<T> localResults((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
     std::vector<BasicResult> headCandidates;
     headCandidates.reserve(m_options.m_searchInternalResultNum);
-    if (m_pQuantizer && p_query.HasQuantizedTarget())
+    if (m_pQuantizer)
     {
         localResults.SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
     }
@@ -1119,7 +1147,9 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         bkt->m_iTreeNumber = m_options.m_iTreeNumber;
         bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
         bkt->m_parallelBuild = m_options.m_parallelBKTBuild;
-        bkt->m_pQuantizer = m_pQuantizer;
+        bkt->m_pQuantizer = UseQuantizerForIndexBuild()
+            ? m_pQuantizer
+            : nullptr;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Info,
@@ -1230,6 +1260,33 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
 
 template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_ptr<Helper::VectorSetReader> &p_reader)
 {
+    struct ScopedIndexBuildADCMode
+    {
+        std::shared_ptr<SPTAG::COMMON::IQuantizer> m_quantizer;
+        bool m_restore;
+        bool m_enableADC;
+
+        ScopedIndexBuildADCMode(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer, bool quantizedIndexBuild)
+            : m_quantizer(std::move(quantizer)),
+              m_restore(m_quantizer != nullptr && quantizedIndexBuild),
+              m_enableADC(false)
+        {
+            if (m_restore)
+            {
+                m_enableADC = m_quantizer->GetEnableADC();
+                m_quantizer->SetEnableADC(false);
+            }
+        }
+
+        ~ScopedIndexBuildADCMode()
+        {
+            if (m_restore)
+            {
+                m_quantizer->SetEnableADC(m_enableADC);
+            }
+        }
+    } scopedADCMode(m_pQuantizer, UseQuantizerForIndexBuild());
+
     int currentLayer = static_cast<int>(m_extraSearchers.size());
     COMMON::Dataset<SizeType> localToGlobalID;
     {
@@ -1259,7 +1316,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
     if (m_options.m_selectHead && m_topIndex == nullptr)
     {
         bool success = false;
-        if (m_pQuantizer)
+        if (UseQuantizerForIndexBuild())
         {
             success = SelectHeadInternal<std::uint8_t>(p_reader);
         }
@@ -1280,13 +1337,21 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
     if (m_options.m_buildHead && m_topIndex == nullptr)
     {
-        auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-        auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+        const bool quantizedIndexBuild = UseQuantizerForIndexBuild();
+        auto valueType = quantizedIndexBuild
+            ? SPTAG::VectorValueType::UInt8
+            : m_options.m_valueType;
+        auto dims = quantizedIndexBuild
+            ? m_pQuantizer->GetNumSubvectors()
+            : m_options.m_dim;
 
         m_topIndex = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_topIndex->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
         m_topIndex->SetParameter("ParallelBKTBuild", m_options.m_parallelBKTBuild ? "true" : "false");
-        m_topIndex->SetQuantizer(m_pQuantizer);
+        if (quantizedIndexBuild)
+        {
+            m_topIndex->SetQuantizer(m_pQuantizer);
+        }
         for (const auto &iter : m_topParameters)
         {
             m_topIndex->SetParameter(iter.first.c_str(), iter.second.c_str());
@@ -1308,9 +1373,11 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
                 return ErrorCode::Fail;
             }
-            if (!m_options.m_quantizerFilePath.empty())
+            if (!m_options.m_quantizerFilePath.empty() && quantizedIndexBuild)
+            {
                 m_topIndex->SetQuantizerFileName(
                     m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
+            }
             if (m_topIndex->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder) !=
                 ErrorCode::Success)
             {
@@ -1341,7 +1408,10 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
                          (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
             return ErrorCode::Fail;
         }
-        m_topIndex->SetQuantizer(m_pQuantizer);
+        if (UseQuantizerForIndexBuild())
+        {
+            m_topIndex->SetQuantizer(m_pQuantizer);
+        }
         if (!CheckHeadIndexType())
             return ErrorCode::Fail;
 
@@ -1475,7 +1545,10 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             m_options.m_headIndexFolder = origHeadIndexFolder;
             return ErrorCode::Fail;
         }
-        m_topIndex->SetQuantizer(m_pQuantizer);
+        if (UseQuantizerForIndexBuild())
+        {
+            m_topIndex->SetQuantizer(m_pQuantizer);
+        }
         m_topIndex->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
         m_topIndex->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
         m_topIndex->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
@@ -1662,8 +1735,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
 template <typename T> ErrorCode Index<T>::BuildIndex(bool p_normalized)
 {
-    SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-    SizeType dim = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+    const bool quantizedIndexBuild = UseQuantizerForIndexBuild();
+    SPTAG::VectorValueType valueType = quantizedIndexBuild
+        ? SPTAG::VectorValueType::UInt8
+        : GetEnumValueType<T>();
+    SizeType dim = quantizedIndexBuild
+        ? m_pQuantizer->GetNumSubvectors()
+        : m_options.m_dim;
     std::shared_ptr<Helper::ReaderOptions> vectorOptions(
         new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter,
                                   m_options.m_iSSDNumberOfThreads, p_normalized));
@@ -1710,7 +1788,10 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     {
         vectorSet->Normalize(m_options.m_iSSDNumberOfThreads);
     }
-    SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
+    SPTAG::VectorValueType valueType =
+        UseQuantizerForIndexBuild()
+            ? SPTAG::VectorValueType::UInt8
+            : GetEnumValueType<T>();
     std::shared_ptr<Helper::ReaderOptions> vectorOptions(
         new Helper::ReaderOptions(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter,
                                   m_options.m_iSSDNumberOfThreads, true));
@@ -1812,7 +1893,7 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
     }
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod"))
     {
-        if (m_pQuantizer)
+        if (UseQuantizerForIndexBuild())
         {
             m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(m_options.m_distCalcMethod);
             m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
@@ -1826,6 +1907,10 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
                                 ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>()
                                 : 1;
         }
+    }
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableADC") && m_pQuantizer)
+    {
+        m_pQuantizer->SetEnableADC(m_options.m_enableADC);
     }
     return ErrorCode::Success;
 }

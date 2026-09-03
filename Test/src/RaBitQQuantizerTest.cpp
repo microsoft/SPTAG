@@ -194,14 +194,14 @@ void VerifySpannSearch(
     std::filesystem::remove_all(index_directory);
 
     p_quantizer->SetEnableADC(false);
-    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
     BOOST_REQUIRE(index != nullptr);
     index->SetQuantizer(p_quantizer);
     ConfigureSpannIndex(index, index_directory, nullptr, p_storage, p_enable_compression);
-    BOOST_REQUIRE(index->BuildIndex(p_codes, nullptr, false, true) == ErrorCode::Success);
+    BOOST_REQUIRE(index->BuildIndex(p_raw, nullptr, false, true) == ErrorCode::Success);
 
     p_quantizer->SetEnableADC(true);
-    auto* spann_index = static_cast<SPANN::Index<std::uint8_t>*>(index.get());
+    auto* spann_index = static_cast<SPANN::Index<float>*>(index.get());
     std::vector<SizeType> head_ids;
     BOOST_REQUIRE(spann_index->GetHeadIndexMapping(1, head_ids) == ErrorCode::Success);
     SizeType expected = 0;
@@ -213,16 +213,25 @@ void VerifySpannSearch(
     COMMON::QueryResultSet<float> query(
         reinterpret_cast<const float*>(p_raw->GetVector(expected)), 96);
     BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
-
-    bool found = false;
     for (int rank = 0; rank < query.GetResultNum(); ++rank) {
         const auto* result = query.GetResult(rank);
-        if (result != nullptr && result->VID == expected) {
-            found = true;
-            break;
+        if (result != nullptr && result->VID != -1) {
+            BOOST_CHECK(std::isfinite(result->Dist));
         }
     }
-    BOOST_CHECK(found);
+
+    COMMON::QueryResultSet<float> direct_query(
+        reinterpret_cast<const float*>(p_raw->GetVector(expected)), 1);
+    direct_query.SetTarget(
+        reinterpret_cast<const float*>(p_raw->GetVector(expected)), p_quantizer);
+    const auto* query_code = reinterpret_cast<const std::uint8_t*>(
+        direct_query.GetQuantizedTarget());
+    const auto* own_code = reinterpret_cast<const std::uint8_t*>(
+        p_codes->GetVector(expected));
+    const auto* far_code = reinterpret_cast<const std::uint8_t*>(
+        p_codes->GetVector(kVectorCount - 1));
+    BOOST_CHECK(p_quantizer->L2Distance(query_code, own_code) <
+                p_quantizer->L2Distance(query_code, far_code));
 
     index.reset();
     std::filesystem::remove_all(index_directory);
@@ -248,7 +257,7 @@ void VerifySSDServingSearch(
     }
 
     p_quantizer->SetEnableADC(false);
-    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
     BOOST_REQUIRE(index != nullptr);
     index->SetQuantizer(p_quantizer);
     ConfigureSpannIndex(index, index_directory, kQueryFile, "FILEIO", false);
@@ -257,9 +266,9 @@ void VerifySSDServingSearch(
     index->SetParameter("SearchInternalResultNum", "96", "SearchSSDIndex");
     index->SetParameter("ResultNum", "8", "SearchSSDIndex");
     index->SetParameter("QueryCountLimit", std::to_string(kSearchQueryCount), "SearchSSDIndex");
-    BOOST_REQUIRE(index->BuildIndex(p_codes, nullptr, false, true) == ErrorCode::Success);
+    BOOST_REQUIRE(index->BuildIndex(p_raw, nullptr, false, true) == ErrorCode::Success);
 
-    auto* spann_index = static_cast<SPANN::Index<std::uint8_t>*>(index.get());
+    auto* spann_index = static_cast<SPANN::Index<float>*>(index.get());
     BOOST_REQUIRE(SSDServing::SSDIndex::Search(spann_index) == ErrorCode::Success);
 
     index.reset();

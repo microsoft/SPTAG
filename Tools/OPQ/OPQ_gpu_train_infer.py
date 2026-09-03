@@ -43,17 +43,10 @@ def get_config():
     args = parser.parse_args()
     return args
 
-def is_binary_vector_file(filename):
-    suffixes = ('.bin', '.fbin', '.u8bin', '.i8bin')
-    if filename.endswith(suffixes):
-        return True
-    stem, separator, shard = filename.rpartition('.')
-    return separator != '' and shard.isdigit() and stem.endswith(suffixes)
-
 class DataReader:
     def __init__(self, filename, featuredim, batchsize, normalize, datatype, targettype='float32'):
         self.mytype = targettype
-        if is_binary_vector_file(filename):
+        if filename.find('.bin') >= 0:
             self.fin = open(filename, 'rb')
             R = unpack('i', self.fin.read(4))[0]
             self.featuredim = unpack('i', self.fin.read(4))[0]
@@ -393,7 +386,7 @@ def train_rabitq(args):
     os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
 
     if args.quan_test > 0:
-        queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
+        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}
@@ -515,7 +508,7 @@ def train_pq(args):
     os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
 
     if args.quan_test > 0:
-        queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
+        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}
@@ -651,7 +644,7 @@ def train_opq(args):
     os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
 
     if args.quan_test > 0:
-        queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
+        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
         numQuery, query = queryreader.readbatch()
 
         qid2ground_truths = {}

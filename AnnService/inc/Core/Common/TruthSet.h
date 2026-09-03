@@ -169,6 +169,11 @@ namespace SPTAG
                 float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0, meanmrr = 0;
                 std::vector<float> thisrecall(NumQuerys, 0);
                 std::unique_ptr<bool[]> visited(new bool[K]);
+                const bool compareDistanceTies =
+                    querySet != nullptr &&
+                    vectorSet != nullptr &&
+                    querySet->GetValueType() == GetEnumValueType<T>() &&
+                    vectorSet->GetValueType() == GetEnumValueType<T>();
                 for (SizeType i = 0; i < NumQuerys; i++)
                 {
                     int minpos = K;
@@ -186,7 +191,7 @@ namespace SPTAG
                                 if (j < minpos) minpos = j;
                                 break;
                             }
-                            else if (vectorSet != nullptr) {
+                            else if (compareDistanceTies) {
                                 float dist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(results[i].GetResult(j)->VID), vectorSet->Dimension(), index->GetDistCalcMethod());
                                 float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), vectorSet->Dimension(), index->GetDistCalcMethod());
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < Epsilon) {
@@ -213,7 +218,7 @@ namespace SPTAG
                         std::vector<NodeDistPair> truthvec;
                         for (SizeType id : truth[i]) {
                             float truthDist = 0.0;
-                            if (vectorSet != nullptr) {
+                            if (compareDistanceTies) {
                                 truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                             }
                             truthvec.emplace_back(id, truthDist);

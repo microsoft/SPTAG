@@ -48,6 +48,7 @@ public:
     DimensionType GetNumSubvectors() const override;
     int GetBase() const override;
     float* GetL2DistanceTables() override;
+    bool QuantizeForIndexBuild() const override { return false; }
 
     DimensionType Dimension() const { return m_dimension; }
     int Bits() const { return m_bits; }

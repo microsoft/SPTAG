@@ -85,6 +85,11 @@ namespace SPTAG
             std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
             std::atomic<int> m_workspaceCount = 0;
 
+            bool UseQuantizerForIndexBuild() const
+            {
+                return m_pQuantizer && m_pQuantizer->QuantizeForIndexBuild();
+            }
+
         public:
             Index()
             {

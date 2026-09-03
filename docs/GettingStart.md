@@ -241,54 +241,11 @@ SearchPostingPageLimit=12
 
 ### **Global RaBitQ Quantizer**
 
-RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. A build
-configured with `-DRABITQ=ON` can select its bit width, train the official
-model, encode the complete base set, and continue SPANN construction in one
-`indexbuilder` invocation. Add only this tuner-specific section to the normal
-native build INI:
-
-```ini
-[RaBitQAutoTune]
-isExecute=true
-TargetRecall=0.95
-```
-
-The tuner takes all shared settings from the existing INI:
-
-* `[Base]` supplies `VectorPath`, `QueryPath`, `TruthPath`, `VectorType`,
-  `QueryType`, `TruthType`, `ValueType`, `Dim`, and `DistCalcMethod`.
-* `[SearchSSDIndex]` supplies `QueryCountLimit` and `ResultNum`.
-* `[BuildSSDIndex]` supplies `NumberOfThreads`.
-
-The raw base and queries must be `Float` with `DistCalcMethod=L2`. Exactly
-`QueryCountLimit` queries are evaluated. Each truth row must contain a
-consistent, duplicate-free candidate list deeper than `ResultNum`; the tuner
-reranks the complete candidate list with each native RaBitQ model, compares its
-first `ResultNum` IDs with the first `ResultNum` exact IDs, and averages query
-recalls equally. Bits 1 through 8 are tried in ascending order and the first
-width meeting `TargetRecall` is selected; the build fails if none qualifies.
-
-The centroid is computed over every base vector in bounded native reader
-batches. The selected official model and complete DEFAULT-format encoded base
-file are built with the complete index in a unique sibling staging directory
-and published under `[Base] IndexDirectory` only after construction succeeds.
-The published files include `rabitq_auto_quantizer.bin` and
-`rabitq_auto_vectors.bin`; a previous index is restored if directory
-publication fails. `--outputfolder` must name the same directory as
-`[Base] IndexDirectory`, and `--input`, `--quantizer`, and
-`Section.Parameter=value` overrides are rejected in auto-tuning mode. The
-builder internally uses the generated `UInt8` width (obtained from
-`GetNumSubvectors()`), model, and vector path while queries remain raw Float
-vectors through ADC. The original `VectorPath` remains the sole raw source;
-no JSON, environment overrides, manual INI edits, or Python/Faiss step is
-used. If the section is absent or disabled, existing build behavior is
-unchanged.
-
-For a manually selected width, train the official model and encode base vectors
-with `Release/quantizer`, then use the generated model through
-`QuantizerFilePath` in the normal SPANN workflow. For 128-dimensional SIFT
-vectors, the encoded `UInt8` vectors use `Dim=68` at 3 bits (48 compact code
-bytes plus five Float factors).
+RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the
+official model and encode base vectors with `Release/quantizer`, then
+use the generated model through `QuantizerFilePath` in the normal SPANN
+workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
+`Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
 
 Train and encode SIFT1M:
 
@@ -359,6 +316,7 @@ TmpDir=/tmp/sift1m-spann-rabitq3
 EnableDeltaEncoding=false
 EnablePostingListRearrange=false
 EnableDataCompression=false
+PostingQuantizer=None
 Rerank=0
 EnableADC=true
 
