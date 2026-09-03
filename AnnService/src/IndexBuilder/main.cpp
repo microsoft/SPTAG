@@ -150,6 +150,13 @@ int main(int argc, char *argv[])
 #endif
     }
 
+    if (quantizerFile.empty() &&
+        iniReader.DoesParameterExist("Base", "QuantizerFilePath"))
+    {
+        quantizerFile =
+            iniReader.GetParameter("Base", "QuantizerFilePath", std::string());
+    }
+
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", quantizerFile.c_str());
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, builderValueType);

@@ -359,7 +359,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, Sear
     {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-        if (m_pQuantizer)
+        if (UseQuantizerForIndexBuild())
         {
             p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
         }
@@ -693,7 +693,7 @@ ErrorCode Index<T>::SearchHeadIndex(QueryResult& p_query, int p_tolayer, ExtraWo
     {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-        if (m_pQuantizer)
+        if (UseQuantizerForIndexBuild())
         {
             p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
         }

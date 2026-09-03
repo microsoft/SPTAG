@@ -204,7 +204,11 @@ namespace SPTAG
         inline void OPQQuantizer<T>::m_VectorMatrixMultiply(OPQMatrixType* mat, const OPQMatrixType* vec, O* mat_vec) const
         {
             for (int i = 0; i < m_matrixDim; i++) {
-                mat_vec[i] = (O)(m_base - m_fdot(vec, mat, m_matrixDim));
+                OPQMatrixType value = 0;
+                for (int j = 0; j < m_matrixDim; ++j) {
+                    value += vec[j] * mat[j];
+                }
+                mat_vec[i] = static_cast<O>(value);
                 mat += m_matrixDim;
             }
         }

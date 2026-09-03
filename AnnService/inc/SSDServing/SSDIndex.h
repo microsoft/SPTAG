@@ -206,7 +206,15 @@ namespace SPTAG {
                     std::vector<SPANN::SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
-                        (*((COMMON::QueryResultSet<ValueType>*)&warmupResults[i])).SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)), p_index->m_pQuantizer);
+                        if (p_index->m_pQuantizer && p_index->m_pQuantizer->QuantizeForIndexBuild())
+                        {
+                            (*((COMMON::QueryResultSet<ValueType>*)&warmupResults[i]))
+                                .SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)), p_index->m_pQuantizer);
+                        }
+                        else
+                        {
+                            warmupResults[i].SetTarget(warmupQuerySet->GetVector(i));
+                        }
                         warmupResults[i].Reset();
                     }
 
@@ -230,7 +238,15 @@ namespace SPTAG {
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
-                    (*((COMMON::QueryResultSet<ValueType>*)&results[i])).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)), p_index->m_pQuantizer);
+                    if (p_index->m_pQuantizer && p_index->m_pQuantizer->QuantizeForIndexBuild())
+                    {
+                        (*((COMMON::QueryResultSet<ValueType>*)&results[i]))
+                            .SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)), p_index->m_pQuantizer);
+                    }
+                    else
+                    {
+                        results[i].SetTarget(querySet->GetVector(i));
+                    }
                     results[i].Reset();
                 }
 
