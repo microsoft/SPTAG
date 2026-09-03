@@ -389,7 +389,7 @@ BOOST_AUTO_TEST_CASE(RaBitQAutoTuneSelectsFirstQualifyingBit)
             selected, recall) == ErrorCode::Success);
     BOOST_CHECK_EQUAL(selected, 4);
     BOOST_CHECK_CLOSE(recall, 0.8F, 0.001F);
-    const std::vector<int> expectedEvaluated = {1, 2, 3, 4};
+    const std::vector<int> expectedEvaluated = {4, 2, 3};
     BOOST_CHECK_EQUAL_COLLECTIONS(
         evaluated.begin(), evaluated.end(),
         expectedEvaluated.begin(), expectedEvaluated.end());

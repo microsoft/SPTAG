@@ -605,7 +605,10 @@ ErrorCode RaBitQAutoTuner::SelectMinimumBits(float p_targetRecall,
         p_targetRecall < 0.0F || p_targetRecall > 1.0F) {
         return ErrorCode::FailedParseValue;
     }
-    for (int bits = 1; bits <= 8; ++bits) {
+    int low = 1;
+    int high = 8;
+    while (low <= high) {
+        const int bits = low + (high - low) / 2;
         float recall = 0.0F;
         const ErrorCode status = p_evaluator(bits, recall);
         if (status != ErrorCode::Success || !std::isfinite(recall)) {
@@ -614,10 +617,13 @@ ErrorCode RaBitQAutoTuner::SelectMinimumBits(float p_targetRecall,
         if (recall >= p_targetRecall) {
             p_selectedBits = bits;
             p_selectedRecall = recall;
-            return ErrorCode::Success;
+            high = bits - 1;
+        }
+        else {
+            low = bits + 1;
         }
     }
-    return ErrorCode::Fail;
+    return p_selectedBits == 0 ? ErrorCode::Fail : ErrorCode::Success;
 }
 
 ErrorCode RaBitQAutoTuner::ValidateTruth(
