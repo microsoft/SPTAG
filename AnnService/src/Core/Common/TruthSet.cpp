@@ -24,7 +24,7 @@ namespace COMMON
 template <typename T>
 void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet,
                              const std::string truthFile, const SPTAG::DistCalcMethod distMethod, const int K,
-                             const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer> &quantizer)
+                             const SPTAG::TruthFileType p_truthFileType, std::shared_ptr<IQuantizer> quantizer, int threadNum, std::vector<std::vector<SizeType>> *truth)
 {
     if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
     {
@@ -74,7 +74,7 @@ void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_pt
 template <typename T>
 void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet,
                              const std::string truthFile, const SPTAG::DistCalcMethod distMethod, const int K,
-                             const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer> &quantizer, int threadNum, std::vector<std::vector<SizeType>> *truth)
+                             const SPTAG::TruthFileType p_truthFileType, std::shared_ptr<IQuantizer> quantizer, int threadNum, std::vector<std::vector<SizeType>> *truth)
 {
     if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
     {
@@ -174,7 +174,7 @@ void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_pt
     template void TruthSet::GenerateTruth<Type>(                                                                       \
         std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,        \
         const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType,               \
-        const std::shared_ptr<IQuantizer> &quantizer);
+        std::shared_ptr<IQuantizer> quantizer, int threadNum, std::vector<std::vector<SizeType>> *truth);
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 } // namespace COMMON

@@ -311,7 +311,7 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, &scanRet, this](bool success)
                     {
                         if (!success) {
                             scanRet = ErrorCode::DiskIOFail;
@@ -854,6 +854,7 @@ namespace SPTAG
                 {
                     auto fullVectors = p_reader->GetVectorSet();
                     fullCount = fullVectors->Count();
+                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(SizeType);
                 }
                 if (upperBound > 0) fullCount = upperBound;
 

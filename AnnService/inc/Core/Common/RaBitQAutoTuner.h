@@ -25,6 +25,7 @@ struct RaBitQAutoTuneResult
     std::shared_ptr<RaBitQQuantizer> quantizer;
 };
 
+template <typename T>
 class RaBitQAutoTuner
 {
 public:
@@ -33,6 +34,10 @@ public:
                         DistCalcMethod p_distance,
                         const std::string& p_outputFolder,
                         RaBitQAutoTuneResult& p_result);
+    static ErrorCode SelectMinimumBits(float p_targetRecall,
+                        const std::function<ErrorCode(int, float&)>& p_evaluator,
+                        int& p_selectedBits,
+                        float& p_selectedRecall);
 };
 
 } // namespace COMMON

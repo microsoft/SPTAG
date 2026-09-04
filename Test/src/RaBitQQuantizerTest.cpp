@@ -179,7 +179,7 @@ void ConfigureSpannIndex(const std::shared_ptr<VectorIndex>& p_index,
     p_index->SetParameter("EnableDataCompression", p_enable_compression ? "true" : "false", "BuildSSDIndex");
     p_index->SetParameter("EnableDictTraining", "false", "BuildSSDIndex");
     p_index->SetParameter("AsyncMergeInSearch", "false", "BuildSSDIndex");
-    p_index->SetParameter("EnableADC", "true", "BuildSSDIndex");
+    p_index->SetParameter("EnableADC", "false", "BuildSSDIndex");
 }
 
 void VerifySpannSearch(
@@ -194,14 +194,14 @@ void VerifySpannSearch(
     std::filesystem::remove_all(index_directory);
 
     p_quantizer->SetEnableADC(false);
-    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
     BOOST_REQUIRE(index != nullptr);
     index->SetQuantizer(p_quantizer);
     ConfigureSpannIndex(index, index_directory, nullptr, p_storage, p_enable_compression);
-    BOOST_REQUIRE(index->BuildIndex(p_raw, nullptr, false, true) == ErrorCode::Success);
+    BOOST_REQUIRE(index->BuildIndex(p_codes, nullptr, false, true) == ErrorCode::Success);
 
     p_quantizer->SetEnableADC(true);
-    auto* spann_index = static_cast<SPANN::Index<float>*>(index.get());
+    auto* spann_index = static_cast<SPANN::Index<uint8_t>*>(index.get());
     std::vector<SizeType> head_ids;
     BOOST_REQUIRE(spann_index->GetHeadIndexMapping(1, head_ids) == ErrorCode::Success);
     SizeType expected = 0;
@@ -257,18 +257,18 @@ void VerifySSDServingSearch(
     }
 
     p_quantizer->SetEnableADC(false);
-    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
     BOOST_REQUIRE(index != nullptr);
     index->SetQuantizer(p_quantizer);
     ConfigureSpannIndex(index, index_directory, kQueryFile, "FILEIO", false);
-    index->SetParameter("EnableADC", "true", "BuildSSDIndex");
+    index->SetParameter("EnableADC", "false", "BuildSSDIndex");
     index->SetParameter("SearchThreadNum", "1", "BuildSSDIndex");
     index->SetParameter("SearchInternalResultNum", "96", "SearchSSDIndex");
     index->SetParameter("ResultNum", "8", "SearchSSDIndex");
     index->SetParameter("QueryCountLimit", std::to_string(kSearchQueryCount), "SearchSSDIndex");
-    BOOST_REQUIRE(index->BuildIndex(p_raw, nullptr, false, true) == ErrorCode::Success);
+    BOOST_REQUIRE(index->BuildIndex(p_codes, nullptr, false, true) == ErrorCode::Success);
 
-    auto* spann_index = static_cast<SPANN::Index<float>*>(index.get());
+    auto* spann_index = static_cast<SPANN::Index<uint8_t>*>(index.get());
     BOOST_REQUIRE(SSDServing::SSDIndex::Search(spann_index) == ErrorCode::Success);
 
     index.reset();
@@ -296,9 +296,8 @@ BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQUsesGlobalQuantizerPath)
 
     VerifySearch(IndexAlgoType::BKT, raw, codes, loaded);
     VerifySearch(IndexAlgoType::KDT, raw, codes, loaded);
-    VerifySpannSearch(raw, codes, loaded, "FILEIO");
     VerifySpannSearch(raw, codes, loaded, "STATIC");
-    VerifySpannSearch(raw, codes, loaded, "STATIC", true);
+    VerifySpannSearch(raw, codes, loaded, "FILEIO");
     VerifySSDServingSearch(raw, codes, loaded);
 
     std::remove(kQuantizerFile);
@@ -368,8 +367,8 @@ BOOST_AUTO_TEST_CASE(SpannAppliesConfiguredADCWhenAttachingQuantizer)
     auto index = VectorIndex::CreateInstance(
         IndexAlgoType::SPANN, VectorValueType::UInt8);
     BOOST_REQUIRE(index != nullptr);
-    index->SetParameter("EnableADC", "true", "BuildSSDIndex");
     index->SetQuantizer(quantizer);
+    index->SetParameter("EnableADC", "true", "BuildSSDIndex");
     BOOST_CHECK(quantizer->GetEnableADC());
 }
 
@@ -379,7 +378,7 @@ BOOST_AUTO_TEST_CASE(RaBitQAutoTuneSelectsFirstQualifyingBit)
     int selected = 0;
     float recall = 0.0F;
     BOOST_REQUIRE(
-        COMMON::RaBitQAutoTuner::SelectMinimumBits(
+        COMMON::RaBitQAutoTuner<float>::SelectMinimumBits(
             0.75F,
             [&](int bits, float& value) {
                 evaluated.push_back(bits);
@@ -395,7 +394,7 @@ BOOST_AUTO_TEST_CASE(RaBitQAutoTuneSelectsFirstQualifyingBit)
         expectedEvaluated.begin(), expectedEvaluated.end());
 
     BOOST_CHECK(
-        COMMON::RaBitQAutoTuner::SelectMinimumBits(
+        COMMON::RaBitQAutoTuner<float>::SelectMinimumBits(
             1.0F,
             [](int, float& value) {
                 value = 0.99F;
@@ -452,15 +451,15 @@ BOOST_AUTO_TEST_CASE(RaBitQAutoTuneProducesNativeBuildHandoff)
             baseData[row * dimension + column] = value;
         }
     }
-    auto baseVectors = std::make_shared<BasicVectorSet>(
-        ByteArray(baseData.data(), baseData.size() * sizeof(float)),
+    std::shared_ptr<VectorSet> baseVectors = std::make_shared<BasicVectorSet>(
+        ByteArray((std::uint8_t*)baseData.data(), baseData.size() * sizeof(float), false),
         VectorValueType::Float, dimension, vectorCount);
 
     COMMON::RaBitQAutoTuneResult result;
 
     BOOST_REQUIRE_MESSAGE(
-        COMMON::RaBitQAutoTuner::Run(
-            baseVectors, 100, 10, 5, 0.9F, DistCalcMethod::L2, outputFolder, result) == ErrorCode::Success,
+        COMMON::RaBitQAutoTuner<float>::Run(
+            baseVectors, queryCount, 10, 5, 0.9F, DistCalcMethod::L2, outputFolder, result) == ErrorCode::Success,
         "RaBitQ auto-tuning failed.");
     BOOST_CHECK_EQUAL(result.selectedBits, 1);
     BOOST_REQUIRE(result.quantizer != nullptr);

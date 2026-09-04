@@ -70,7 +70,6 @@ else()
     )
 endif()
 
-set (RabitQ_LIBRARIES "")
 if (RABITQ)
     add_definitions(-DRABITQ)
     set(RaBitQOfficial ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficial)
@@ -140,7 +139,6 @@ if (RABITQ)
         set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
             PROPERTIES COMPILE_FLAGS "/arch:AVX2")
     endif()
-    set (RabitQ_LIBRARIES RabitQOfficialCore)
 else()
     list(REMOVE_ITEM HDR_FILES
 	    ${AnnService}/inc/Core/Common/RaBitQQuantizer.h

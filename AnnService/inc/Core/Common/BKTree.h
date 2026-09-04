@@ -44,9 +44,9 @@ namespace SPTAG
             DistCalcMethod _M;
             uint8_t* reconstructVectors;
             T* centers;
-            T* newTCenters;            
-            SizeType* counts;
-            float* newCenters;            
+            T* newTCenters;
+            float* newCenters;             
+            SizeType* counts;           
             SizeType* newCounts;
             int* label;
             SizeType* clusterIdx;
@@ -67,8 +67,8 @@ namespace SPTAG
 
                 centers = (T*)ALIGN_ALLOC(sizeof(T) * _K * _D);
                 newTCenters = (T*)ALIGN_ALLOC(sizeof(T) * _K * _D);
+                newCenters = (float*)ALIGN_ALLOC(sizeof(float) * _TH * _K * _RD);
                 counts = new SizeType[_K];
-                newCenters = new float[_TH * _K * _RD];
                 newCounts = new SizeType[_TH * _K];
                 label = new int[datasize];
                 clusterIdx = new SizeType[_TH * _K];
@@ -80,9 +80,9 @@ namespace SPTAG
             ~KmeansArgs() {
                 if (reconstructVectors) ALIGN_FREE(reconstructVectors);
                 ALIGN_FREE(centers);
-                ALIGN_FREE(newTCenters);                                
+                ALIGN_FREE(newTCenters);
+                ALIGN_FREE(newCenters);                               
                 delete[] counts;
-                delete[] newCenters;
                 delete[] newCounts;
                 delete[] label;
                 delete[] clusterIdx;
@@ -190,7 +190,7 @@ namespace SPTAG
                     
                     if (args.m_pQuantizer) {
                         for (DimensionType j = 0; j < args._RD; j++) reconstructVector[j] = (R)(currCenters[j]);
-                        args.m_pQuantizer->QuantizeVector(reconstructVector.data(), (uint8_t*)TCenter);
+                        args.m_pQuantizer->QuantizeVector(reconstructVector.data(), (uint8_t*)TCenter, false);
                     }
                     else {
                         for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);

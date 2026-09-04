@@ -101,12 +101,12 @@ int main(int argc, char *argv[])
     {
 #ifdef RABITQ
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles.empty()? iniReader.GetParameter("Base", "VectorPath", "") : options->m_inputFiles))
+        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles.empty()? iniReader.GetParameter("Base", "VectorPath", std::string("")) : options->m_inputFiles))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
             exit(1);
         }
-        vecset = vectorReader->GetVectorSet(0, iniReader.GetParameter("RaBitQAutoTune", "TrainSamples", 10000));
+        auto vecset = vectorReader->GetVectorSet(0, iniReader.GetParameter("RaBitQAutoTune", "TrainSamples", 10000));
         
         DistCalcMethod distCalcMethod = iniReader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined);
         if (distCalcMethod == DistCalcMethod::Undefined)
@@ -118,11 +118,19 @@ int main(int argc, char *argv[])
             distCalcMethod = DistCalcMethod::L2;
         }
         COMMON::RaBitQAutoTuneResult tuneResult;
+        ErrorCode ret;
 
-        ErrorCode ret = COMMON::RaBitQAutoTuner::Run(
-                    vecset, iniReader.GetParameter("RaBitQAutoTune", "TestQueries", 100), 
-                    iniReader.GetParameter("RaBitQAutoTune", "ResultCount", 10), options->m_threads, 
-                    iniReader.GetParameter("RaBitQAutoTune", "TargetRecall", 0.9F), distCalcMethod, ".", tuneResult);
+#define DefineVectorValueType(Name, Type) \
+        if (options->m_inputValueType == VectorValueType::Name) \
+        { \
+            ret = COMMON::RaBitQAutoTuner<Type>::Run( \
+                vecset, iniReader.GetParameter("RaBitQAutoTune", "TestQueries", 100), \
+                iniReader.GetParameter("RaBitQAutoTune", "ResultCount", 10), options->m_threadNum, \
+                iniReader.GetParameter("RaBitQAutoTune", "TargetRecall", 0.9F), distCalcMethod, ".", tuneResult); \
+        } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
         
         if (ret != ErrorCode::Success || !tuneResult.quantizer)
         {
@@ -134,11 +142,11 @@ int main(int argc, char *argv[])
         quantizerFile = tuneResult.quantizerPath;
         std::string newVectorPath;
         if (options->m_inputFiles.empty()) {
-            newVectorPath = iniReader.GetParameter("Base", "VectorPath", "vectors.bin") + ".quan";         
+            newVectorPath = iniReader.GetParameter("Base", "VectorPath", std::string("vectors.bin")) + ".quan";         
             iniReader.SetParameter("Base", "VectorPath", newVectorPath);
             iniReader.SetParameter("Base", "VectorType", "Default");
             iniReader.SetParameter("Base", "ValueType", "UInt8");
-            iniReader.SetParameter("Base", "Dim", "" + std::to_string(tuneResult.codeDimension));
+            iniReader.SetParameter("Base", "Dim", std::to_string(tuneResult.codeDimension));
         } else {
             auto oldVectorPath = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles, ",")[0];
             newVectorPath = oldVectorPath + ".quan";
@@ -146,7 +154,6 @@ int main(int argc, char *argv[])
         }
 
         options->m_inputValueType = VectorValueType::UInt8;
-        options->m_dim = tuneResult.codeDimension;
         options->m_dimension = tuneResult.codeDimension;
         {
             SizeType written = 0;
@@ -162,15 +169,15 @@ int main(int argc, char *argv[])
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create encoded vector file: %s\n", newVectorPath.c_str());
                 return 1;
             }
-            p_quantizer->SetEnableADC(true);
+            tuneResult.quantizer->SetEnableADC(true);
             std::vector<std::uint8_t> code(static_cast<std::size_t>(tuneResult.codeDimension));
             SizeType kBatchSize = iniReader.GetParameter("RaBitQAutoTune", "BatchSize", (SizeType)1000000);
             for (SizeType start = 0; ; start += kBatchSize) {
-                const auto batch = p_reader->GetVectorSet(start, start + kBatchSize);
+                const auto batch = vectorReader->GetVectorSet(start, start + kBatchSize);
                 if (!batch) break;
 
                 for (SizeType i = 0; i < batch->Count(); ++i) {
-                    p_quantizer->QuantizeVector(batch->GetVector(i), code.data(), false);
+                    tuneResult.quantizer->QuantizeVector(batch->GetVector(i), code.data(), false);
                     if (vectorOutput->WriteBinary(
                             code.size(), reinterpret_cast<const char*>(code.data())) != code.size()) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write encoded vector file: %s\n", newVectorPath.c_str());
