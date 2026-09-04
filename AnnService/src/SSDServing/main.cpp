@@ -136,15 +136,14 @@ int BootProgram(bool forANNIndexTestTool, std::map<std::string, std::map<std::st
     if (opts->m_generateTruth)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
-        VectorValueType vectorValueType = opts->m_valueType;
         SizeType dim = opts->m_dim;
         if (index->m_pQuantizer)
         {
-            vectorValueType = index->m_pQuantizer->GetReconstructType();
-            dim = index->m_pQuantizer->ReconstructDim();
+            valueType = VectorValueType::UInt8;
+            dim = index->m_pQuantizer->GetNumSubvectors();
         }
         std::shared_ptr<Helper::ReaderOptions> vectorOptions(
-            new Helper::ReaderOptions(vectorValueType, dim, opts->m_vectorType, opts->m_vectorDelimiter));
+            new Helper::ReaderOptions(valueType, dim, opts->m_vectorType, opts->m_vectorDelimiter));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
         if (ErrorCode::Success != vectorReader->LoadFile(opts->m_vectorPath))
         {

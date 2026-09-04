@@ -25,10 +25,7 @@ public:
     RaBitQQuantizer(DimensionType p_dimension, int p_bits, bool p_normalize);
 
     ErrorCode Train(const std::shared_ptr<VectorSet>& p_vectors);
-    ErrorCode BeginTraining();
-    ErrorCode AddTrainingBatch(const std::shared_ptr<VectorSet>& p_vectors);
-    ErrorCode FinishTraining();
-    std::shared_ptr<RaBitQQuantizer> CreateWithBits(int p_bits) const;
+    std::shared_ptr<RaBitQQuantizer> CloneWithBits(int p_bits) const;
 
     float L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
@@ -48,7 +45,6 @@ public:
     DimensionType GetNumSubvectors() const override;
     int GetBase() const override;
     float* GetL2DistanceTables() override;
-    bool QuantizeForIndexBuild() const override { return false; }
 
     DimensionType Dimension() const { return m_dimension; }
     int Bits() const { return m_bits; }
@@ -96,8 +92,6 @@ private:
     rabitqlib::quant::RabitqConfig m_quantizer_config;
     rabitqlib::ex_ipfunc m_ip_func = nullptr;
     std::vector<float> m_centroid;
-    std::vector<double> m_training_sum;
-    std::uint64_t m_training_count = 0;
     bool m_trained = false;
 };
 

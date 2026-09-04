@@ -125,7 +125,7 @@ namespace SPTAG
             SizeType vectorID = *(reinterpret_cast<SizeType*>(p_postingListFullData + offsetVectorID));\
             if (p_exWorkSpace->Deduper().CheckAndSet(vectorID)) { listElements--; continue; } \
             (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
-            auto distance2leaf = PostingDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
+            auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray((std::uint8_t*)(p_postingListFullData + offsetVector), StoredVectorBytes(), false) : ByteArray::c_empty); \
         } \
 
@@ -138,7 +138,7 @@ namespace SPTAG
             if (p_exWorkSpace->Deduper().CheckAndSet(vectorID)) continue; \
             if (p_exWorkSpace->m_filterFunc != nullptr && !p_exWorkSpace->m_filterFunc(m_headIndex->GetMetadata(vectorID))) continue; \
             (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
-            auto distance2leaf = PostingDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
+            auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
             foundResult = true;\
             break;\
@@ -181,35 +181,6 @@ namespace SPTAG
                 return m_headIndex->m_pQuantizer
                     ? static_cast<size_t>(m_headIndex->m_pQuantizer->GetNumSubvectors())
                     : static_cast<size_t>(m_opt->m_dim) * sizeof(ValueType);
-            }
-
-            inline float PostingDistance(const void* p_query, const char* p_vector) const
-            {
-                if (!m_headIndex->m_pQuantizer)
-                {
-                    return m_headIndex->ComputeDistance(p_query, p_vector);
-                }
-                if (m_headIndex->GetDistCalcMethod() == DistCalcMethod::L2)
-                {
-                    return m_headIndex->m_pQuantizer->L2Distance(
-                        reinterpret_cast<const std::uint8_t*>(p_query),
-                        reinterpret_cast<const std::uint8_t*>(p_vector));
-                }
-                return m_headIndex->m_pQuantizer->CosineDistance(
-                    reinterpret_cast<const std::uint8_t*>(p_query),
-                    reinterpret_cast<const std::uint8_t*>(p_vector));
-            }
-
-            inline size_t DiskRequestIndex(const ExtraWorkSpace* p_exWorkSpace, size_t p_postingIndex) const
-            {
-                return p_postingIndex;
-            }
-
-            inline Helper::AsyncReadRequest& DiskRequest(ExtraWorkSpace* p_exWorkSpace, size_t p_postingIndex) const
-            {
-                auto& request = p_exWorkSpace->m_diskRequests[DiskRequestIndex(p_exWorkSpace, p_postingIndex)];
-                request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[p_postingIndex].GetBuffer());
-                return request;
             }
 
             virtual bool LoadIndex(Options& p_opt) override {
@@ -279,8 +250,7 @@ namespace SPTAG
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
                 if (postingListCount > p_exWorkSpace->m_pageBuffers.size() ||
-                    (postingListCount > 0 &&
-                     DiskRequestIndex(p_exWorkSpace, postingListCount - 1) >= p_exWorkSpace->m_diskRequests.size())) {
+                    postingListCount > p_exWorkSpace->m_diskRequests.size()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                                  "Static search workspace is too small: postings=%u buffers=%zu requests=%zu.\n",
                                  postingListCount, p_exWorkSpace->m_pageBuffers.size(),
@@ -305,7 +275,7 @@ namespace SPTAG
                     auto it = m_globalVectorIDToHeadMap.find(curPostingID);
                     if (it == m_globalVectorIDToHeadMap.end()) {
                         ++missingPostingIDs;
-                        auto& request = DiskRequest(p_exWorkSpace, pi);
+                        auto& request = p_exWorkSpace->m_diskRequests[pi];
                         request.m_readSize = 0;
                         request.m_success = false;
                         request.m_callback = nullptr;
@@ -333,7 +303,7 @@ namespace SPTAG
                     }
 
 #ifdef ASYNC_READ       
-                    auto& request = DiskRequest(p_exWorkSpace, pi);
+                    auto& request = p_exWorkSpace->m_diskRequests[pi];
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -341,15 +311,15 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    Helper::AsyncReadRequest* requestPtr = &request;
-                    request.m_callback = [p_exWorkSpace, &queryResults, requestPtr, &listElements, &scanRet, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, this](bool success)
                     {
                         if (!success) {
                             scanRet = ErrorCode::DiskIOFail;
                             return;
                         }
-                        char* buffer = requestPtr->m_buffer;
-                        ListInfo* listInfo = (ListInfo*)(requestPtr->m_payload);
+
+                        char* buffer = request.m_buffer;
+                        ListInfo* listInfo = (ListInfo*)(request.m_payload);
 
                         // decompress posting list
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
@@ -361,16 +331,16 @@ namespace SPTAG
                         ProcessPosting();
                     };
 #else // async read
-                    Helper::AsyncReadRequest* requestPtr = &request;
-                    request.m_callback = [p_exWorkSpace, requestPtr](bool success)
+                    request.m_callback = [&p_exWorkSpace, &request](bool success)
                     {
-                        p_exWorkSpace->m_processIocp.push(requestPtr);
+                        p_exWorkSpace->m_processIocp.push(&request);
                     };
 
                     ++unprocessed;
                     if (!(indexFile->ReadFileAsync(request)))
                     {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
+                        scanRet = ErrorCode::DiskIOFail;
                         unprocessed--;
                     }
 #endif
@@ -379,7 +349,8 @@ namespace SPTAG
                     auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
                     if (numRead != totalBytes) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
-                        throw std::runtime_error("File read mismatch");
+                        scanRet = ErrorCode::DiskIOFail;
+                        continue;
                     }
                     // decompress posting list
                     char* p_postingListFullData = buffer + listInfo->pageOffset;
@@ -504,7 +475,7 @@ namespace SPTAG
                         if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
                             continue;
                         (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));
-                        auto distance2leaf = PostingDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector);
+                        auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector);
                         p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
                             queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(p_postingListFullData + offsetVector), StoredVectorBytes()) : ByteArray::c_empty);
                     }
@@ -522,7 +493,7 @@ namespace SPTAG
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                     auto it = m_globalVectorIDToHeadMap.find(curPostingID);
                     if (it == m_globalVectorIDToHeadMap.end()) {
-                        auto& request = DiskRequest(p_exWorkSpace, pi);
+                        auto& request = p_exWorkSpace->m_diskRequests[pi];
                         request.m_readSize = 0;
                         request.m_success = false;
                         request.m_callback = nullptr;
@@ -539,7 +510,7 @@ namespace SPTAG
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
 
 #ifdef ASYNC_READ
-                    auto& request = DiskRequest(p_exWorkSpace, pi);
+                    auto& request = p_exWorkSpace->m_diskRequests[pi];
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -547,22 +518,20 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ
-                    Helper::AsyncReadRequest* requestPtr = &request;
-                    request.m_callback = [&appendPosting, requestPtr, &scanRet](bool success)
+                    request.m_callback = [&appendPosting, &request, &scanRet](bool success)
                     {
                         if (!success) {
                             scanRet = ErrorCode::DiskIOFail;
                             return;
                         }
-                        ErrorCode ret = appendPosting(requestPtr->m_buffer, static_cast<ListInfo*>(requestPtr->m_payload));
+                        ErrorCode ret = appendPosting(request.m_buffer, static_cast<ListInfo*>(request.m_payload));
                         if (ret != ErrorCode::Success)
                             scanRet = ret;
                     };
 #else
-                    Helper::AsyncReadRequest* requestPtr = &request;
-                    request.m_callback = [p_exWorkSpace, requestPtr](bool success)
+                    request.m_callback = [&p_exWorkSpace, &request](bool success)
                     {
-                        p_exWorkSpace->m_processIocp.push(requestPtr);
+                        p_exWorkSpace->m_processIocp.push(&request);
                     };
 
                     ++unprocessed;
@@ -642,7 +611,7 @@ namespace SPTAG
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
                     
 #ifdef ASYNC_READ       
-                    auto& request = DiskRequest(p_exWorkSpace, pi);
+                    auto& request = p_exWorkSpace->m_diskRequests[pi];
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -667,10 +636,9 @@ namespace SPTAG
                         */
                     };
 #else // async read
-                    Helper::AsyncReadRequest* requestPtr = &request;
-                    request.m_callback = [p_exWorkSpace, requestPtr](bool success)
+                    request.m_callback = [&p_exWorkSpace, &request](bool success)
                     {
-                        p_exWorkSpace->m_processIocp.push(requestPtr);
+                        p_exWorkSpace->m_processIocp.push(&request);
                     };
 
                     ++unprocessed;
@@ -752,8 +720,7 @@ namespace SPTAG
                         continue;
                     }
                     char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[p_exWorkSpace->m_pi]).GetBuffer());
-                    ListInfo* listInfo = static_cast<ListInfo*>(
-                        DiskRequest(p_exWorkSpace, p_exWorkSpace->m_pi).m_payload);
+                    ListInfo* listInfo = static_cast<ListInfo*>(p_exWorkSpace->m_diskRequests[p_exWorkSpace->m_pi].m_payload);
                     // decompress posting list
                     char* p_postingListFullData = buffer + listInfo->pageOffset;
                     if (m_enableDataCompression && p_exWorkSpace->m_offset == 0)
@@ -797,7 +764,6 @@ namespace SPTAG
                 size_t p_postingListSize,
                 Selection &p_selections,
                 std::shared_ptr<VectorSet> p_fullVectors,
-                std::shared_ptr<VectorSet> p_quantizedVectors,
                 COMMON::Dataset<SizeType>& p_localToGlobal,
                 bool p_enableDeltaEncoding = false,
                 bool p_enablePostingListRearrange = false,
@@ -823,29 +789,7 @@ namespace SPTAG
                     vectorID.append(reinterpret_cast<char *>(&vid), sizeof(SizeType));
 
                     ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(vid));
-                    const bool quantizePosting =
-                        m_headIndex->m_pQuantizer &&
-                        p_fullVectors->GetValueType() == m_headIndex->m_pQuantizer->GetReconstructType() &&
-                        p_fullVectors->Dimension() == m_headIndex->m_pQuantizer->ReconstructDim();
-                    if (quantizePosting && p_quantizedVectors)
-                    {
-                        const void* quantizedVector = p_quantizedVectors->GetVector(vid);
-                        vector.append(
-                            reinterpret_cast<const char*>(quantizedVector),
-                            p_quantizedVectors->PerVectorDataSize());
-                    }
-                    else if (quantizePosting)
-                    {
-                        thread_local std::vector<std::uint8_t> quantizedVector;
-                        quantizedVector.resize(static_cast<size_t>(
-                            m_headIndex->m_pQuantizer->GetNumSubvectors()));
-                        m_headIndex->m_pQuantizer->QuantizeVector(
-                            p_vector, quantizedVector.data(), false);
-                        vector.append(
-                            reinterpret_cast<const char*>(quantizedVector.data()),
-                            quantizedVector.size());
-                    }
-                    else if (p_enableDeltaEncoding)
+                    if (p_enableDeltaEncoding)
                     {
                         DimensionType n = p_fullVectors->Dimension();
                         std::vector<ValueType> p_vector_delta(n);
@@ -907,60 +851,9 @@ namespace SPTAG
 
                 SizeType fullCount = 0;
                 size_t vectorInfoSize = 0;
-                std::shared_ptr<VectorSet> quantizedVectors;
                 {
                     auto fullVectors = p_reader->GetVectorSet();
                     fullCount = fullVectors->Count();
-                    const bool quantizePosting =
-                        m_headIndex->m_pQuantizer &&
-                        fullVectors->GetValueType() == m_headIndex->m_pQuantizer->GetReconstructType() &&
-                        fullVectors->Dimension() == m_headIndex->m_pQuantizer->ReconstructDim();
-                    if (quantizePosting && p_opt.m_enableDeltaEncoding)
-                    {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                     "Delta encoding is not supported when SSD postings are quantized.\n");
-                        return false;
-                    }
-                    vectorInfoSize = (quantizePosting
-                        ? static_cast<size_t>(m_headIndex->m_pQuantizer->GetNumSubvectors())
-                        : fullVectors->PerVectorDataSize()) + sizeof(SizeType);
-                    if (quantizePosting && !p_opt.m_quantizedVectorPath.empty())
-                    {
-                        auto quantizedOptions = std::make_shared<Helper::ReaderOptions>(
-                            VectorValueType::UInt8,
-                            m_headIndex->m_pQuantizer->GetNumSubvectors(),
-                            VectorFileType::DEFAULT,
-                            "|",
-                            p_opt.m_iSSDNumberOfThreads,
-                            false);
-                        auto quantizedReader = Helper::VectorSetReader::CreateInstance(quantizedOptions);
-                        if (!quantizedReader ||
-                            quantizedReader->LoadFile(p_opt.m_quantizedVectorPath) != ErrorCode::Success)
-                        {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                         "Failed to load pre-quantized posting vectors: %s\n",
-                                         p_opt.m_quantizedVectorPath.c_str());
-                            return false;
-                        }
-                        quantizedVectors = quantizedReader->GetVectorSet();
-                        if (!quantizedVectors ||
-                            quantizedVectors->GetValueType() != VectorValueType::UInt8 ||
-                            quantizedVectors->Dimension() !=
-                                m_headIndex->m_pQuantizer->GetNumSubvectors() ||
-                            quantizedVectors->Count() < fullCount ||
-                            quantizedVectors->PerVectorDataSize() !=
-                                m_headIndex->m_pQuantizer->GetNumSubvectors())
-                        {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                         "Pre-quantized posting vectors are incompatible with the quantizer.\n");
-                            return false;
-                        }
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                                     "Loaded pre-quantized posting vectors from %s (%d,%d).\n",
-                                     p_opt.m_quantizedVectorPath.c_str(),
-                                     quantizedVectors->Count(),
-                                     quantizedVectors->Dimension());
-                    }
                 }
                 if (upperBound > 0) fullCount = upperBound;
 
@@ -1210,7 +1103,7 @@ namespace SPTAG
                                     headVector = (ValueType*)p_headIndex->GetSample(j);
                                 }
                                 std::string postingListFullData = GetPostingListFullData(
-                                    j, curPostingListSizes[j], selections, fullVectors, quantizedVectors, p_localToGlobal, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
+                                    j, curPostingListSizes[j], selections, fullVectors, p_localToGlobal, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
 
                                 samplesBuffer += postingListFullData;
                                 samplesSizes.push_back(postingListFullData.size());
@@ -1250,7 +1143,7 @@ namespace SPTAG
                                         }
                                         std::string postingListFullData =
                                             GetPostingListFullData(postingListId, postingListSize[postingListId],
-                                                                   selections, fullVectors, quantizedVectors, p_localToGlobal, p_opt.m_enableDeltaEncoding,
+                                                                   selections, fullVectors, p_localToGlobal, p_opt.m_enableDeltaEncoding,
                                                                    p_opt.m_enablePostingListRearrange, headVector);
                                         size_t sizeToCompress = postingListSize[postingListId] * vectorInfoSize;
                                         if (sizeToCompress != postingListFullData.size())
@@ -1315,7 +1208,7 @@ namespace SPTAG
                         postPageNum,
                         postPageOffset,
                         postingOrderInIndex,
-                        fullVectors, quantizedVectors, p_headToLocal, p_localToGlobal,
+                        fullVectors, p_headToLocal, p_localToGlobal,
                         curPostingListOffSet);
                 }
 
@@ -1626,7 +1519,6 @@ namespace SPTAG
                 const std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                 const std::vector<int>& p_postingOrderInIndex,
                 std::shared_ptr<VectorSet> p_fullVectors,
-                std::shared_ptr<VectorSet> p_quantizedVectors,
                 COMMON::Dataset<SizeType>& p_headToLocal,
                 COMMON::Dataset<SizeType>& p_localToGlobal,
                 size_t p_postingListOffset)
@@ -1847,7 +1739,7 @@ namespace SPTAG
                         headVector = (ValueType *)p_headIndex->GetSample(postingListId);
                     }
                     std::string postingListFullData = GetPostingListFullData(
-                        postingListId, p_postingListSizes[id], p_postingSelections, p_fullVectors, p_quantizedVectors, p_localToGlobal, p_enableDeltaEncoding, p_enablePostingListRearrange, headVector);
+                        postingListId, p_postingListSizes[id], p_postingSelections, p_fullVectors, p_localToGlobal, p_enableDeltaEncoding, p_enablePostingListRearrange, headVector);
                     size_t postingListFullSize = p_postingListSizes[id] * p_spacePerVector;
                     if (postingListFullSize != postingListFullData.size())
                     {

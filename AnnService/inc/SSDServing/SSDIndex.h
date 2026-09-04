@@ -181,11 +181,10 @@ namespace SPTAG {
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
                 ErrorCode ret;
-                const bool useADC = p_index->m_pQuantizer && p_opts.m_enableADC;
-                const VectorValueType queryValueType = useADC
+                const VectorValueType queryValueType = p_index->m_pQuantizer
                     ? p_index->m_pQuantizer->GetReconstructType()
                     : p_opts.m_valueType;
-                const DimensionType queryDimension = useADC
+                const DimensionType queryDimension = p_index->m_pQuantizer
                     ? p_index->m_pQuantizer->ReconstructDim()
                     : p_opts.m_dim;
 

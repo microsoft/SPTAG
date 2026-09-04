@@ -53,10 +53,6 @@ namespace SPTAG
                 return GetEnumValueType<T>();
             }
 
-            bool QuantizeForIndexBuild() const override
-            {
-                return false;
-            }
 
         protected:
             using PQQuantizer<OPQMatrixType>::m_NumSubvectors;

@@ -33,7 +33,6 @@ DefineBasicParameter(m_ssdIndex, std::string, std::string("SPTAGFullList.bin"), 
 DefineBasicParameter(m_deleteHeadVectors, bool, false, "DeleteHeadVectors")
 DefineBasicParameter(m_ssdIndexFileNum, int, 1, "SSDIndexFileNum")
 DefineBasicParameter(m_quantizerFilePath, std::string, std::string(), "QuantizerFilePath")
-DefineBasicParameter(m_quantizedVectorPath, std::string, std::string(), "QuantizedVectorPath")
 DefineBasicParameter(m_datasetRowsInBlock, SizeType, 1024 * 1024, "DataBlockSize")
 DefineBasicParameter(m_datasetCapacity, SizeType, SPTAG::MaxSize, "DataCapacity")
 #endif

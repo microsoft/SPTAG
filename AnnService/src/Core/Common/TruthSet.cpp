@@ -74,7 +74,7 @@ void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_pt
 template <typename T>
 void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet,
                              const std::string truthFile, const SPTAG::DistCalcMethod distMethod, const int K,
-                             const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer> &quantizer)
+                             const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer> &quantizer, int threadNum, std::vector<std::vector<SizeType>> *truth)
 {
     if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
     {
@@ -84,13 +84,15 @@ void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_pt
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n",
                  querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
-    std::vector<std::vector<SPTAG::SizeType>> truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
+    std::vector<std::vector<SPTAG::SizeType>> tempset;
+    std::vector<std::vector<SPTAG::SizeType>> &truthset = (truth == nullptr)? tempset : *truth;
+    truthset.resize(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
     std::vector<std::vector<float>> distset(querySet->Count(), std::vector<float>(K, 0));
     auto fComputeDistance =
         quantizer ? quantizer->DistanceCalcSelector<T>(distMethod) : COMMON::DistanceCalcSelector<T>(distMethod);
 
     std::vector<std::thread> mythreads;
-    int maxthreads = std::thread::hardware_concurrency();
+    int maxthreads = threadNum < 0 ? std::thread::hardware_concurrency(): threadNum;
     mythreads.reserve(maxthreads);
     std::atomic_size_t sent(0);
     for (int tid = 0; tid < maxthreads; tid++)
@@ -131,6 +133,8 @@ void TruthSet::GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_pt
         t.join();
     }
     mythreads.clear();
+
+    if (truthFile.empty()) return;
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
     writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);

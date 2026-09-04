@@ -44,7 +44,6 @@ namespace SPTAG {
             bool m_deleteHeadVectors;
             int m_ssdIndexFileNum;
             std::string m_quantizerFilePath;
-            std::string m_quantizedVectorPath;
             SizeType m_datasetRowsInBlock;
             SizeType m_datasetCapacity;
 

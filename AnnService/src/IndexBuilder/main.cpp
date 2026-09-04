@@ -19,8 +19,7 @@ using namespace SPTAG;
 class BuilderOptions : public Helper::ReaderOptions
 {
   public:
-    BuilderOptions()
-        : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
+    BuilderOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
     {
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
@@ -84,14 +83,12 @@ int main(int argc, char *argv[])
                      paramVal.c_str());
     }
 
-    std::string quantizerFile = options->m_quantizerFile;
-    VectorValueType builderValueType = options->m_inputValueType;
     if (options->m_inputFiles.empty() &&
         iniReader.DoesParameterExist("Base", "ValueType"))
     {
-        builderValueType =
+        options->m_inputValueType =
             iniReader.GetParameter("Base", "ValueType", VectorValueType::Undefined);
-        if (builderValueType == VectorValueType::Undefined)
+        if (options->m_inputValueType == VectorValueType::Undefined)
         {
             SPTAGLIB_LOG(
                 Helper::LogLevel::LL_Error, "Invalid [Base] ValueType.\n");
@@ -99,50 +96,93 @@ int main(int argc, char *argv[])
         }
     }
 
-    const bool autoTuneEnabled =
-        iniReader.DoesSectionExist("RaBitQAutoTune") &&
-        iniReader.GetParameter("RaBitQAutoTune", "isExecute", false);
-    if (autoTuneEnabled)
+    std::string quantizerFile = options->m_quantizerFile;
+    if (quantizerFile.empty() && iniReader.GetParameter("RaBitQAutoTune", "isExecute", false))
     {
 #ifdef RABITQ
-        if (options->m_indexAlgoType != IndexAlgoType::SPANN)
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles.empty()? iniReader.GetParameter("Base", "VectorPath", "") : options->m_inputFiles))
         {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                         "RaBitQ auto-tuning is supported only for SPANN index construction.\n");
-            return 1;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+            exit(1);
         }
-        if (!options->m_inputFiles.empty())
+        vecset = vectorReader->GetVectorSet(0, iniReader.GetParameter("RaBitQAutoTune", "TrainSamples", 10000));
+        
+        DistCalcMethod distCalcMethod = iniReader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined);
+        if (distCalcMethod == DistCalcMethod::Undefined)
         {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                         "RaBitQ auto-tuning reads vectors from the INI; --input is not allowed.\n");
-            return 1;
+            distCalcMethod = iniReader.GetParameter("Base", "DistCalcMethod", DistCalcMethod::Undefined);
         }
-
+        if (distCalcMethod == DistCalcMethod::Undefined)
+        {
+            distCalcMethod = DistCalcMethod::L2;
+        }
         COMMON::RaBitQAutoTuneResult tuneResult;
-        std::string tuneError;
-        ErrorCode tuneStatus = ErrorCode::Fail;
-        try
-        {
-            tuneStatus =
-                COMMON::RaBitQAutoTuner::Run(
-                    iniReader, options->m_outputFolder, tuneResult, tuneError);
-        }
-        catch (const std::exception& exception)
-        {
-            tuneError = exception.what();
-        }
-        if (tuneStatus != ErrorCode::Success)
+
+        ErrorCode ret = COMMON::RaBitQAutoTuner::Run(
+                    vecset, iniReader.GetParameter("RaBitQAutoTune", "TestQueries", 100), 
+                    iniReader.GetParameter("RaBitQAutoTune", "ResultCount", 10), options->m_threads, 
+                    iniReader.GetParameter("RaBitQAutoTune", "TargetRecall", 0.9F), distCalcMethod, ".", tuneResult);
+        
+        if (ret != ErrorCode::Success || !tuneResult.quantizer)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                         "RaBitQ auto-tuning failed: %s\n", tuneError.c_str());
+                         "RaBitQ auto-tuning failed.\n");
             return 1;
         }
 
         quantizerFile = tuneResult.quantizerPath;
-        iniReader.SetParameter("Base", "VectorSize", std::to_string(tuneResult.vectorCount));
-        iniReader.SetParameter("Base", "QuantizerFilePath", tuneResult.quantizerPath);
-        iniReader.SetParameter("Base", "QuantizedVectorPath", tuneResult.vectorPath);
-        iniReader.SetParameter("BuildSSDIndex", "EnableADC", "true");
+        std::string newVectorPath;
+        if (options->m_inputFiles.empty()) {
+            newVectorPath = iniReader.GetParameter("Base", "VectorPath", "vectors.bin") + ".quan";         
+            iniReader.SetParameter("Base", "VectorPath", newVectorPath);
+            iniReader.SetParameter("Base", "VectorType", "Default");
+            iniReader.SetParameter("Base", "ValueType", "UInt8");
+            iniReader.SetParameter("Base", "Dim", "" + std::to_string(tuneResult.codeDimension));
+        } else {
+            auto oldVectorPath = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles, ",")[0];
+            newVectorPath = oldVectorPath + ".quan";
+            options->m_inputFiles = options->m_inputFiles.replace(0, oldVectorPath.length(), newVectorPath);
+        }
+
+        options->m_inputValueType = VectorValueType::UInt8;
+        options->m_dim = tuneResult.codeDimension;
+        options->m_dimension = tuneResult.codeDimension;
+        {
+            SizeType written = 0;
+            auto vectorOutput = f_createIO();
+            if (!vectorOutput ||
+                !vectorOutput->Initialize(
+                    newVectorPath.c_str(), std::ios::out | std::ios::binary) ||
+                vectorOutput->WriteBinary(sizeof(written), reinterpret_cast<const char*>(&written)) !=
+                    sizeof(written) ||
+                vectorOutput->WriteBinary(
+                    sizeof(tuneResult.codeDimension), reinterpret_cast<const char*>(&(tuneResult.codeDimension))) !=
+                    sizeof(tuneResult.codeDimension)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create encoded vector file: %s\n", newVectorPath.c_str());
+                return 1;
+            }
+            p_quantizer->SetEnableADC(true);
+            std::vector<std::uint8_t> code(static_cast<std::size_t>(tuneResult.codeDimension));
+            SizeType kBatchSize = iniReader.GetParameter("RaBitQAutoTune", "BatchSize", (SizeType)1000000);
+            for (SizeType start = 0; ; start += kBatchSize) {
+                const auto batch = p_reader->GetVectorSet(start, start + kBatchSize);
+                if (!batch) break;
+
+                for (SizeType i = 0; i < batch->Count(); ++i) {
+                    p_quantizer->QuantizeVector(batch->GetVector(i), code.data(), false);
+                    if (vectorOutput->WriteBinary(
+                            code.size(), reinterpret_cast<const char*>(code.data())) != code.size()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write encoded vector file: %s\n", newVectorPath.c_str());
+                        exit(1);
+                    }
+                }
+                written += batch->Count();
+                if (batch->Count() < kBatchSize) break;
+            }
+            vectorOutput->WriteBinary(sizeof(written), reinterpret_cast<const char*>(&written), 0);
+        }
+
 #else
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                      "[RaBitQAutoTune] isExecute=true requires a build configured with RABITQ=ON.\n");
@@ -152,7 +192,7 @@ int main(int argc, char *argv[])
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", quantizerFile.c_str());
 
-    auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, builderValueType);
+    auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
     if (!indexBuilder)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot create index builder.\n");
@@ -165,44 +205,6 @@ int main(int argc, char *argv[])
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load quantizer file.\n");
             return 1;
-        }
-        if (!indexBuilder->m_pQuantizer->QuantizeForIndexBuild())
-        {
-            const auto reconstructType = indexBuilder->m_pQuantizer->GetReconstructType();
-            if (builderValueType != reconstructType)
-            {
-                if (!options->m_inputFiles.empty())
-                {
-                    SPTAGLIB_LOG(
-                        Helper::LogLevel::LL_Error,
-                        "This quantizer requires raw reconstruct vectors for SPANN index build. "
-                        "Set the input vector type to %s and keep pre-quantized codes in QuantizedVectorPath.\n",
-                        Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
-                    return 1;
-                }
-                if (iniReader.DoesParameterExist("Base", "VectorPath") &&
-                    !iniReader.DoesParameterExist("Base", "QuantizedVectorPath"))
-                {
-                    SPTAGLIB_LOG(
-                        Helper::LogLevel::LL_Error,
-                        "This quantizer requires [Base] VectorPath to point to raw reconstruct vectors "
-                        "and [Base] QuantizedVectorPath to point to pre-quantized codes.\n");
-                    return 1;
-                }
-
-                builderValueType = reconstructType;
-                iniReader.SetParameter(
-                    "Base", "ValueType",
-                    Helper::Convert::ConvertToString<VectorValueType>(builderValueType));
-                indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, builderValueType);
-                if (!indexBuilder ||
-                    indexBuilder->LoadQuantizer(quantizerFile) != ErrorCode::Success ||
-                    !indexBuilder->m_pQuantizer)
-                {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot recreate index builder for quantizer reconstruct type.\n");
-                    return 1;
-                }
-            }
         }
     }
 
