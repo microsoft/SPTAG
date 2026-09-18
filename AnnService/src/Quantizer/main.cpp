@@ -47,7 +47,7 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader> &vectorRead
                         i = sent.fetch_add(1);
                         if (i < set->Count())
                         {
-                            quantizer->QuantizeVector(set->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i));
+                            quantizer->QuantizeVector(set->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i), false);
                         }
                         else
                         {

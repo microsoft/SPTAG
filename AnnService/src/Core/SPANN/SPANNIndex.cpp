@@ -344,10 +344,11 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, Sear
     {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-        if (m_pQuantizer)
-        {
-            p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
-        }
+    }
+
+    if (m_pQuantizer && !p_queryResults->HasQuantizedTarget())
+    {
+        p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
     }
 
     ErrorCode ret;
@@ -426,6 +427,11 @@ ErrorCode Index<T>::SearchIndexIterative(QueryResult &p_headQuery, QueryResult &
     {
         p_extraWorkspace->ResetIteratorState(layerCount, m_options.m_maxCheck, m_options.m_hashExp);
         p_extraWorkspace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
+        if (m_pQuantizer)
+        {
+            p_headQueryResults->SetTarget((const T*)p_headQuery.GetTarget(), m_pQuantizer);
+            p_queryResults->SetTarget((const T*)p_query.GetTarget(), m_pQuantizer);
+        }
     }
 
     auto fetchHeadCandidates = [&](int p_count) {
@@ -678,10 +684,11 @@ ErrorCode Index<T>::SearchHeadIndex(QueryResult& p_query, int p_tolayer, ExtraWo
     {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-        if (m_pQuantizer)
-        {
-            p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
-        }
+    }
+
+    if (m_pQuantizer && !p_queryResults->HasQuantizedTarget())
+    {
+        p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
     }
 
     ErrorCode ret;

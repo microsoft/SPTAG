@@ -59,7 +59,7 @@ ErrorCode EvaluateBits(const std::shared_ptr<RaBitQQuantizer>& p_quantizer,
                 if (query >= p_queries->Count()) {
                     return;
                 }
-                p_quantizer->QuantizeVector(p_queries->GetVector(query), queryCode.data(), true);
+                p_quantizer->QuantizeVector(p_queries->GetVector(query), queryCode.data());
 
                 SPTAG::COMMON::QueryResultSet<T> queryResult((T *)p_queries->GetVector(query), p_resultCount);
                 for (SPTAG::SizeType j = 0; j < p_base->Count(); j++)

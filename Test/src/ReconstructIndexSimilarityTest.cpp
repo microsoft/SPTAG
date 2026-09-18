@@ -399,7 +399,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet> &real_vecset, std::share
         for (int i = 0; i < n; i++)
         {
             auto nvec = &vecs[i * m];
-            quantizer->QuantizeVector(nvec, (uint8_t *)quan_vecset->GetVector(i));
+            quantizer->QuantizeVector(nvec, (uint8_t *)quan_vecset->GetVector(i), false);
             quantizer->ReconstructVector((uint8_t *)quan_vecset->GetVector(i), rec_vecset->GetVector(i));
         }
         quan_vecset->Save("quantest_quan_vector.bin");

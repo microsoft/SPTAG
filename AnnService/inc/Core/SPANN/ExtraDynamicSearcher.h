@@ -761,7 +761,14 @@ namespace SPTAG::SPANN {
                 }
 
                 std::vector<int> ks(2, 0);
-                if (m_headIndex->ComputeDistance(args.centers, headVec->c_str() + m_metaDataSize) < m_headIndex->ComputeDistance(args.centers + args._D, headVec->c_str() + m_metaDataSize)) {
+                std::string headVecData(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
+                if (m_headIndex->m_pQuantizer && m_headIndex->m_pQuantizer->GetEnableADC()) {
+                    headVecData.resize(m_headIndex->m_pQuantizer->QuantizeSize());
+                    std::shared_ptr<std::uint8_t> rec_query((uint8_t*)ALIGN_ALLOC(m_headIndex->m_pQuantizer->ReconstructSize()), [=](std::uint8_t* ptr) { ALIGN_FREE(ptr); });
+                    m_headIndex->m_pQuantizer->ReconstructVector((uint8_t*)(headVec->c_str() + m_metaDataSize), rec_query.get());
+                    m_headIndex->m_pQuantizer->QuantizeVector(rec_query.get(), (uint8_t*)headVecData.data());
+                }
+                if (m_headIndex->ComputeDistance(headVecData.c_str(), args.centers) < m_headIndex->ComputeDistance(headVecData.c_str(), args.centers + args._D)) {
                     ks[0] = 1;
                 } else {
                     ks[1] = 1;
@@ -779,7 +786,7 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
-                    if (!theSameHead && m_headIndex->ComputeDistance(args.centers + k * args._D, headVec->c_str() + m_metaDataSize) < Epsilon) {
+                    if (!theSameHead && m_headIndex->ComputeDistance(headVecData.c_str(), args.centers + k * args._D) < Epsilon) {
                         newHeadsID[k] = headID;
                         newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
