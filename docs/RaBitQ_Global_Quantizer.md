@@ -34,5 +34,4 @@ multiple of 64. The current adapter supports the official L2 estimator; cosine
 distance is intentionally unsupported.
 
 `Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini` is the canonical
-SIFT1M example. It uses STATIC postings containing the global RaBitQ codes;
-keep `PostingQuantizer=None` because RaBitQ is already the global quantizer.
+SIFT1M example. It uses STATIC postings containing the global RaBitQ codes.

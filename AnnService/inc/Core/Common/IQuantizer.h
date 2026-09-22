@@ -60,6 +60,8 @@ namespace SPTAG
 
             virtual float* GetL2DistanceTables() = 0;
 
+            virtual bool Trained() const { return true; }
+            
             template<typename T>
             T* GetCodebooks();
         };

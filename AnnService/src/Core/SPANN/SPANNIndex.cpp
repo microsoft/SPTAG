@@ -104,6 +104,7 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
 {
     /** Need to modify **/
     m_topIndex->SetQuantizer(m_pQuantizer);
+
     if (!m_options.m_persistentBufferPath.empty() && !direxists(m_options.m_persistentBufferPath.c_str()))
         mkdir(m_options.m_persistentBufferPath.c_str());
 
@@ -157,6 +158,7 @@ template <typename T>
 ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams)
 {
     m_topIndex->SetQuantizer(m_pQuantizer);
+
     if (!m_options.m_persistentBufferPath.empty() && !direxists(m_options.m_persistentBufferPath.c_str()))
         mkdir(m_options.m_persistentBufferPath.c_str());
 
@@ -339,8 +341,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, Sear
     if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
         p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     else
+    {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
+    }
+
+    if (m_pQuantizer && !p_queryResults->HasQuantizedTarget())
+    {
+        p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
+    }
 
     ErrorCode ret;
     auto searchStart = std::chrono::high_resolution_clock::now();
@@ -418,6 +427,11 @@ ErrorCode Index<T>::SearchIndexIterative(QueryResult &p_headQuery, QueryResult &
     {
         p_extraWorkspace->ResetIteratorState(layerCount, m_options.m_maxCheck, m_options.m_hashExp);
         p_extraWorkspace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
+        if (m_pQuantizer)
+        {
+            p_headQueryResults->SetTarget((const T*)p_headQuery.GetTarget(), m_pQuantizer);
+            p_queryResults->SetTarget((const T*)p_query.GetTarget(), m_pQuantizer);
+        }
     }
 
     auto fetchHeadCandidates = [&](int p_count) {
@@ -667,8 +681,15 @@ ErrorCode Index<T>::SearchHeadIndex(QueryResult& p_query, int p_tolayer, ExtraWo
     if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
         p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     else
+    {
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
+    }
+
+    if (m_pQuantizer && !p_queryResults->HasQuantizedTarget())
+    {
+        p_queryResults->SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
+    }
 
     ErrorCode ret;
     if ((ret = m_topIndex->SearchIndex(*p_queryResults)) != ErrorCode::Success)
@@ -722,7 +743,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
     COMMON::QueryResultSet<T> localResults((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
     std::vector<BasicResult> headCandidates;
     headCandidates.reserve(m_options.m_searchInternalResultNum);
-    if (m_pQuantizer && p_query.HasQuantizedTarget())
+    if (m_pQuantizer)
     {
         localResults.SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
     }
@@ -1286,6 +1307,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
         m_topIndex->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
         m_topIndex->SetParameter("ParallelBKTBuild", m_options.m_parallelBKTBuild ? "true" : "false");
         m_topIndex->SetQuantizer(m_pQuantizer);
+
         for (const auto &iter : m_topParameters)
         {
             m_topIndex->SetParameter(iter.first.c_str(), iter.second.c_str());
@@ -1341,6 +1363,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
             return ErrorCode::Fail;
         }
         m_topIndex->SetQuantizer(m_pQuantizer);
+
         if (!CheckHeadIndexType())
             return ErrorCode::Fail;
 
@@ -1825,6 +1848,10 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
                                 ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>()
                                 : 1;
         }
+    }
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableADC") && m_pQuantizer)
+    {
+        m_pQuantizer->SetEnableADC(m_options.m_enableADC);
     }
     return ErrorCode::Success;
 }

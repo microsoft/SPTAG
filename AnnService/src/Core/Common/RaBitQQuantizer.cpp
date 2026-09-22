@@ -41,6 +41,7 @@ ErrorCode RaBitQQuantizer::Initialize(DimensionType p_dimension, int p_bits, boo
     m_quantizer_config = rabitqlib::quant::faster_config(
         static_cast<std::size_t>(m_padded_dimension), static_cast<std::size_t>(m_bits));
     m_ip_func = rabitqlib::select_excode_ipfunc(static_cast<std::size_t>(m_bits));
+    m_trained = false;
     return ErrorCode::Success;
 }
 
@@ -66,7 +67,19 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
         m_centroid[static_cast<std::size_t>(j)] =
             static_cast<float>(accumulator[static_cast<std::size_t>(j)] * inverse_count);
     }
+    m_trained = true;
     return ErrorCode::Success;
+}
+
+std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CloneWithBits(int p_bits) const
+{
+    if (!Ready() || !m_trained || p_bits < 1 || p_bits > 8) {
+        return nullptr;
+    }
+    auto quantizer = std::make_shared<RaBitQQuantizer>(m_dimension, p_bits, m_normalize);
+    quantizer->m_centroid = m_centroid;
+    quantizer->m_trained = true;
+    return quantizer;
 }
 
 float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
@@ -246,7 +259,7 @@ std::uint64_t RaBitQQuantizer::BufferSize() const
 
 ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_output) const
 {
-    if (!p_output || !Ready()) {
+    if (!p_output || !Ready() || !m_trained) {
         return ErrorCode::Fail;
     }
 
@@ -283,6 +296,7 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_input
             m_centroid.size() * sizeof(float)) {
         return ErrorCode::FailedParseValue;
     }
+    m_trained = true;
     return ErrorCode::Success;
 }
 
@@ -299,6 +313,7 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::uint8_t* p_raw_bytes)
     }
     p_raw_bytes += sizeof(header);
     std::memcpy(m_centroid.data(), p_raw_bytes, m_centroid.size() * sizeof(float));
+    m_trained = true;
     return ErrorCode::Success;
 }
 
