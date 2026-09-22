@@ -46,7 +46,7 @@ def get_config():
 class DataReader:
     def __init__(self, filename, featuredim, batchsize, normalize, datatype, targettype='float32'):
         self.mytype = targettype
-        if filename.endswith('.bin') or filename.endswith('.fbin'):
+        if filename.find('.bin') >= 0:
             self.fin = open(filename, 'rb')
             R = unpack('i', self.fin.read(4))[0]
             self.featuredim = unpack('i', self.fin.read(4))[0]
@@ -228,7 +228,7 @@ def search(faiss_index,
         batch_num = math.ceil(len(query_embeddings) / batch_size)
         all_scores = []
         all_search_results = []
-        for step in tqdm(range(batch_num)):
+        for step in tqdm.tqdm(range(batch_num)):
             start = batch_size * step
             end = min(batch_size * (step + 1), len(query_embeddings))
             batch_emb = np.array(query_embeddings[start:end])
@@ -253,6 +253,7 @@ def evaluate(retrieve_results: List[List[int]],
     MRR = [0.0] * len(MRR_cutoffs)
     Recall = [0.0] * len(Recall_cutoffs)
     ranking = []
+    finalk = min(Recall_cutoffs)
     if qids is None:
         qids = list(range(len(retrieve_results)))
     for qid, candidate_pid in zip(qids, retrieve_results):
@@ -278,22 +279,137 @@ def evaluate(retrieve_results: List[List[int]],
     print(f"{len(ranking)} matching queries found")
     MRR = [x / len(ranking) for x in MRR]
     for i, k in enumerate(MRR_cutoffs):
-        print(f'MRR@{k}:{MRR[i]}')
+        print(f'MRR{finalk}@{k}:{MRR[i]}')
 
     Recall = [x / len(ranking) for x in Recall]
     for i, k in enumerate(Recall_cutoffs):
-        print(f'Recall@{k}:{Recall[i]}')
+        print(f'Recall{finalk}@{k}:{Recall[i]}')
 
     return MRR, Recall
+
+def train_rabitq(args):
+    import faiss
+
+    output_dir = args.output_dir
+
+    if args.train_samples > args.B: args.train_samples = args.B
+
+    datareader = DataReader(args.data_file, args.dim, args.B, args.data_normalize, args.data_type, args.target_type)
+
+    print (f'train RabitQ using {args.train_samples} samples ...')
+
+    numData, data = datareader.readbatch()
+
+    faiss.omp_set_num_threads(args.T)
+    nbytes = int(args.quan_dim * 8 // args.dim)
+    print (f'nbytes:{nbytes}')
+    faiss_index = faiss.index_factory(len(data[0]), f"RaBitQ{nbytes}", faiss.METRIC_L2)
+    print('Training the index with doc embeddings')
+
+    faiss_index.train(data[0:args.train_samples])
+
+    rtype = np.uint8(0)
+    if args.data_type == 'uint8':
+        rtype = np.uint8(1)
+    elif args.data_type == 'int16':
+        rtype = np.uint8(2)
+    elif args.data_type == 'float32':
+        rtype = np.uint8(3)
+
+    ivf_index = faiss.downcast_index(faiss_index)
+    #centroid_embedings = faiss.vector_to_array(ivf_index.pq.centroids)
+    #codebooks = centroid_embedings.reshape(ivf_index.pq.M, ivf_index.pq.ksub, ivf_index.pq.dsub)
+    #print ('codebooks shape:')
+    #print (codebooks.shape)
+
+    #codebooks = codebooks.astype(np.float32)
+    #with open(os.path.join(output_dir, args.output_quantizer + '.' + str(args.task)),'wb') as f:
+    #    f.write(pack('B', 1))
+    #    f.write(pack('B', rtype))
+    #    f.write(pack('i', codebooks.shape[0]))
+    #    f.write(pack('i', codebooks.shape[1]))
+    #    f.write(pack('i', codebooks.shape[2]))
+    #    f.write(codebooks.tobytes())
+
+    if args.quan_test == 0 and len(args.output_quan_vector_file) == 0 and len(args.output_rec_vector_file) == 0:
+        os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
+        return
+
+    if len(args.output_quan_vector_file) > 0:
+        fquan = open(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task) + '.tmp'), 'wb')
+        fquan.write(pack('i', 0))
+        fquan.write(pack('i', args.quan_dim))
+
+    if len(args.output_rec_vector_file) > 0:
+        frec = open(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task) + '.tmp'), 'wb')
+        frec.write(pack('i', 0))
+        frec.write(pack('i', data.shape[1]))
+
+    writeitems = 0
+    while numData > 0:
+        if args.quan_test > 0: faiss_index.add(data)
+
+        if len(args.output_quan_vector_file) > 0:
+            codes = ivf_index.pq.compute_codes(data)
+            print ('codes shape:')
+            print (codes.shape)
+            fquan.write(codes.tobytes())
+
+        if len(args.output_rec_vector_file) > 0:
+            reconstructed = ivf_index.pq.decode(codes).astype(args.data_type)
+            frec.write(reconstructed.tobytes())
+
+        writeitems += numData
+        numData, data = datareader.readbatch()
+
+    datareader.close()
+
+    if len(args.output_quan_vector_file) > 0:
+        p = fquan.tell()
+        fquan.seek(0)
+        fquan.write(pack('i', writeitems))
+        fquan.seek(p)
+        fquan.close()
+        if os.path.exists(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task))):
+            os.remove(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task)))
+        os.rename(os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task) + '.tmp'), os.path.join(output_dir, args.output_quan_vector_file + '.' + str(args.task)))
+    if len(args.output_rec_vector_file) > 0:
+        p = frec.tell()
+        frec.seek(0)
+        frec.write(pack('i', writeitems))
+        frec.seek(p)
+        frec.close()
+        if os.path.exists(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task))):
+            os.remove(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task)))
+        os.rename(os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task) + '.tmp'), os.path.join(output_dir, args.output_rec_vector_file + '.' + str(args.task)))
+
+    os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
+
+    if args.quan_test > 0:
+        queryreader = DataReader(args.query_file, args.dim, -1, args.query_normalize, args.data_type, args.target_type)
+        numQuery, query = queryreader.readbatch()
+
+        qid2ground_truths = {}
+        f = open(os.path.join(output_dir, 'truth.txt.' + str(args.task)), 'r')
+        for i in range(numQuery):
+            items = f.readline()[0:-1].strip().split(' ')
+            qid2ground_truths[i] = set([int(gt) for gt in items])
+        f.close()
+
+        # Test the performance
+        scores, retrieve_results = search(faiss_index, query, topk=args.k * 10, batch_size=64)
+        evaluate(retrieve_results, qid2ground_truths, MRR_cutoffs=[args.k, args.k*2, args.k*4, args.k*8], Recall_cutoffs=[args.k, args.k*2, args.k*4, args.k*8], qids=None)
 
 def train_pq(args):
     import faiss
 
     output_dir = args.output_dir
 
-    datareader = DataReader(args.data_file, args.dim, args.train_samples, args.data_normalize, args.data_type, args.target_type)
+    if args.train_samples > args.B: args.train_samples = args.B
 
-    print ('train PQ...')
+    datareader = DataReader(args.data_file, args.dim, args.B, args.data_normalize, args.data_type, args.target_type)
+
+    print (f'train PQ using {args.train_samples} samples...')
 
     subvector_num = args.quan_dim
     subvector_bits = 8
@@ -304,7 +420,12 @@ def train_pq(args):
     faiss_index = faiss.index_factory(len(data[0]), f"PQ{subvector_num}x{subvector_bits}", faiss.METRIC_L2)
     print('Training the index with doc embeddings')
 
-    faiss_index.train(data)
+    t1 = time.perf_counter()
+    faiss_index.train(data[0:args.train_samples])
+    t2 = time.perf_counter()
+    elapsed_time = t2 - t1
+    print (f"Train time: {elapsed_time:.6f} seconds")
+
 
     rtype = np.uint8(0)
     if args.data_type == 'uint8':
@@ -398,17 +519,19 @@ def train_pq(args):
         f.close()
 
         # Test the performance
-        scores, retrieve_results = search(faiss_index, query, topk=args.k, nprobe = 1, batch_size=64)
-        evaluate(retrieve_results, qid2ground_truths, MRR_cutoffs=[5, 10], Recall_cutoffs=[5, 10, 20, 40], qids=None)
+        scores, retrieve_results = search(faiss_index, query, topk=args.k * 10, batch_size=64)
+        evaluate(retrieve_results, qid2ground_truths, MRR_cutoffs=[args.k, args.k*2, args.k*4, args.k*8], Recall_cutoffs=[args.k, args.k*2, args.k*4, args.k*8], qids=None)
 
 def train_opq(args):
     import faiss
 
     output_dir = args.output_dir
 
-    datareader = DataReader(args.data_file, args.dim, args.train_samples, args.data_normalize, args.data_type, args.target_type)
+    if args.train_samples > args.B: args.train_samples = args.B
 
-    print ('train OPQ...')
+    datareader = DataReader(args.data_file, args.dim, args.B, args.data_normalize, args.data_type, args.target_type)
+
+    print (f'train OPQ using {args.train_samples} samples...')
 
     index_method = 'opq'
     ivf_centers_num = -1
@@ -421,8 +544,11 @@ def train_opq(args):
     faiss_index = faiss.index_factory(len(data[0]), f"OPQ{subvector_num},PQ{subvector_num}x{subvector_bits}", faiss.METRIC_L2)
 
     print('Training the index with doc embeddings')
-
-    faiss_index.train(data)
+    t1 = time.perf_counter()
+    faiss_index.train(data[0:args.train_samples])
+    t2 = time.perf_counter()
+    elapsed_time = t2 - t1
+    print (f"Train time: {elapsed_time:.6f} seconds")
 
     rtype = np.uint8(0)
     if args.data_type == 'uint8':
@@ -529,8 +655,8 @@ def train_opq(args):
         f.close()
 
         # Test the performance
-        scores, retrieve_results = search(faiss_index, query, topk=args.k, nprobe = 1, batch_size=64)
-        evaluate(retrieve_results, qid2ground_truths, MRR_cutoffs=[5, 10], Recall_cutoffs=[5, 10, 20, 40], qids=None)
+        scores, retrieve_results = search(faiss_index, query, topk=args.k * 10, batch_size=64)
+        evaluate(retrieve_results, qid2ground_truths, MRR_cutoffs=[args.k, args.k*2, args.k*4, args.k*8], Recall_cutoffs=[args.k, args.k*2, args.k*4, args.k*8], qids=None)
 
 def quan_reconstruct_vectors(args):
     import faiss
@@ -692,9 +818,11 @@ if __name__ == '__main__':
             train_pq(args)
         elif args.quan_type == 'opq':
             train_opq(args)
+        elif args.quan_type == 'rabitq':
+            train_rabitq(args)
         elif args.quan_type == 'quan_reconstruct':
             quan_reconstruct_vectors(args)
 
     if args.log_dir != '':
-        localpath = args.output_truth + '.dist\\dist.bin.' + str(args.task)
+        localpath = args.output_truth + '.dist//dist.bin.' + str(args.task)
         # upload to cloud storage

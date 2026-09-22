@@ -7,7 +7,12 @@
 #include "inc/Helper/VectorSetReader.h"
 
 #include <inc/Core/Common/DistanceUtils.h>
+#include <exception>
 #include <memory>
+
+#ifdef RABITQ
+#include "inc/Core/Common/RaBitQAutoTuner.h"
+#endif
 
 using namespace SPTAG;
 
@@ -48,17 +53,6 @@ int main(int argc, char *argv[])
     {
         exit(1);
     }
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
-
-    auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
-    if (!options->m_quantizerFile.empty())
-    {
-        indexBuilder->LoadQuantizer(options->m_quantizerFile);
-        if (!indexBuilder->m_pQuantizer)
-        {
-            exit(1);
-        }
-    }
 
     Helper::IniReader iniReader;
     if (!options->m_builderConfigFile.empty() &&
@@ -89,6 +83,138 @@ int main(int argc, char *argv[])
                      paramVal.c_str());
     }
 
+    if (options->m_inputFiles.empty() &&
+        iniReader.DoesParameterExist("Base", "ValueType"))
+    {
+        options->m_inputValueType =
+            iniReader.GetParameter("Base", "ValueType", VectorValueType::Undefined);
+        if (options->m_inputValueType == VectorValueType::Undefined)
+        {
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Error, "Invalid [Base] ValueType.\n");
+            return 1;
+        }
+    }
+
+    std::string quantizerFile = options->m_quantizerFile;
+    if (quantizerFile.empty() && iniReader.GetParameter("RaBitQAutoTune", "isExecute", false))
+    {
+#ifdef RABITQ
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles.empty()? iniReader.GetParameter("Base", "VectorPath", std::string("")) : options->m_inputFiles))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+            exit(1);
+        }
+        auto vecset = vectorReader->GetVectorSet(0, iniReader.GetParameter("RaBitQAutoTune", "TrainSamples", 10000));
+        
+        DistCalcMethod distCalcMethod = iniReader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined);
+        if (distCalcMethod == DistCalcMethod::Undefined)
+        {
+            distCalcMethod = iniReader.GetParameter("Base", "DistCalcMethod", DistCalcMethod::Undefined);
+        }
+        if (distCalcMethod == DistCalcMethod::Undefined)
+        {
+            distCalcMethod = DistCalcMethod::L2;
+        }
+        COMMON::RaBitQAutoTuneResult tuneResult;
+        ErrorCode ret;
+
+#define DefineVectorValueType(Name, Type) \
+        if (options->m_inputValueType == VectorValueType::Name) \
+        { \
+            ret = COMMON::RaBitQAutoTuner<Type>::Run( \
+                vecset, iniReader.GetParameter("RaBitQAutoTune", "TestQueries", 100), \
+                iniReader.GetParameter("RaBitQAutoTune", "ResultCount", 10), options->m_threadNum, \
+                iniReader.GetParameter("RaBitQAutoTune", "TargetRecall", 0.9F), distCalcMethod, ".", tuneResult); \
+        } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+        
+        if (ret != ErrorCode::Success || !tuneResult.quantizer)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "RaBitQ auto-tuning failed.\n");
+            return 1;
+        }
+
+        quantizerFile = tuneResult.quantizerPath;
+        std::string newVectorPath;
+        if (options->m_inputFiles.empty()) {
+            newVectorPath = iniReader.GetParameter("Base", "VectorPath", std::string("vectors.bin")) + ".quan";         
+            iniReader.SetParameter("Base", "VectorPath", newVectorPath);
+            iniReader.SetParameter("Base", "VectorType", "Default");
+            iniReader.SetParameter("Base", "ValueType", "UInt8");
+            iniReader.SetParameter("Base", "Dim", std::to_string(tuneResult.codeDimension));
+        } else {
+            auto oldVectorPath = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles, ",")[0];
+            newVectorPath = oldVectorPath + ".quan";
+            options->m_inputFiles = options->m_inputFiles.replace(0, oldVectorPath.length(), newVectorPath);
+        }
+
+        options->m_inputValueType = VectorValueType::UInt8;
+        options->m_dimension = tuneResult.codeDimension;
+        {
+            SizeType written = 0;
+            auto vectorOutput = f_createIO();
+            if (!vectorOutput ||
+                !vectorOutput->Initialize(
+                    newVectorPath.c_str(), std::ios::out | std::ios::binary) ||
+                vectorOutput->WriteBinary(sizeof(written), reinterpret_cast<const char*>(&written)) !=
+                    sizeof(written) ||
+                vectorOutput->WriteBinary(
+                    sizeof(tuneResult.codeDimension), reinterpret_cast<const char*>(&(tuneResult.codeDimension))) !=
+                    sizeof(tuneResult.codeDimension)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create encoded vector file: %s\n", newVectorPath.c_str());
+                return 1;
+            }
+            tuneResult.quantizer->SetEnableADC(true);
+            std::vector<std::uint8_t> code(static_cast<std::size_t>(tuneResult.codeDimension));
+            SizeType kBatchSize = iniReader.GetParameter("RaBitQAutoTune", "BatchSize", (SizeType)1000000);
+            for (SizeType start = 0; ; start += kBatchSize) {
+                const auto batch = vectorReader->GetVectorSet(start, start + kBatchSize);
+                if (!batch) break;
+
+                for (SizeType i = 0; i < batch->Count(); ++i) {
+                    tuneResult.quantizer->QuantizeVector(batch->GetVector(i), code.data(), false);
+                    if (vectorOutput->WriteBinary(
+                            code.size(), reinterpret_cast<const char*>(code.data())) != code.size()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write encoded vector file: %s\n", newVectorPath.c_str());
+                        exit(1);
+                    }
+                }
+                written += batch->Count();
+                if (batch->Count() < kBatchSize) break;
+            }
+            vectorOutput->WriteBinary(sizeof(written), reinterpret_cast<const char*>(&written), 0);
+        }
+
+#else
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[RaBitQAutoTune] isExecute=true requires a build configured with RABITQ=ON.\n");
+        return 1;
+#endif
+    }
+
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", quantizerFile.c_str());
+
+    auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
+    if (!indexBuilder)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot create index builder.\n");
+        return 1;
+    }
+    if (!quantizerFile.empty())
+    {
+        if (indexBuilder->LoadQuantizer(quantizerFile) != ErrorCode::Success ||
+            !indexBuilder->m_pQuantizer)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load quantizer file.\n");
+            return 1;
+        }
+    }
+
     std::string sections[] = {"Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index"};
     for (int i = 0; i < 5; i++)
     {
@@ -106,6 +232,12 @@ int main(int argc, char *argv[])
     std::shared_ptr<VectorSet> vecset;
     if (options->m_inputFiles != "")
     {
+        if (options->m_dimension <= 0)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "--dimension is required when indexbuilder reads --input directly.\n");
+            return 1;
+        }
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
         {
@@ -118,16 +250,21 @@ int main(int argc, char *argv[])
     }
     else
     {
-        if (!options->m_quantizerFile.empty())
+        if (!quantizerFile.empty())
         {
             indexBuilder->SetQuantizerFileName(
-                options->m_quantizerFile.substr(options->m_quantizerFile.find_last_of("/\\") + 1));
+                quantizerFile.substr(quantizerFile.find_last_of("/\\") + 1));
         }
         code = indexBuilder->BuildIndex(options->m_normalized);
     }
     if (code == ErrorCode::Success)
     {
-        indexBuilder->SaveIndex(options->m_outputFolder);
+        code = indexBuilder->SaveIndex(options->m_outputFolder);
+        if (code != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save index.\n");
+            return 1;
+        }
     }
     else
     {

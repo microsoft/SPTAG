@@ -34,6 +34,7 @@ DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Dep
 DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
 DefineKDTParameter(m_pGraph.m_iheadNumGPUs, int, 1, "HeadNumGPUs")
 DefineKDTParameter(m_pGraph.m_iTPTBalanceFactor, int, 2, "TPTBalanceFactor")
+DefineKDTParameter(m_pGraph.m_TPTParallelBuild, bool, true, "ParallelTPTBuild")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")

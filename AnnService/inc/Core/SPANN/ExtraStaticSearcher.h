@@ -126,7 +126,7 @@ namespace SPTAG
             if (p_exWorkSpace->Deduper().CheckAndSet(vectorID)) { listElements--; continue; } \
             (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
-            queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray((std::uint8_t*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_opt->m_dim, false) : ByteArray::c_empty); \
+            queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray((std::uint8_t*)(p_postingListFullData + offsetVector), StoredVectorBytes(), false) : ByteArray::c_empty); \
         } \
 
 #define ProcessPostingOffset() \
@@ -176,6 +176,13 @@ namespace SPTAG
                 return m_available;
             }
 
+            inline size_t StoredVectorBytes() const
+            {
+                return m_headIndex->m_pQuantizer
+                    ? static_cast<size_t>(m_headIndex->m_pQuantizer->GetNumSubvectors())
+                    : static_cast<size_t>(m_opt->m_dim) * sizeof(ValueType);
+            }
+
             virtual bool LoadIndex(Options& p_opt) override {
                 m_opt = &p_opt;
                 m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
@@ -185,7 +192,7 @@ namespace SPTAG
 
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile + "_" + std::to_string(m_layer);
-                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(SizeType)) + PageSize - 1) / PageSize));
+                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (StoredVectorBytes() + sizeof(SizeType)) + PageSize - 1) / PageSize));
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
                     auto curIndexFile = f_createAsyncIO();
@@ -256,6 +263,7 @@ namespace SPTAG
                 int diskIO = 0;
                 int listElements = 0;
                 int missingPostingIDs = 0;
+                ErrorCode scanRet = ErrorCode::Success;
 
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
@@ -296,7 +304,6 @@ namespace SPTAG
 
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
-                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -304,8 +311,13 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, &scanRet, this](bool success)
                     {
+                        if (!success) {
+                            scanRet = ErrorCode::DiskIOFail;
+                            return;
+                        }
+
                         char* buffer = request.m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request.m_payload);
 
@@ -328,6 +340,7 @@ namespace SPTAG
                     if (!(indexFile->ReadFileAsync(request)))
                     {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
+                        scanRet = ErrorCode::DiskIOFail;
                         unprocessed--;
                     }
 #endif
@@ -336,7 +349,8 @@ namespace SPTAG
                     auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
                     if (numRead != totalBytes) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
-                        throw std::runtime_error("File read mismatch");
+                        scanRet = ErrorCode::DiskIOFail;
+                        continue;
                     }
                     // decompress posting list
                     char* p_postingListFullData = buffer + listInfo->pageOffset;
@@ -357,7 +371,11 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
 #ifdef BATCH_READ
-                BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
+                if (!BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount))
+                {
+                    return ErrorCode::DiskIOFail;
+                }
+                if (scanRet != ErrorCode::Success) return scanRet;
 #else
                 while (unprocessed > 0)
                 {
@@ -459,7 +477,7 @@ namespace SPTAG
                         (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));
                         auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector);
                         p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
-                            queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_opt->m_dim) : ByteArray::c_empty);
+                            queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(p_postingListFullData + offsetVector), StoredVectorBytes()) : ByteArray::c_empty);
                     }
                     return ErrorCode::Success;
                 };
@@ -493,7 +511,6 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
-                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -595,7 +612,6 @@ namespace SPTAG
                     
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
-                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -661,6 +677,7 @@ namespace SPTAG
                     success = BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
                     retry++;
                 }
+                if (!success) return ErrorCode::DiskIOFail;
 #else
                 while (unprocessed > 0)
                 {
@@ -1502,7 +1519,9 @@ namespace SPTAG
                 const std::unique_ptr<int[]>& p_postPageNum,
                 const std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                 const std::vector<int>& p_postingOrderInIndex,
-                std::shared_ptr<VectorSet> p_fullVectors, COMMON::Dataset<SizeType>& p_headToLocal, COMMON::Dataset<SizeType>& p_localToGlobal,
+                std::shared_ptr<VectorSet> p_fullVectors,
+                COMMON::Dataset<SizeType>& p_headToLocal,
+                COMMON::Dataset<SizeType>& p_localToGlobal,
                 size_t p_postingListOffset)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start output...\n");
@@ -1567,7 +1586,15 @@ namespace SPTAG
                 }
 
                 // Vector dimension
-                int i32Val = static_cast<int>(p_fullVectors->Dimension());
+                size_t storedVectorBytes = p_spacePerVector - sizeof(SizeType);
+                if (storedVectorBytes % sizeof(ValueType) != 0)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Posting vector bytes %zu are not aligned to value type size %zu.\n",
+                                 storedVectorBytes, sizeof(ValueType));
+                    throw std::runtime_error("Posting vector size is not value-type aligned");
+                }
+                int i32Val = static_cast<int>(storedVectorBytes / sizeof(ValueType));
                 if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                     throw std::runtime_error("Failed to write SSDIndex File");
@@ -1827,7 +1854,6 @@ namespace SPTAG
             int m_listPerFile = 0;
 
             std::unordered_map<SizeType, SizeType> m_globalVectorIDToHeadMap;
-
         };
     } // namespace SPANN
 } // namespace SPTAG

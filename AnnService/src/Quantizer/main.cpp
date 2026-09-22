@@ -47,7 +47,7 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader> &vectorRead
                         i = sent.fetch_add(1);
                         if (i < set->Count())
                         {
-                            quantizer->QuantizeVector(set->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i));
+                            quantizer->QuantizeVector(set->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i), false);
                         }
                         else
                         {
@@ -243,6 +243,7 @@ int main(int argc, char *argv[])
 
         break;
     }
+#ifdef RABITQ
     case QuantizerType::RaBitQQuantizer: {
         if (options->m_inputValueType != VectorValueType::Float) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RaBitQ global quantization requires Float input vectors.\n");
@@ -290,6 +291,7 @@ int main(int argc, char *argv[])
         }
         break;
     }
+#endif
     default: {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer type.\n");
         exit(1);
