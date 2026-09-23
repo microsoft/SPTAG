@@ -2000,6 +2000,11 @@ namespace SPTAG::SPANN {
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
 		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%lld\n", (std::int64_t)vectorID);
+                    // Merge eligibility needs a deletion check for every physical record.
+                    if (!isTiKV && !m_opt->m_asyncMergeInSearch && p_exWorkSpace->Deduper().Contains(vectorID)) {
+                        listElements--;
+                        continue;
+                    }
                     if (!isTiKV && m_versionMap->Deleted(vectorID)) {
                         realNum--;
                         listElements--;
@@ -2129,6 +2134,8 @@ namespace SPTAG::SPANN {
 
                     if (vectorID < 0 || vectorID >= m_versionMap->Count())
                         return ErrorCode::Key_OverFlow;
+                    if (!isTiKV && p_exWorkSpace->Deduper().Contains(vectorID))
+                        continue;
                     if (!isTiKV && m_versionMap->Deleted(vectorID))
                         continue;
                     if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
