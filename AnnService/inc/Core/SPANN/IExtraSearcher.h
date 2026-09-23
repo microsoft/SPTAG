@@ -459,7 +459,8 @@ namespace SPTAG {
             }
 
             void Clear(int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
-                if (p_internalResultNum > m_pageBuffers.size() || p_maxPages > m_pageBuffers[0].GetPageSize()) {
+                if (m_pageBuffers.empty() || m_blockIO != p_blockIO ||
+                    p_internalResultNum > m_pageBuffers.size() || p_maxPages > m_pageBuffers[0].GetPageSize()) {
                     m_postingIDs.reserve(p_internalResultNum);
                     m_pageBuffers.resize(p_internalResultNum);
                     for (int pi = 0; pi < p_internalResultNum; pi++) {
