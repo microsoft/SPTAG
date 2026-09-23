@@ -28,17 +28,17 @@ namespace SPTAG
             }
 
             SizeType Count() override { 
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                //std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 return (SizeType)(m_label.size()); 
             }
             SizeType GetDeleteCount() override { return 0; }
             std::uint64_t BufferSize() override { 
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                //std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 return m_label.size() * (sizeof(uint8_t) + sizeof(SizeType)); 
             }
 
             bool Deleted(const SizeType& key) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                //std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 if (m_label.find(key) != m_label.end()) return false;
                 return true;
             }
@@ -57,22 +57,22 @@ namespace SPTAG
             }
 
             uint8_t GetVersion(const SizeType& key) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                //std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 auto iter = m_label.find(key);
                 if (iter == m_label.end()) return 0xfe;
                 return iter->second; 
             }
             void SetVersion(const SizeType& key, const uint8_t& version) override { 
-                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 m_label[key] = version;
             }
             bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                //std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 auto iter = m_label.find(key);
                 if (iter == m_label.end()) return false;
                 uint8_t oldVersion = iter->second;
                 *newVersion = (oldVersion+1) & 0x7f;
-                m_label[key] = *newVersion;
+                iter->second = *newVersion;
                 return true; 
             }
 
