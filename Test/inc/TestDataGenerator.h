@@ -29,7 +29,20 @@ namespace TestUtils {
 
         static std::shared_ptr<SPTAG::MetadataSet> LoadMetadataSet(const std::string pmetaset, const std::string pmetaidx, SPTAG::SizeType start = 0, SPTAG::SizeType count = -1);
 
-        static float EvaluateRecall(const std::vector<SPTAG::QueryResult> &res, std::shared_ptr<SPTAG::VectorSet> &truth, int recallK, int k, int batch, int totalbatches);
+        // Compute recall against truth file.
+        //
+        // Distributed (per-node) recall: when each node only owns a SUBSET of
+        // the global query set, pass the global query count and this node's
+        // query offset so the truth row indexing is computed in global terms.
+        // The truth file is laid out as:
+        //   [iter=0 VIDs for queries 0..Q-1] [iter=1 VIDs ...] ...
+        //   [iter=0 dists for queries 0..Q-1] [iter=1 dists ...] ...
+        // where Q is the GLOBAL query count, NOT res.size(). With the legacy
+        // res.size()-based formula, distributed batches > 0 read the wrong
+        // rows (off by Q-myCount), giving near-random recall that's noise.
+        // totalQueries=-1 (default) preserves the legacy single-node formula.
+        static float EvaluateRecall(const std::vector<SPTAG::QueryResult> &res, std::shared_ptr<SPTAG::VectorSet> &truth, int recallK, int k, int batch, int totalbatches,
+                                    int totalQueries = -1, int queryOffset = 0);
 
         void RunBatches(std::shared_ptr<SPTAG::VectorSet> &vecset, std::shared_ptr<SPTAG::MetadataSet> &metaset,
                         std::shared_ptr<SPTAG::VectorSet> &addvecset, std::shared_ptr<SPTAG::MetadataSet> &addmetaset,

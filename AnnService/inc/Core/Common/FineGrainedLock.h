@@ -56,10 +56,24 @@ namespace SPTAG
                 return GetLock(idx);
             }
 
-	    static inline SizeType hash_func(SizeType idx)
-	    {
+	          static inline SizeType hash_func(SizeType idx)
+	          {
                 return idx;
-	    }
+            }
+
+            // Bucket index for the internal mutex-sharded unordered_map of
+            // per-posting locks. Exposed for callers that need an array sized
+            // to BucketCount and indexed by the same granularity as the lock
+            // pool (e.g. ExtraDynamicSearcher::m_remoteBucketLocked).
+            static inline unsigned BucketIndex(SizeType idx)
+            {
+                unsigned key = static_cast<unsigned>(idx);
+                return ((unsigned)(key * 99991) + _rotl(key, 2) + 101) & BucketMask;
+            }
+
+            static const int BucketMask = 32767;
+            static const int BucketCount = BucketMask + 1;
+
         private:
             struct Bucket {
                 std::mutex mutex;

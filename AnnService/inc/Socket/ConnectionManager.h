@@ -41,7 +41,11 @@ private:
     inline static std::uint32_t GetPosition(ConnectionID p_connectionID);
 
 private:
-    static constexpr std::uint32_t c_connectionPoolSize = 1 << 8;
+    // Bumped from 1<<8 (256) to 1<<12 (4096) to avoid silently dropping new
+    // connections when reconnect storms (e.g., from concurrent FlushRemoteAppends
+    // timeouts) saturate the pool. Each ConnectionItem is small; 4096 slots is
+    // ~64KB per ConnectionManager, which is negligible.
+    static constexpr std::uint32_t c_connectionPoolSize = 1 << 12;
 
     static constexpr std::uint32_t c_connectionPoolMask = c_connectionPoolSize - 1;
 

@@ -47,6 +47,17 @@ namespace SPTAG
                 m_cond.notify_all();
                 for (auto&& t : m_threads) t.join();
                 m_threads.clear();
+                // get() stops handing out work the moment abort is set, so
+                // whatever is still queued would otherwise leak -- and a job
+                // that reports its completion from its destructor would never
+                // release a caller waiting on it. Drop the queue outside the
+                // lock so job destructors don't run under it.
+                std::deque<Job*> stranded;
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    stranded.swap(m_jobs);
+                }
+                for (auto* j : stranded) delete j;
             }
 
             void init(int numberOfThreads = 1)

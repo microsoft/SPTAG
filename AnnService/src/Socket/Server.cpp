@@ -26,7 +26,7 @@ Server::Server(const std::string &p_address, const std::string &p_port, const Pa
 
     boost::asio::ip::tcp::endpoint endpoint = *(endPoints.begin());
     m_acceptor.open(endpoint.protocol());
-    m_acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(false));
+    m_acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
 
     m_acceptor.bind(endpoint, errCode);
     if (errCode)

@@ -1,0 +1,4 @@
+# Generated C++ stubs are environment-specific (protoc/grpc versions must
+# match the gRPC libs in the build env). Each developer should regenerate
+# locally via generate_cpp.sh instead of consuming the committed snapshot.
+generated/

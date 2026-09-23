@@ -31,6 +31,13 @@ namespace SPTAG
             virtual void DeleteAll() = 0;
 
             virtual SizeType Count() = 0;
+            virtual SizeType MaxVID() { return Count() > 0 ? Count() - 1 : -1; }
+            virtual bool InitializeInitialGlobalTotalCount(SizeType size)
+            {
+                (void)size;
+                return true;
+            }
+            virtual SizeType InitialGlobalTotalCount() { return Count(); }
             virtual SizeType GetDeleteCount() = 0;
             virtual std::uint64_t BufferSize() = 0;
 
@@ -45,6 +52,18 @@ namespace SPTAG
             virtual bool TryGetDefaultVersionForNewVector(uint8_t& version) const { return false; }
             virtual void SetR(SizeType num) {}
             virtual void SetVersion(const SizeType& key, const uint8_t& version) = 0;
+
+            /// Batch SetVersion: apply (vids[i] -> versions[i]) for all i.
+            /// Default impl is a per-VID loop. TiKV-backed maps override this
+            /// to group writes by chunk so N records in the same chunk only
+            /// trigger 1 ReadChunk + 1 WriteChunk RPC pair
+            virtual void BatchSetVersions(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions)
+            {
+                size_t n = std::min(vids.size(), versions.size());
+                for (size_t i = 0; i < n; i++) {
+                    SetVersion(vids[i], versions[i]);
+                }
+            }
             /// Increment the version of a VID.
             /// @param expectedOld If not 0xff, the caller asserts the current version should be this value.
             ///   If TiKV already holds (expectedOld+1)&0x7f, treat as success (another node did the same increment).
@@ -57,15 +76,7 @@ namespace SPTAG
             virtual ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity) = 0;
             virtual ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) = 0;
 
-            /// Batch version check for a set of VIDs.
-            /// Returns a vector of versions (0xfe = deleted) in the same order as vids.
-            /// Default implementation does per-VID lookup.
-            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions)
-            {
-                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
-            }
-
-            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy)
+            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy = VersionReadPolicy::UseCache)
             {
                 versions.resize(vids.size());
                 for (size_t i = 0; i < vids.size(); i++) {

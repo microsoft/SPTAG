@@ -26,10 +26,21 @@ Connection::Connection(ConnectionID p_connectionID, boost::asio::ip::tcp::socket
 
 void Connection::Start()
 {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
-                 static_cast<uint32_t>(m_socket.local_endpoint().port()),
-                 m_socket.remote_endpoint().address().to_string().c_str(),
-                 static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+    boost::system::error_code localEc;
+    boost::system::error_code remoteEc;
+    auto localEp = m_socket.local_endpoint(localEc);
+    auto remoteEp = m_socket.remote_endpoint(remoteEc);
+    if (!localEc && !remoteEc) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
+                     static_cast<uint32_t>(localEp.port()),
+                     remoteEp.address().to_string().c_str(),
+                     static_cast<uint32_t>(remoteEp.port()));
+    } else {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Connection Start, socket not connected: local=%s remote=%s\n",
+                     localEc ? localEc.message().c_str() : "ok",
+                     remoteEc ? remoteEc.message().c_str() : "ok");
+        return;
+    }
 
     if (!m_stopped.exchange(false))
     {
@@ -42,10 +53,16 @@ void Connection::Start()
 
 void Connection::Stop()
 {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
-                 static_cast<uint32_t>(m_socket.local_endpoint().port()),
-                 m_socket.remote_endpoint().address().to_string().c_str(),
-                 static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+    boost::system::error_code localEc;
+    boost::system::error_code remoteEc;
+    auto localEp = m_socket.local_endpoint(localEc);
+    auto remoteEp = m_socket.remote_endpoint(remoteEc);
+    if (!localEc && !remoteEc) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
+                     static_cast<uint32_t>(localEp.port()),
+                     remoteEp.address().to_string().c_str(),
+                     static_cast<uint32_t>(remoteEp.port()));
+    }
 
     if (m_stopped.exchange(true))
     {

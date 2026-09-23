@@ -1382,6 +1382,15 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
             m_extraSearchers.emplace_back(std::make_shared<ExtraDynamicSearcher<T>>(m_options, m_extraSearchers.size(), this, m_db));
         }
 
+        // Hand the routing worker (if any) to the freshly-created searcher
+        // before BuildIndex runs. Build itself no longer routes postings
+        // (shared TiKV cluster — the driver writes straight to TiKV and PD
+        // routes each key to the owning store), but other build-time hooks
+        // that consult m_worker still benefit from seeing a non-null value.
+        if (m_pendingWorker) {
+            m_extraSearchers.back()->SetWorker(m_pendingWorker);
+        }
+
         {
             std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
             if (ptr == nullptr ||
@@ -1928,7 +1937,7 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
                     {
                         ByteArray meta = m_pMetadata->GetMetadata(i);
                         std::string metastr((char *)meta.Data(), meta.Length());
-                        UpdateMetaMapping(metastr, i);
+                        UpdateMetaMapping(metastr, m_extraSearchers[0]->AllocateGlobalVID(i));
                     }
                 }
             }
@@ -1977,7 +1986,9 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
 
     if (VID != nullptr)
     {
-        for (int i = 0; i < p_vectorNum; i++) VID[i] = begin + i;
+        for (int i = 0; i < p_vectorNum; i++) {
+            VID[i] = m_extraSearchers[0]->AllocateGlobalVID(begin + i);
+        }
     }
 
     std::shared_ptr<VectorSet> vectorSet;
@@ -2011,7 +2022,9 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     }
     workSpace->m_deduper.clear();
     workSpace->m_postingIDs.clear();
-    return m_extraSearchers[0]->AddIndex(workSpace.get(), vectorSet, begin);
+
+    return m_extraSearchers[0]->AddIndex(workSpace.get(), vectorSet,
+        m_extraSearchers[0]->AllocateGlobalVID(begin));
 }
 
 template <typename T>

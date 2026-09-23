@@ -119,6 +119,23 @@ DefineSSDParameter(m_searchCheckVersionMapOnlyLayer0, bool, false, "SearchCheckV
 DefineSSDParameter(m_versionChunkSize, int, 4096, "VersionChunkSize")
 DefineSSDParameter(m_asyncRpcMaxInflight, int, 0, "AsyncRpcMaxInflight")
 
+// Distributed RemotePostingOps RPC tuning
+// ChunkSize=20000: with the receiver-side BatchAppendLayerJob fast path (one
+// db->MultiMerge per chunk instead of N per-item Merges), larger chunks pay
+// off — they amortize the network roundtrip without exploding the receiver
+// pool depth. 20K is a balance: small enough that ChunkSize × MaxInflight
+// stays under the WAL admission-control cap (so chunks take the WAL-backed
+// fast-ACK path), large enough that the network roundtrip overhead is small
+// vs. per-chunk work. 50K was tried and immediately tripped the WAL cap.
+DefineSSDParameter(m_remoteAppendChunkSize, int, 20000, "RemoteAppendChunkSize")
+DefineSSDParameter(m_remoteAppendRetry, int, 3, "RemoteAppendRetry")
+DefineSSDParameter(m_remoteAppendTimeoutSec, int, 180, "RemoteAppendTimeoutSec")
+// MaxInflight=8 (was 4): keeps the receiver's 16-thread BatchAppendItemJob pool
+// well-fed even when one chunk straggles on lock contention.
+DefineSSDParameter(m_remoteAppendMaxInflight, int, 8, "RemoteAppendMaxInflight")
+DefineSSDParameter(m_asyncJobMaxRetry, int, 8, "AsyncJobMaxRetry")
+DefineSSDParameter(m_remoteLockTtlMs, int, 30000, "RemoteLockTtlMs")
+
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
 DefineSSDParameter(m_gpuSSDLeafSize, int, 200, "GPUSSDLeafSize")
@@ -176,6 +193,10 @@ DefineSSDParameter(m_endVectorNum, int, -1, "EndVectorNum")
 DefineSSDParameter(m_persistentBufferPath, std::string, std::string(""), "PersistentBufferPath")
 // Background append threadnum
 DefineSSDParameter(m_appendThreadNum, int, 1, "AppendThreadNum") // Mutable
+// Vectors per chunk when AddIndex splits a bulk insert into jobs. Smaller
+// values start flushing appends sooner (better overlap with remote nodes and
+// shorter head-lock hold); larger values batch more heads per MultiMerge.
+DefineSSDParameter(m_addIndexChunkSize, int, 32, "AddIndexChunkSize") // Mutable
 // Background reassign threadnum
 DefineSSDParameter(m_reassignThreadNum, int, 0, "ReassignThreadNum") // Mutable
 // Background process batch size
