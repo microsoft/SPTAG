@@ -4,6 +4,7 @@
 #include "inc/Test.h"
 
 #include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/PQQuantizer.h"
 #include "inc/Core/Common/RaBitQAutoTuner.h"
 #include "inc/Core/Common/RaBitQQuantizer.h"
 #include "inc/Core/SPANN/Index.h"
@@ -11,13 +12,17 @@
 #include "inc/SSDServing/SSDIndex.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 using namespace SPTAG;
@@ -33,6 +38,43 @@ constexpr DimensionType kRaBitQCodeBytes =
 constexpr const char* kQuantizerFile = "rabitq_global_quantizer_test.bin";
 constexpr const char* kQueryFile = "rabitq_global_query_test.fvecs";
 constexpr SizeType kSearchQueryCount = 16;
+
+class CheckedADCQuantizer : public COMMON::RaBitQQuantizer
+{
+public:
+    CheckedADCQuantizer() : COMMON::RaBitQQuantizer(kDimension, 7, false) {}
+
+    void QuantizeVector(const void* input, std::uint8_t* output, bool adc = true) const override
+    {
+        COMMON::RaBitQQuantizer::QuantizeVector(input, output, adc);
+        if (adc && GetEnableADC()) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_queries.insert(output);
+        }
+    }
+
+    float L2Distance(const std::uint8_t* x, const std::uint8_t* y) const override
+    {
+        if (GetEnableADC()) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_queries.count(x) == 0) {
+                if (invalidADCInputs.fetch_add(1) == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                "Test detected a stored code passed as an ADC query; evaluating with the SDC reference.\n");
+                }
+                return reference->L2Distance(x, y);
+            }
+        }
+        return COMMON::RaBitQQuantizer::L2Distance(x, y);
+    }
+
+    std::shared_ptr<COMMON::RaBitQQuantizer> reference;
+    mutable std::atomic<std::size_t> invalidADCInputs{0};
+
+private:
+    mutable std::mutex m_mutex;
+    mutable std::set<const std::uint8_t*> m_queries;
+};
 
 std::shared_ptr<VectorSet> MakeRawVectors()
 {
@@ -631,6 +673,65 @@ BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsUseExistingIndexPaths)
     VerifySpannSearch(raw, codes, quantizer, "FILEIO");
     VerifySSDServingSearch(raw, codes, quantizer);
     std::remove(kQuantizerFile);
+}
+
+BOOST_AUTO_TEST_CASE(QuantizedGraphAndReplicaBuildDoNotTreatCodesAsADCQueries)
+{
+    const auto raw = MakeRawVectors();
+    for (bool local : {false, true}) {
+        auto quantizer = std::make_shared<CheckedADCQuantizer>();
+        BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
+        if (local) BOOST_REQUIRE(quantizer->SetLocalCentroids(raw) == ErrorCode::Success);
+        const auto codes = QuantizeVectors(raw, quantizer);
+        quantizer->reference = quantizer->CloneWithBits(7);
+        BOOST_REQUIRE(quantizer->reference != nullptr);
+        quantizer->reference->SetEnableADC(false);
+        quantizer->SetEnableADC(true);
+        for (SizeType x = 0; x < 8; ++x) {
+            for (SizeType y = 8; y < 16; ++y) {
+                const auto* a = static_cast<const std::uint8_t*>(codes->GetVector(x));
+                const auto* b = static_cast<const std::uint8_t*>(codes->GetVector(y));
+                BOOST_CHECK_EQUAL(quantizer->L2DistanceSDC(a, b), quantizer->reference->L2Distance(a, b));
+            }
+        }
+        auto index = VectorIndex::CreateInstance(IndexAlgoType::BKT, VectorValueType::UInt8);
+        index->SetQuantizer(quantizer);
+        index->SetParameter("DistCalcMethod", "L2");
+        index->SetParameter("NumberOfThreads", "1");
+        index->SetParameter("NeighborhoodSize", "8");
+        index->SetParameter("TPTNumber", "2");
+        index->SetParameter("MaxCheck", "256");
+        BOOST_REQUIRE(index->BuildIndex(codes, nullptr, false, true) == ErrorCode::Success);
+        BOOST_CHECK_EQUAL(quantizer->invalidADCInputs.load(), 0);
+        BOOST_CHECK(quantizer->GetEnableADC());
+        quantizer->invalidADCInputs = 0;
+        auto mutableCodes = codes;
+        std::unordered_set<SizeType> except;
+        std::vector<Edge> selections(raw->Count() * 8);
+        index->ApproximateRNG(mutableCodes, except, 32, selections.data(), 8, 1, 1, 64, 1.0F, 0);
+        BOOST_CHECK_EQUAL(quantizer->invalidADCInputs.load(), 0);
+        BOOST_CHECK(quantizer->GetEnableADC());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(PQStoredDistancesAreIndependentOfADCMode)
+{
+    std::unique_ptr<float[]> codebooks(new float[4]{0.0F, 2.0F, 0.0F, 3.0F});
+    auto quantizer = std::make_shared<COMMON::PQQuantizer<float>>(2, 2, 1, true, std::move(codebooks));
+    const std::uint8_t x[2]{0, 0};
+    const std::uint8_t y[2]{1, 1};
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::BKT, VectorValueType::UInt8);
+    index->SetQuantizer(quantizer);
+    index->SetParameter("DistCalcMethod", "L2");
+    BOOST_CHECK_EQUAL(index->ComputeDistanceBetweenStoredVectors(x, y), 13.0F);
+    BOOST_CHECK(quantizer->GetEnableADC());
+    const float query[2]{0.0F, 0.0F};
+    ByteArray adc = ByteArray::Alloc(quantizer->QuantizeSize());
+    quantizer->QuantizeVector(query, adc.Data());
+    BOOST_CHECK_EQUAL(index->ComputeDistance(adc.Data(), y), 13.0F);
+    quantizer->SetEnableADC(false);
+    BOOST_CHECK_EQUAL(index->ComputeDistanceBetweenStoredVectors(x, y), 13.0F);
+    BOOST_CHECK_EQUAL(index->ComputeDistance(x, y), 13.0F);
 }
 
 BOOST_AUTO_TEST_CASE(RaBitQAutoTuneProducesNativeBuildHandoff)

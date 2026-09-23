@@ -11,6 +11,15 @@ The SDC compatibility path reconstructs its query code with the official
 `reconstruct_vec` API before invoking the same official asymmetric estimator.
 Online search with `EnableADC=true` does not reconstruct base vectors.
 
+Graph construction/refinement and posting replica selection compare **two stored
+codes**, not a query buffer and a code. They use
+`VectorIndex::ComputeDistanceBetweenStoredVectors` and the quantizer's explicit
+`L2DistanceSDC` entry point, independently of `EnableADC`. Do not pass a stored
+code as the first operand of the ADC query-distance API or toggle a shared
+quantizer's mode inside a parallel build. Quantized indexes previously built
+with ADC enabled must have their head graph and postings rebuilt to correct
+these comparisons; the model and encoded base vectors can be reused.
+
 Train the model and encode Float base vectors with `Release/quantizer`:
 
 ```bash

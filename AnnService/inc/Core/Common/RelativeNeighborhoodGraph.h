@@ -24,7 +24,7 @@ namespace SPTAG
 
                     bool good = true;
                     for (DimensionType k = 0; k < count; k++) {
-                        if (m_fRNGFactor * index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) < item.Dist) {
+                        if (m_fRNGFactor * index->ComputeDistanceBetweenStoredVectors(index->GetSample(nodes[k]), index->GetSample(item.VID)) < item.Dist) {
                             good = false;
                             break;
                         }
@@ -64,18 +64,18 @@ namespace SPTAG
                     }
 
                     tmpVec = index->GetSample(tmpNode);
-                    tmpDist = index->ComputeDistance(tmpVec, nodeVec);
+                    tmpDist = index->ComputeDistanceBetweenStoredVectors(tmpVec, nodeVec);
                     if (tmpDist > insertDist || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         nodes[k] = insertNode;
-                        while (++k < checkNeighborhoodSize && index->ComputeDistance(tmpVec, nodeVec) <= index->ComputeDistance(tmpVec, insertVec)) {
+                        while (++k < checkNeighborhoodSize && index->ComputeDistanceBetweenStoredVectors(tmpVec, nodeVec) <= index->ComputeDistanceBetweenStoredVectors(tmpVec, insertVec)) {
                             std::swap(tmpNode, nodes[k]);
                             if (tmpNode < 0) return;
                             tmpVec = index->GetSample(tmpNode);
                         }
                         break;
                     }
-                    else if (index->ComputeDistance(tmpVec, insertVec) < insertDist) {
+                    else if (index->ComputeDistanceBetweenStoredVectors(tmpVec, insertVec) < insertDist) {
                         break;
                     }
                 }

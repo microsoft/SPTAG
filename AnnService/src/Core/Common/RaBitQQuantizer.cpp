@@ -160,12 +160,23 @@ std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CloneWithBits(int p_bits) cons
 
 float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
+    return ComputeL2Distance(p_x, p_y, m_enable_adc);
+}
+
+float RaBitQQuantizer::L2DistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
+{
+    return ComputeL2Distance(p_x, p_y, false);
+}
+
+float RaBitQQuantizer::ComputeL2Distance(
+    const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const
+{
     thread_local std::vector<float> reconstructed_query;
     const float* query = reinterpret_cast<const float*>(p_x);
     float g_add = 0.0F;
     float k1xsumq = 0.0F;
     const auto centroidId = CentroidId(p_y);
-    if (!m_enable_adc) {
+    if (!p_adc) {
         Decode(p_x, reconstructed_query);
         query = reconstructed_query.data();
         g_add = rabitqlib::euclidean_sqr(
