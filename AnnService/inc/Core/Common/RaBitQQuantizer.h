@@ -63,7 +63,8 @@ private:
     };
 
     static constexpr std::uint32_t kModelMagic = 0x32464252U; // RBF2
-    static constexpr std::uint32_t kModelVersion = 2U;
+    static constexpr std::uint32_t kLegacyModelVersion = 2U;
+    static constexpr std::uint32_t kModelVersion = 3U;
     static constexpr std::size_t kCodeFactorCount = 5;
     static constexpr std::size_t kQueryFactorCount = 2;
 
@@ -92,6 +93,7 @@ private:
     rabitqlib::quant::RabitqConfig m_quantizer_config;
     rabitqlib::ex_ipfunc m_ip_func = nullptr;
     std::vector<float> m_centroid;
+    std::vector<float> m_rotation;
     bool m_trained = false;
 };
 
