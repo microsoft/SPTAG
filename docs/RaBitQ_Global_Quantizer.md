@@ -89,3 +89,11 @@ validate the complete query set and report any changed search parameters.
 
 `Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini` is the canonical
 SIFT1M example. It uses STATIC postings containing the global RaBitQ codes.
+
+STATIC search workspaces must use one asynchronous read request per posting,
+pointing to the start of that posting's buffer. Dynamic storage instead uses
+one request per page. Using the dynamic layout for STATIC reads can overlap
+posting data and write past the buffer, causing corrupt IDs, repeated hash-table
+expansion, and heap corruption. Workspace initialization selects the layout from
+the storage type and refreshes it when a reused workspace changes layouts.
+This does not change the index format or require rebuilding an existing index.
