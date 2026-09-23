@@ -40,6 +40,7 @@ ErrorCode RaBitQQuantizer::Initialize(DimensionType p_dimension, int p_bits, boo
     m_enable_adc = false;
     m_centroid.assign(static_cast<std::size_t>(m_padded_dimension), 0.0F);
     m_rotation.clear();
+    m_localCentroids.clear();
     m_quantizer_config = rabitqlib::quant::faster_config(
         static_cast<std::size_t>(m_padded_dimension), static_cast<std::size_t>(m_bits));
     m_ip_func = rabitqlib::select_excode_ipfunc(static_cast<std::size_t>(m_bits));
@@ -54,6 +55,9 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
         return ErrorCode::FailedParseValue;
     }
 
+    m_localCentroids.clear();
+    m_quantizer_config = rabitqlib::quant::faster_config(
+        static_cast<std::size_t>(m_padded_dimension), static_cast<std::size_t>(m_bits));
     rabitqlib::rotator_impl::MatrixRotator<float> rotation(m_dimension, m_padded_dimension);
     m_rotation.resize(static_cast<std::size_t>(m_dimension) * m_padded_dimension);
     rotation.save(reinterpret_cast<char*>(m_rotation.data()));
@@ -77,6 +81,69 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
     return ErrorCode::Success;
 }
 
+ErrorCode RaBitQQuantizer::SetLocalCentroids(const std::shared_ptr<VectorSet>& p_centroids)
+{
+    if (!Ready() || !m_trained || m_rotation.empty() || !p_centroids ||
+        p_centroids->GetValueType() != VectorValueType::Float ||
+        p_centroids->Dimension() != m_dimension || p_centroids->Count() <= 0 ||
+        static_cast<std::uint64_t>(p_centroids->Count()) > kMaxLocalCentroids) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Local RaBitQ requires a trained rotated model and 1..65536 Float centroids of matching dimension.\n");
+        return ErrorCode::FailedParseValue;
+    }
+    std::vector<float> centers;
+    centers.reserve(static_cast<std::size_t>(p_centroids->Count()) * m_padded_dimension);
+    std::vector<float> prepared;
+    for (SizeType i = 0; i < p_centroids->Count(); ++i) {
+        PrepareInput(static_cast<const float*>(p_centroids->GetVector(i)), prepared);
+        if (!std::all_of(prepared.begin(), prepared.end(), [](float value) { return std::isfinite(value); })) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Local RaBitQ centroids must be finite.\n");
+            return ErrorCode::FailedParseValue;
+        }
+        centers.insert(centers.end(), prepared.begin(), prepared.end());
+    }
+    m_localCentroids = std::move(centers);
+    m_quantizer_config = rabitqlib::quant::RabitqConfig();
+    return ErrorCode::Success;
+}
+
+std::size_t RaBitQQuantizer::LocalCentroidCount() const
+{
+    return m_padded_dimension > 0 ? m_localCentroids.size() / m_padded_dimension : 0;
+}
+
+ErrorCode RaBitQQuantizer::InitializeLocalCentroids(std::uint32_t p_count)
+{
+    const std::uint64_t queryFloats =
+        static_cast<std::uint64_t>(m_padded_dimension) + kQueryFactorCount + p_count;
+    if (p_count == 0 || p_count > kMaxLocalCentroids ||
+        queryFloats > static_cast<std::uint64_t>((std::numeric_limits<int>::max)()) / sizeof(float)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid local RaBitQ centroid count: %u.\n", p_count);
+        return ErrorCode::FailedParseValue;
+    }
+    m_localCentroids.resize(static_cast<std::size_t>(p_count) * m_padded_dimension);
+    m_quantizer_config = rabitqlib::quant::RabitqConfig();
+    return ErrorCode::Success;
+}
+
+std::uint32_t RaBitQQuantizer::CentroidId(const std::uint8_t* p_code) const
+{
+    if (m_localCentroids.empty()) return 0;
+    std::uint32_t id;
+    std::memcpy(&id, p_code + PackedCodeBytes() + kCodeFactorCount * sizeof(float), sizeof(id));
+    if (id >= LocalCentroidCount()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid local RaBitQ centroid ID: %u.\n", id);
+        throw std::out_of_range("Invalid local RaBitQ centroid ID");
+    }
+    return id;
+}
+
+const float* RaBitQQuantizer::Centroid(std::uint32_t p_id) const
+{
+    return m_localCentroids.empty() ? m_centroid.data()
+        : m_localCentroids.data() + static_cast<std::size_t>(p_id) * m_padded_dimension;
+}
+
 std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CloneWithBits(int p_bits) const
 {
     if (!Ready() || !m_trained || p_bits < 1 || p_bits > 8) {
@@ -85,6 +152,8 @@ std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CloneWithBits(int p_bits) cons
     auto quantizer = std::make_shared<RaBitQQuantizer>(m_dimension, p_bits, m_normalize);
     quantizer->m_centroid = m_centroid;
     quantizer->m_rotation = m_rotation;
+    quantizer->m_localCentroids = m_localCentroids;
+    if (!m_localCentroids.empty()) quantizer->m_quantizer_config = rabitqlib::quant::RabitqConfig();
     quantizer->m_trained = true;
     return quantizer;
 }
@@ -95,11 +164,12 @@ float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p
     const float* query = reinterpret_cast<const float*>(p_x);
     float g_add = 0.0F;
     float k1xsumq = 0.0F;
+    const auto centroidId = CentroidId(p_y);
     if (!m_enable_adc) {
         Decode(p_x, reconstructed_query);
         query = reconstructed_query.data();
         g_add = rabitqlib::euclidean_sqr(
-            query, m_centroid.data(), static_cast<std::size_t>(m_padded_dimension));
+            query, Centroid(centroidId), static_cast<std::size_t>(m_padded_dimension));
         k1xsumq = -0.5F * std::accumulate(
             query, query + m_padded_dimension, 0.0F);
     } else {
@@ -107,6 +177,10 @@ float RaBitQQuantizer::L2Distance(const std::uint8_t* p_x, const std::uint8_t* p
             p_x + static_cast<std::size_t>(m_padded_dimension) * sizeof(float);
         std::memcpy(&g_add, query_factors, sizeof(float));
         std::memcpy(&k1xsumq, query_factors + sizeof(float), sizeof(float));
+        if (!m_localCentroids.empty()) {
+            std::memcpy(&g_add, query_factors + (kQueryFactorCount + centroidId) * sizeof(float),
+                        sizeof(float));
+        }
     }
 
     float f_add = 0.0F;
@@ -147,12 +221,33 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
             input, input + m_padded_dimension, 0.0F);
         std::memcpy(p_output + query_bytes, &g_add, sizeof(float));
         std::memcpy(p_output + query_bytes + sizeof(float), &k1xsumq, sizeof(float));
+        for (std::size_t id = 0; id < LocalCentroidCount(); ++id) {
+            const float localNorm = rabitqlib::euclidean_sqr(
+                input, Centroid(static_cast<std::uint32_t>(id)),
+                static_cast<std::size_t>(m_padded_dimension));
+            std::memcpy(p_output + query_bytes + (kQueryFactorCount + id) * sizeof(float),
+                        &localNorm, sizeof(float));
+        }
         return;
     }
 
+    std::uint32_t centroidId = 0;
+    if (!m_localCentroids.empty()) {
+        float bestDistance = (std::numeric_limits<float>::infinity)();
+        const auto distance = COMMON::DistanceCalcSelector<float>(DistCalcMethod::L2);
+        for (std::size_t id = 0; id < LocalCentroidCount(); ++id) {
+            const float current = distance(input, Centroid(static_cast<std::uint32_t>(id)),
+                                           m_padded_dimension);
+            if (current < bestDistance) {
+                bestDistance = current;
+                centroidId = static_cast<std::uint32_t>(id);
+            }
+        }
+    }
+    const float* centroid = Centroid(centroidId);
     bool zero_residual = true;
     for (DimensionType i = 0; i < m_padded_dimension; ++i) {
-        if (input[i] != m_centroid[static_cast<std::size_t>(i)]) {
+        if (input[i] != centroid[i]) {
             zero_residual = false;
             break;
         }
@@ -171,7 +266,7 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
 
         rabitqlib::quant::quantize_scalar<float, std::uint8_t>(
             input,
-            m_centroid.data(),
+            centroid,
             static_cast<std::size_t>(m_padded_dimension),
             static_cast<std::size_t>(m_bits),
             scalar_code.data(),
@@ -185,7 +280,7 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
                     static_cast<std::size_t>(m_padded_dimension)));
             rabitqlib::quant::quantize_compact_one_bit(
                 input,
-                m_centroid.data(),
+                centroid,
                 static_cast<std::size_t>(m_padded_dimension),
                 bin_data.data(),
                 rabitqlib::METRIC_L2);
@@ -202,7 +297,7 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
         } else {
             rabitqlib::quant::quantize_full_single<float, std::uint8_t>(
                 input,
-                m_centroid.data(),
+                centroid,
                 static_cast<std::size_t>(m_padded_dimension),
                 static_cast<std::size_t>(m_bits),
                 full_code.data(),
@@ -229,6 +324,9 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
     std::memcpy(factors + 2 * sizeof(float), &f_error, sizeof(f_error));
     std::memcpy(factors + 3 * sizeof(float), &delta, sizeof(delta));
     std::memcpy(factors + 4 * sizeof(float), &lower_value, sizeof(lower_value));
+    if (!m_localCentroids.empty()) {
+        std::memcpy(factors + kCodeFactorCount * sizeof(float), &centroidId, sizeof(centroidId));
+    }
 }
 
 int RaBitQQuantizer::QuantizeSize() const
@@ -236,7 +334,7 @@ int RaBitQQuantizer::QuantizeSize() const
     return m_enable_adc
         ? static_cast<int>(
               sizeof(float) *
-              (static_cast<std::size_t>(m_padded_dimension) + kQueryFactorCount))
+              (static_cast<std::size_t>(m_padded_dimension) + kQueryFactorCount + LocalCentroidCount()))
         : static_cast<int>(CodeBytes());
 }
 
@@ -268,7 +366,8 @@ DimensionType RaBitQQuantizer::ReconstructDim() const
 std::uint64_t RaBitQQuantizer::BufferSize() const
 {
     return sizeof(QuantizerType) + sizeof(VectorValueType) + sizeof(ModelHeader) +
-        (m_centroid.size() + m_rotation.size()) * sizeof(float);
+        (m_centroid.size() + m_rotation.size() + m_localCentroids.size()) * sizeof(float) +
+        (m_localCentroids.empty() ? 0 : sizeof(std::uint32_t));
 }
 
 ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_output) const
@@ -281,7 +380,8 @@ ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_outpu
     VectorValueType reconstruct_type = VectorValueType::Float;
     ModelHeader header{
         kModelMagic,
-        m_rotation.empty() ? kLegacyModelVersion : kModelVersion,
+        !m_localCentroids.empty() ? kLocalModelVersion :
+            (m_rotation.empty() ? kLegacyModelVersion : kModelVersion),
         m_dimension,
         m_padded_dimension,
         m_bits,
@@ -298,6 +398,15 @@ ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_outpu
         p_output->WriteBinary(m_rotation.size() * sizeof(float),
                              reinterpret_cast<const char*>(m_rotation.data())) != m_rotation.size() * sizeof(float)) {
         return ErrorCode::DiskIOFail;
+    }
+    if (!m_localCentroids.empty()) {
+        const auto count = static_cast<std::uint32_t>(LocalCentroidCount());
+        if (p_output->WriteBinary(sizeof(count), reinterpret_cast<const char*>(&count)) != sizeof(count) ||
+            p_output->WriteBinary(m_localCentroids.size() * sizeof(float),
+                                 reinterpret_cast<const char*>(m_localCentroids.data())) !=
+                m_localCentroids.size() * sizeof(float)) {
+            return ErrorCode::DiskIOFail;
+        }
     }
     return ErrorCode::Success;
 }
@@ -320,6 +429,21 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_input
                             reinterpret_cast<char*>(m_rotation.data())) != m_rotation.size() * sizeof(float)) {
         return ErrorCode::FailedParseValue;
     }
+    if (header.version == kLocalModelVersion) {
+        std::uint32_t count = 0;
+        if (p_input->ReadBinary(sizeof(count), reinterpret_cast<char*>(&count)) != sizeof(count) ||
+            InitializeLocalCentroids(count) != ErrorCode::Success ||
+            p_input->ReadBinary(m_localCentroids.size() * sizeof(float),
+                               reinterpret_cast<char*>(m_localCentroids.data())) !=
+                m_localCentroids.size() * sizeof(float)) {
+            return ErrorCode::FailedParseValue;
+        }
+        if (!std::all_of(m_localCentroids.begin(), m_localCentroids.end(),
+                         [](float value) { return std::isfinite(value); })) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid non-finite local RaBitQ centroid.\n");
+            return ErrorCode::FailedParseValue;
+        }
+    }
     m_trained = true;
     return ErrorCode::Success;
 }
@@ -340,6 +464,19 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::uint8_t* p_raw_bytes)
     p_raw_bytes += m_centroid.size() * sizeof(float);
     if (!m_rotation.empty()) {
         std::memcpy(m_rotation.data(), p_raw_bytes, m_rotation.size() * sizeof(float));
+        p_raw_bytes += m_rotation.size() * sizeof(float);
+    }
+    if (header.version == kLocalModelVersion) {
+        std::uint32_t count;
+        std::memcpy(&count, p_raw_bytes, sizeof(count));
+        p_raw_bytes += sizeof(count);
+        if (InitializeLocalCentroids(count) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+        std::memcpy(m_localCentroids.data(), p_raw_bytes, m_localCentroids.size() * sizeof(float));
+        if (!std::all_of(m_localCentroids.begin(), m_localCentroids.end(),
+                         [](float value) { return std::isfinite(value); })) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid non-finite local RaBitQ centroid.\n");
+            return ErrorCode::FailedParseValue;
+        }
     }
     m_trained = true;
     return ErrorCode::Success;
@@ -386,20 +523,24 @@ bool RaBitQQuantizer::Ready() const
         m_padded_dimension >= m_dimension && m_padded_dimension % 64 == 0 &&
         m_centroid.size() == static_cast<std::size_t>(m_padded_dimension) &&
         (m_rotation.empty() || m_rotation.size() == static_cast<std::size_t>(m_dimension) * m_padded_dimension) &&
+        (m_localCentroids.empty() || (!m_rotation.empty() &&
+            m_localCentroids.size() % m_padded_dimension == 0 &&
+            LocalCentroidCount() <= kMaxLocalCentroids)) &&
         m_ip_func != nullptr;
 }
 
 ErrorCode RaBitQQuantizer::LoadHeader(const ModelHeader& p_header)
 {
     if (p_header.magic != kModelMagic ||
-        (p_header.version != kLegacyModelVersion && p_header.version != kModelVersion) ||
+        (p_header.version != kLegacyModelVersion && p_header.version != kModelVersion &&
+         p_header.version != kLocalModelVersion) ||
         p_header.dimension <= 0 || p_header.paddedDimension < p_header.dimension ||
         p_header.paddedDimension % 64 != 0 || p_header.bits < 1 || p_header.bits > 8) {
         return ErrorCode::FailedParseValue;
     }
     const ErrorCode status =
         Initialize(p_header.dimension, p_header.bits, p_header.normalize != 0);
-    if (status == ErrorCode::Success && p_header.version == kModelVersion) {
+    if (status == ErrorCode::Success && p_header.version != kLegacyModelVersion) {
         m_rotation.resize(static_cast<std::size_t>(m_dimension) * m_padded_dimension);
     }
     return status == ErrorCode::Success && m_padded_dimension == p_header.paddedDimension
@@ -427,8 +568,9 @@ void RaBitQQuantizer::Decode(const std::uint8_t* p_code, std::vector<float>& p_o
         lower_value,
         static_cast<std::size_t>(m_padded_dimension),
         p_output.data());
+    const float* centroid = Centroid(CentroidId(p_code));
     for (DimensionType i = 0; i < m_padded_dimension; ++i) {
-        p_output[static_cast<std::size_t>(i)] += m_centroid[static_cast<std::size_t>(i)];
+        p_output[static_cast<std::size_t>(i)] += centroid[i];
     }
     if (m_rotation.empty()) {
         std::fill(
@@ -565,7 +707,8 @@ std::size_t RaBitQQuantizer::PackedCodeBytes() const
 
 std::size_t RaBitQQuantizer::CodeBytes() const
 {
-    return PackedCodeBytes() + kCodeFactorCount * sizeof(float);
+    return PackedCodeBytes() + kCodeFactorCount * sizeof(float) +
+        (m_localCentroids.empty() ? 0 : sizeof(std::uint32_t));
 }
 
 } // namespace COMMON
