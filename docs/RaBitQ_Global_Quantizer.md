@@ -33,5 +33,50 @@ The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
 multiple of 64. The current adapter supports the official L2 estimator; cosine
 distance is intentionally unsupported.
 
+## Optional local residual quantization
+
+The default remains a single global centroid and the upstream fast quantizer.
+For higher accuracy at a fixed bit width, supply Float XVEC centroids trained
+from base vectors only:
+
+```bash
+Release/quantizer \
+  -d 128 -v Float -f XVEC \
+  -i sift/sift_base.fvecs -o sift/sift_base.rabitq7-local.u8bin \
+  -oq sift/rabitq7-local.bin -qt RaBitQQuantizer -qd 7 \
+  -rc sift/centroids.fvecs -ts 1000000
+```
+
+Use a **new** model and output path. `-rc` is rejected when the model already
+exists; omit it when reusing a saved local model. Centroids must have the input
+dimension, contain finite values, and number between 1 and 65,536. They use the
+model's input normalization and persisted rotation. The C++ equivalent is
+`SetLocalCentroids` on a trained rotated `RaBitQQuantizer`; bit-width clones
+retain those centers.
+
+Each base vector is assigned to its nearest center and its residual is encoded
+with upstream per-vector optimal scaling, rather than the shared expected scale.
+The model stores the centers; each code appends a `uint32` center ID after the
+existing packed payload and five Float factors. For 128-dimensional 7-bit
+vectors this is **136 bytes** (112 + 20 + 4), versus 132 for global quantization.
+Set the index's `Dim` to that encoded width. Center storage is additional to the
+7-bit payload; the bit count is not a claim about total index size.
+
+ADC query preparation computes the query norm relative to every center once,
+alongside the rotated query and existing factors. Its buffer uses
+`4 * (paddedDimension + 2 + centerCount)` bytes. Scoring selects the matching
+center's norm without fetching or reranking raw base vectors. SDC and vector
+reconstruction likewise use each code's stored center.
+
+Local models use **version 4**: the version-3 payload is followed by a `uint32`
+center count and row-major rotated Float centers. Version-2/3 models keep their
+existing encoding, scoring, serialization, and fast quantization behavior.
+Never replace a model beneath an existing encoded corpus/index: re-encode and
+build a separate index when enabling or changing local centers.
+
+Local quantization reduces distance-estimation error, but does not guarantee
+a fixed recall. Search candidate coverage remains an independent requirement;
+validate the complete query set and report any changed search parameters.
+
 `Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini` is the canonical
 SIFT1M example. It uses STATIC postings containing the global RaBitQ codes.
