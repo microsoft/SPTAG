@@ -6,6 +6,7 @@
 
 #ifndef _MSC_VER
 #ifdef TBB
+#include <tbb/concurrent_hash_map.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_queue.h>
 #include <tbb/concurrent_unordered_set.h>
@@ -37,6 +38,9 @@ namespace SPTAG
 
             template <typename K, typename V>
             using ConcurrentMap = tbb::concurrent_unordered_map<K, V>;
+
+            template <typename K, typename V>
+            using ConcurrentHashMap = tbb::concurrent_hash_map<K, V>;
 
             template <typename T>
             using ConcurrentQueue = tbb::concurrent_queue<T>;
