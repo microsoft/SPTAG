@@ -19,6 +19,9 @@ namespace SPTAG
         public:
             virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
 
+            // Both operands are stored codes, independently of the query ADC mode.
+            virtual float L2DistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
+
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
 
             template <typename T>

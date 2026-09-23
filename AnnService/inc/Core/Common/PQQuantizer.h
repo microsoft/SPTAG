@@ -31,6 +31,8 @@ namespace SPTAG
 
             virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
+            float L2DistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const override;
+
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const;
@@ -120,9 +122,17 @@ namespace SPTAG
                 }
             }
             else {
-                for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
-                }                
+                return L2DistanceSDC(pX, pY);
+            }
+            return out;
+        }
+
+        template <typename T>
+        float PQQuantizer<T>::L2DistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const
+        {
+            float out = 0;
+            for (int i = 0; i < m_NumSubvectors; i++) {
+                out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
             }
             return out;
         }
