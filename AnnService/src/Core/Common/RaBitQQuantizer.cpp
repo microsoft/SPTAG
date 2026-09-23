@@ -5,6 +5,7 @@
 
 #include "rabitqlib/quantization/data_layout.hpp"
 #include "rabitqlib/quantization/pack_excode.hpp"
+#include "rabitqlib/utils/rotator.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -38,6 +39,7 @@ ErrorCode RaBitQQuantizer::Initialize(DimensionType p_dimension, int p_bits, boo
     m_normalize = p_normalize;
     m_enable_adc = false;
     m_centroid.assign(static_cast<std::size_t>(m_padded_dimension), 0.0F);
+    m_rotation.clear();
     m_quantizer_config = rabitqlib::quant::faster_config(
         static_cast<std::size_t>(m_padded_dimension), static_cast<std::size_t>(m_bits));
     m_ip_func = rabitqlib::select_excode_ipfunc(static_cast<std::size_t>(m_bits));
@@ -52,18 +54,22 @@ ErrorCode RaBitQQuantizer::Train(const std::shared_ptr<VectorSet>& p_vectors)
         return ErrorCode::FailedParseValue;
     }
 
-    std::vector<double> accumulator(static_cast<std::size_t>(m_dimension), 0.0);
+    rabitqlib::rotator_impl::MatrixRotator<float> rotation(m_dimension, m_padded_dimension);
+    m_rotation.resize(static_cast<std::size_t>(m_dimension) * m_padded_dimension);
+    rotation.save(reinterpret_cast<char*>(m_rotation.data()));
+
+    std::vector<double> accumulator(static_cast<std::size_t>(m_padded_dimension), 0.0);
     std::vector<float> prepared;
     for (SizeType i = 0; i < p_vectors->Count(); ++i) {
         const auto* vector = static_cast<const float*>(p_vectors->GetVector(i));
         PrepareInput(vector, prepared);
-        for (DimensionType j = 0; j < m_dimension; ++j) {
+        for (DimensionType j = 0; j < m_padded_dimension; ++j) {
             accumulator[static_cast<std::size_t>(j)] += prepared[static_cast<std::size_t>(j)];
         }
     }
 
     const double inverse_count = 1.0 / static_cast<double>(p_vectors->Count());
-    for (DimensionType j = 0; j < m_dimension; ++j) {
+    for (DimensionType j = 0; j < m_padded_dimension; ++j) {
         m_centroid[static_cast<std::size_t>(j)] =
             static_cast<float>(accumulator[static_cast<std::size_t>(j)] * inverse_count);
     }
@@ -78,6 +84,7 @@ std::shared_ptr<RaBitQQuantizer> RaBitQQuantizer::CloneWithBits(int p_bits) cons
     }
     auto quantizer = std::make_shared<RaBitQQuantizer>(m_dimension, p_bits, m_normalize);
     quantizer->m_centroid = m_centroid;
+    quantizer->m_rotation = m_rotation;
     quantizer->m_trained = true;
     return quantizer;
 }
@@ -237,8 +244,15 @@ void RaBitQQuantizer::ReconstructVector(const std::uint8_t* p_code, void* p_outp
 {
     thread_local std::vector<float> reconstructed;
     Decode(p_code, reconstructed);
-    std::memcpy(
-        p_output, reconstructed.data(), static_cast<std::size_t>(m_dimension) * sizeof(float));
+    if (m_rotation.empty()) {
+        std::memcpy(
+            p_output, reconstructed.data(), static_cast<std::size_t>(m_dimension) * sizeof(float));
+    } else {
+        rabitqlib::RowMajorMatrixMap<float> output(static_cast<float*>(p_output), 1, m_dimension);
+        const rabitqlib::ConstRowMajorMatrixMap<float> input(reconstructed.data(), 1, m_padded_dimension);
+        const rabitqlib::ConstRowMajorMatrixMap<float> rotation(m_rotation.data(), m_dimension, m_padded_dimension);
+        output.noalias() = input * rotation.transpose();
+    }
 }
 
 int RaBitQQuantizer::ReconstructSize() const
@@ -254,7 +268,7 @@ DimensionType RaBitQQuantizer::ReconstructDim() const
 std::uint64_t RaBitQQuantizer::BufferSize() const
 {
     return sizeof(QuantizerType) + sizeof(VectorValueType) + sizeof(ModelHeader) +
-        m_centroid.size() * sizeof(float);
+        (m_centroid.size() + m_rotation.size()) * sizeof(float);
 }
 
 ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_output) const
@@ -267,7 +281,7 @@ ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_outpu
     VectorValueType reconstruct_type = VectorValueType::Float;
     ModelHeader header{
         kModelMagic,
-        kModelVersion,
+        m_rotation.empty() ? kLegacyModelVersion : kModelVersion,
         m_dimension,
         m_padded_dimension,
         m_bits,
@@ -278,6 +292,11 @@ ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_outpu
         p_output->WriteBinary(sizeof(header), reinterpret_cast<char*>(&header)) != sizeof(header) ||
         p_output->WriteBinary(m_centroid.size() * sizeof(float), reinterpret_cast<char*>(const_cast<float*>(m_centroid.data()))) !=
             m_centroid.size() * sizeof(float)) {
+        return ErrorCode::DiskIOFail;
+    }
+    if (!m_rotation.empty() &&
+        p_output->WriteBinary(m_rotation.size() * sizeof(float),
+                             reinterpret_cast<const char*>(m_rotation.data())) != m_rotation.size() * sizeof(float)) {
         return ErrorCode::DiskIOFail;
     }
     return ErrorCode::Success;
@@ -294,6 +313,11 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_input
         LoadHeader(header) != ErrorCode::Success ||
         p_input->ReadBinary(m_centroid.size() * sizeof(float), reinterpret_cast<char*>(m_centroid.data())) !=
             m_centroid.size() * sizeof(float)) {
+        return ErrorCode::FailedParseValue;
+    }
+    if (!m_rotation.empty() &&
+        p_input->ReadBinary(m_rotation.size() * sizeof(float),
+                            reinterpret_cast<char*>(m_rotation.data())) != m_rotation.size() * sizeof(float)) {
         return ErrorCode::FailedParseValue;
     }
     m_trained = true;
@@ -313,6 +337,10 @@ ErrorCode RaBitQQuantizer::LoadQuantizer(std::uint8_t* p_raw_bytes)
     }
     p_raw_bytes += sizeof(header);
     std::memcpy(m_centroid.data(), p_raw_bytes, m_centroid.size() * sizeof(float));
+    p_raw_bytes += m_centroid.size() * sizeof(float);
+    if (!m_rotation.empty()) {
+        std::memcpy(m_rotation.data(), p_raw_bytes, m_rotation.size() * sizeof(float));
+    }
     m_trained = true;
     return ErrorCode::Success;
 }
@@ -357,18 +385,23 @@ bool RaBitQQuantizer::Ready() const
     return m_dimension > 0 && m_bits >= 1 && m_bits <= 8 &&
         m_padded_dimension >= m_dimension && m_padded_dimension % 64 == 0 &&
         m_centroid.size() == static_cast<std::size_t>(m_padded_dimension) &&
+        (m_rotation.empty() || m_rotation.size() == static_cast<std::size_t>(m_dimension) * m_padded_dimension) &&
         m_ip_func != nullptr;
 }
 
 ErrorCode RaBitQQuantizer::LoadHeader(const ModelHeader& p_header)
 {
-    if (p_header.magic != kModelMagic || p_header.version != kModelVersion ||
+    if (p_header.magic != kModelMagic ||
+        (p_header.version != kLegacyModelVersion && p_header.version != kModelVersion) ||
         p_header.dimension <= 0 || p_header.paddedDimension < p_header.dimension ||
         p_header.paddedDimension % 64 != 0 || p_header.bits < 1 || p_header.bits > 8) {
         return ErrorCode::FailedParseValue;
     }
     const ErrorCode status =
         Initialize(p_header.dimension, p_header.bits, p_header.normalize != 0);
+    if (status == ErrorCode::Success && p_header.version == kModelVersion) {
+        m_rotation.resize(static_cast<std::size_t>(m_dimension) * m_padded_dimension);
+    }
     return status == ErrorCode::Success && m_padded_dimension == p_header.paddedDimension
         ? ErrorCode::Success
         : ErrorCode::FailedParseValue;
@@ -397,8 +430,10 @@ void RaBitQQuantizer::Decode(const std::uint8_t* p_code, std::vector<float>& p_o
     for (DimensionType i = 0; i < m_padded_dimension; ++i) {
         p_output[static_cast<std::size_t>(i)] += m_centroid[static_cast<std::size_t>(i)];
     }
-    std::fill(
-        p_output.begin() + static_cast<std::size_t>(m_dimension), p_output.end(), 0.0F);
+    if (m_rotation.empty()) {
+        std::fill(
+            p_output.begin() + static_cast<std::size_t>(m_dimension), p_output.end(), 0.0F);
+    }
 }
 
 void RaBitQQuantizer::PrepareInput(
@@ -406,21 +441,26 @@ void RaBitQQuantizer::PrepareInput(
 {
     p_output.assign(static_cast<std::size_t>(m_padded_dimension), 0.0F);
     std::copy(p_input, p_input + m_dimension, p_output.begin());
-    if (!m_normalize) {
-        return;
+    if (m_normalize) {
+        double norm = 0.0;
+        for (DimensionType i = 0; i < m_dimension; ++i) {
+            norm += static_cast<double>(p_input[i]) * p_input[i];
+        }
+        if (norm != 0.0) {
+            const float inverse_norm = static_cast<float>(1.0 / std::sqrt(norm));
+            for (DimensionType i = 0; i < m_dimension; ++i) {
+                p_output[static_cast<std::size_t>(i)] = p_input[i] * inverse_norm;
+            }
+        }
     }
-
-    double norm = 0.0;
-    for (DimensionType i = 0; i < m_dimension; ++i) {
-        norm += static_cast<double>(p_input[i]) * p_input[i];
-    }
-    if (norm == 0.0) {
-        return;
-    }
-
-    const float inverse_norm = static_cast<float>(1.0 / std::sqrt(norm));
-    for (DimensionType i = 0; i < m_dimension; ++i) {
-        p_output[static_cast<std::size_t>(i)] = p_input[i] * inverse_norm;
+    if (!m_rotation.empty()) {
+        thread_local std::vector<float> rotated;
+        rotated.resize(static_cast<std::size_t>(m_padded_dimension));
+        const rabitqlib::ConstRowMajorMatrixMap<float> input(p_output.data(), 1, m_dimension);
+        const rabitqlib::ConstRowMajorMatrixMap<float> rotation(m_rotation.data(), m_dimension, m_padded_dimension);
+        rabitqlib::RowMajorMatrixMap<float> output(rotated.data(), 1, m_padded_dimension);
+        output.noalias() = input * rotation;
+        p_output.swap(rotated);
     }
 }
 

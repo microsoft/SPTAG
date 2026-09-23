@@ -320,8 +320,8 @@ BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQHandlesCentroidVector)
     quantizer->QuantizeVector(values, code.data(), false);
     std::vector<float> reconstructed(kDimension);
     quantizer->ReconstructVector(code.data(), reconstructed.data());
-    for (float value : reconstructed) {
-        BOOST_CHECK(std::isfinite(value));
+    for (DimensionType dim = 0; dim < kDimension; ++dim) {
+        BOOST_CHECK_SMALL(reconstructed[dim] - values[dim], 0.0001F);
     }
 
     quantizer->SetEnableADC(true);
@@ -433,6 +433,98 @@ BOOST_AUTO_TEST_CASE(RaBitQEncodedWidthMatchesSavedModel)
     BOOST_REQUIRE(loaded != nullptr);
     BOOST_CHECK_EQUAL(loaded->GetNumSubvectors(), quantizer->GetNumSubvectors());
     std::remove(modelPath);
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQRotationPreservesGeometryAndPersistence)
+{
+    for (DimensionType dimension : {3, 70, 128}) {
+        for (bool normalize : {false, true}) {
+            ByteArray bytes = ByteArray::Alloc(sizeof(float) * dimension * 2);
+            auto* values = reinterpret_cast<float*>(bytes.Data());
+            for (DimensionType i = 0; i < dimension * 2; ++i)
+                values[i] = std::sin(static_cast<float>(i + 1)) + static_cast<float>(i % 7);
+            auto vectors = std::make_shared<BasicVectorSet>(
+                bytes, VectorValueType::Float, dimension, 2);
+            auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(dimension, 3, normalize);
+            BOOST_REQUIRE(quantizer->Train(vectors) == ErrorCode::Success);
+            const int padded = (dimension + 63) / 64 * 64;
+            BOOST_CHECK_EQUAL(quantizer->BufferSize(),
+                sizeof(QuantizerType) + sizeof(VectorValueType) + 24 +
+                sizeof(float) * (padded + dimension * padded));
+            quantizer->SetEnableADC(true);
+            std::vector<std::uint8_t> first(quantizer->QuantizeSize()), second(first.size());
+            quantizer->QuantizeVector(values, first.data());
+            quantizer->QuantizeVector(values + dimension, second.data());
+            float originalDistance = 0, rotatedDistance = 0, firstNorm = 0, secondNorm = 0;
+            for (int d = 0; d < dimension; ++d) {
+                firstNorm += values[d] * values[d];
+                secondNorm += values[dimension + d] * values[dimension + d];
+            }
+            for (int d = 0; d < dimension; ++d) {
+                const float difference = values[d] / (normalize ? std::sqrt(firstNorm) : 1.0F) -
+                    values[dimension + d] / (normalize ? std::sqrt(secondNorm) : 1.0F);
+                originalDistance += difference * difference;
+            }
+            for (int d = 0; d < padded; ++d) {
+                float a, b;
+                std::memcpy(&a, first.data() + d * sizeof(float), sizeof(float));
+                std::memcpy(&b, second.data() + d * sizeof(float), sizeof(float));
+                rotatedDistance += (a - b) * (a - b);
+            }
+            BOOST_CHECK_CLOSE(rotatedDistance, originalDistance, 0.001F);
+            BOOST_CHECK(std::memcmp(first.data(), values, dimension * sizeof(float)) != 0);
+
+            auto diskLoaded = SaveAndLoad(quantizer);
+            ByteArray saved = ByteArray::Alloc(quantizer->BufferSize());
+            std::ifstream file(kQuantizerFile, std::ios::binary);
+            file.read(reinterpret_cast<char*>(saved.Data()), saved.Length());
+            BOOST_REQUIRE(file.good());
+            auto memoryLoaded = COMMON::IQuantizer::LoadIQuantizer(saved);
+            BOOST_REQUIRE(memoryLoaded != nullptr);
+            auto clone = quantizer->CloneWithBits(4);
+            BOOST_REQUIRE(clone != nullptr);
+            for (auto loaded : {diskLoaded, memoryLoaded, std::static_pointer_cast<COMMON::IQuantizer>(clone)}) {
+                loaded->SetEnableADC(true);
+                std::vector<std::uint8_t> query(loaded->QuantizeSize());
+                loaded->QuantizeVector(values, query.data());
+                BOOST_CHECK_EQUAL_COLLECTIONS(first.begin(), first.end(), query.begin(), query.end());
+            }
+            std::vector<std::uint8_t> code(quantizer->GetNumSubvectors()), loadedCode(code.size());
+            quantizer->QuantizeVector(values, code.data(), false);
+            diskLoaded->QuantizeVector(values, loadedCode.data(), false);
+            BOOST_CHECK_EQUAL_COLLECTIONS(code.begin(), code.end(), loadedCode.begin(), loadedCode.end());
+            std::vector<float> reconstructed(dimension), loadedReconstruction(dimension);
+            quantizer->ReconstructVector(code.data(), reconstructed.data());
+            memoryLoaded->ReconstructVector(code.data(), loadedReconstruction.data());
+            BOOST_CHECK_EQUAL_COLLECTIONS(reconstructed.begin(), reconstructed.end(),
+                                         loadedReconstruction.begin(), loadedReconstruction.end());
+            file.close();
+            std::remove(kQuantizerFile);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(RaBitQLegacyModelKeepsIdentityTransform)
+{
+    const std::uint32_t header[] = {0x32464252U, 2, 128, 128, 3, 0};
+    std::vector<std::uint8_t> payload(sizeof(header) + 128 * sizeof(float), 0);
+    std::memcpy(payload.data(), header, sizeof(header));
+    auto legacy = std::make_shared<COMMON::RaBitQQuantizer>();
+    BOOST_REQUIRE(legacy->LoadQuantizer(payload.data()) == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(legacy->BufferSize(),
+                      sizeof(QuantizerType) + sizeof(VectorValueType) + payload.size());
+    const auto raw = MakeRawVectors();
+    legacy->SetEnableADC(true);
+    std::vector<std::uint8_t> query(legacy->QuantizeSize());
+    legacy->QuantizeVector(raw->GetVector(0), query.data());
+    BOOST_CHECK(std::memcmp(query.data(), raw->GetVector(0), 128 * sizeof(float)) == 0);
+    auto loaded = SaveAndLoad(legacy);
+    loaded->SetEnableADC(true);
+    std::vector<std::uint8_t> loadedQuery(loaded->QuantizeSize());
+    loaded->QuantizeVector(raw->GetVector(0), loadedQuery.data());
+    BOOST_CHECK_EQUAL_COLLECTIONS(query.begin(), query.end(), loadedQuery.begin(), loadedQuery.end());
+    BOOST_CHECK_EQUAL(loaded->BufferSize(), legacy->BufferSize());
+    std::remove(kQuantizerFile);
 }
 
 BOOST_AUTO_TEST_CASE(RaBitQAutoTuneProducesNativeBuildHandoff)
