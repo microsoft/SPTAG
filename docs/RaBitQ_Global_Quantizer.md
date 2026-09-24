@@ -42,6 +42,18 @@ The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
 multiple of 64. The current adapter supports the official L2 estimator; cosine
 distance is intentionally unsupported.
 
+## Rotation and model compatibility
+
+New models apply the same random orthogonal rotation to training vectors,
+centroids, encoded vectors, and ADC queries. Reconstruction applies the inverse
+transform, and bit-width clones retain the original rotation.
+
+Global models store the rotation in version 3. Existing version-2 models retain
+their identity transform and serialization; loading them does not silently
+upgrade their codes. To use rotation with an old corpus, train a new model,
+re-encode the base vectors, and build a separate index. Do not replace only the
+model file under an existing index.
+
 ## Optional local residual quantization
 
 The default remains a single global centroid and the upstream fast quantizer.
