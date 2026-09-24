@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <set>
 #include <thread>
 
@@ -172,9 +173,52 @@ BOOST_AUTO_TEST_CASE(ConcurrentLookupUpdateAndErase)
     workers.Start();
     workers.Join();
     BOOST_CHECK_EQUAL(failures.load(), 0);
+    std::vector<SizeType> remaining;
+    BOOST_REQUIRE(map.GetContainedIDs(remaining) == ErrorCode::Success);
+    const std::set<SizeType> present(remaining.begin(), remaining.end());
+    for (SizeType id = 0; id < keys; ++id)
+        BOOST_CHECK_EQUAL(map.Deleted(id), present.count(id) == 0);
     for (SizeType id = 0; id < keys; ++id) map.SetVersion(id, 9);
     BOOST_CHECK_EQUAL(map.Count(), keys);
-    for (SizeType id = 0; id < keys; ++id) BOOST_CHECK_EQUAL(map.GetVersion(id), 9);
+    for (SizeType id = 0; id < keys; ++id) {
+        BOOST_CHECK_EQUAL(map.GetVersion(id), 9);
+        BOOST_CHECK(!map.Deleted(id));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(MembershipDuringGrowthAndVersionUpdates)
+{
+    LocalVersionMap map;
+    constexpr SizeType stable = 700000000;
+    constexpr SizeType missing = stable + 1;
+    constexpr int keys = 32768;
+    map.SetVersion(stable, 0xfe);
+    std::atomic<int> failures{0};
+    Workers workers;
+    workers.Launch([&]() {
+        for (SizeType id = 0; id < keys; ++id) {
+            map.SetVersion(id, 0);
+            map.SetVersion(stable, static_cast<uint8_t>(id));
+            if (id % 2 == 0) map.Delete(id);
+        }
+    });
+    for (int reader = 0; reader < 8; ++reader) {
+        workers.Launch([&]() {
+            for (int i = 0; i < keys; ++i) {
+                if (map.Deleted(stable) || !map.Deleted(missing)) ++failures;
+                map.Deleted(i);
+            }
+        });
+    }
+    workers.Start();
+    workers.Join();
+    BOOST_CHECK_EQUAL(failures.load(), 0);
+    for (SizeType id = 0; id < keys; ++id)
+        BOOST_CHECK_EQUAL(map.Deleted(id), id % 2 == 0);
+    BOOST_CHECK(map.Delete(stable));
+    BOOST_CHECK(map.Deleted(stable));
+    map.SetVersion(stable, 0xfe);
+    BOOST_CHECK(!map.Deleted(stable));
 }
 
 BOOST_AUTO_TEST_CASE(MaintenanceQuiescesReadersAndWriters)
@@ -222,7 +266,10 @@ BOOST_AUTO_TEST_CASE(MaintenanceQuiescesReadersAndWriters)
         BOOST_REQUIRE(restored.GetContainedIDs(ids) == ErrorCode::Success);
         BOOST_CHECK_EQUAL(ids.size(), restored.Count());
         BOOST_CHECK_EQUAL(std::set<SizeType>(ids.begin(), ids.end()).size(), ids.size());
-        for (auto id : ids) BOOST_CHECK_EQUAL(restored.GetVersion(id), id);
+        for (auto id : ids) {
+            BOOST_CHECK_EQUAL(restored.GetVersion(id), id);
+            BOOST_CHECK(!restored.Deleted(id));
+        }
         BOOST_REQUIRE(map.Load(BufferIO(bytes), 1024, 1024) == ErrorCode::Success);
         BOOST_REQUIRE(map.GetContainedIDs(ids) == ErrorCode::Success);
         BOOST_CHECK_EQUAL(std::set<SizeType>(ids.begin(), ids.end()).size(), ids.size());
@@ -234,8 +281,93 @@ BOOST_AUTO_TEST_CASE(MaintenanceQuiescesReadersAndWriters)
     BOOST_CHECK_EQUAL(failures.load(), 0);
     map.DeleteAll();
     BOOST_CHECK_EQUAL(map.Count(), 0);
+    for (SizeType id = 0; id < keys; ++id) BOOST_CHECK(map.Deleted(id));
     map.SetVersion(7, 13);
     BOOST_CHECK_EQUAL(map.GetVersion(7), 13);
+    BOOST_CHECK(!map.Deleted(7));
+}
+
+BOOST_AUTO_TEST_CASE(PresenceAcrossPagesAndSparseKeyRange)
+{
+    LocalVersionMap map;
+    const std::vector<SizeType> ids = {
+        0, 63, 64, 65535, 65536, 65537, 131071, 131072, 700000000,
+#ifdef LARGEVID
+        static_cast<SizeType>((std::numeric_limits<std::uint32_t>::max)()),
+        static_cast<SizeType>((std::numeric_limits<std::uint32_t>::max)()) + 1,
+#endif
+        (std::numeric_limits<SizeType>::max)(),
+        (std::numeric_limits<SizeType>::min)(), -1
+    };
+    for (auto id : ids) {
+        BOOST_CHECK(map.Deleted(id));
+        map.SetVersion(id, 0xfe);
+        BOOST_CHECK(!map.Deleted(id)); // Presence does not depend on the version sentinel.
+    }
+    auto bytes = Snapshot(map, static_cast<SizeType>(ids.size()));
+    LocalVersionMap loaded;
+    BOOST_REQUIRE(loaded.Load(BufferIO(bytes), 1024, 1024) == ErrorCode::Success);
+    for (auto id : ids) {
+        BOOST_CHECK(!loaded.Deleted(id));
+        BOOST_CHECK(loaded.Delete(id));
+        BOOST_CHECK(loaded.Deleted(id));
+        BOOST_CHECK(!loaded.Delete(id));
+    }
+    map.DeleteAll();
+    for (auto id : ids) BOOST_CHECK(map.Deleted(id));
+    BOOST_REQUIRE(map.Load(BufferIO(bytes), 1024, 1024) == ErrorCode::Success);
+    for (auto id : ids) BOOST_CHECK(!map.Deleted(id));
+}
+
+BOOST_AUTO_TEST_CASE(ConcurrentPresencePublicationAndSharedWordUpdates)
+{
+    LocalVersionMap map;
+    std::atomic<int> failures{0};
+    Workers workers;
+    constexpr int threads = 8;
+    constexpr int pages = 32;
+    for (int writer = 0; writer < threads; ++writer) {
+        workers.Launch([&, writer]() {
+            for (int round = 0; round < 200; ++round) {
+                for (int page = 0; page < pages; ++page) {
+                    const SizeType key = static_cast<SizeType>(page * 65536 + writer);
+                    map.SetVersion(key, static_cast<uint8_t>(round));
+                    if (map.Deleted(key)) ++failures;
+                    if (!map.Delete(key) || !map.Deleted(key)) ++failures;
+                    map.SetVersion(key, 0xff);
+                    if (map.Deleted(key)) ++failures;
+                }
+            }
+        });
+    }
+    workers.Start();
+    workers.Join();
+    BOOST_CHECK_EQUAL(failures.load(), 0);
+    BOOST_CHECK_EQUAL(map.Count(), threads * pages);
+    for (int page = 0; page < pages; ++page) {
+        for (int bit = 0; bit < 64; ++bit)
+            BOOST_CHECK_EQUAL(map.Deleted(page * 65536 + bit), bit >= threads);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(PartialLoadKeepsPresenceConsistent)
+{
+    LocalVersionMap map;
+    map.SetVersion(65535, 8);
+    const SizeType rows = 2, id = 65536;
+    std::vector<char> bytes(sizeof(SizeType) * 2 + 1);
+    memcpy(bytes.data(), &rows, sizeof(rows));
+    memcpy(bytes.data() + sizeof(rows), &id, sizeof(id));
+    bytes.back() = 9;
+    BOOST_CHECK(map.Load(BufferIO(bytes), 1024, 1024) == ErrorCode::DiskIOFail);
+    BOOST_CHECK_EQUAL(map.Count(), 2);
+    BOOST_CHECK(!map.Deleted(65535));
+    BOOST_CHECK(!map.Deleted(65536));
+    BOOST_CHECK(map.Deleted(65537));
+    BOOST_CHECK_EQUAL(map.GetVersion(65536), 9);
+    map.DeleteAll();
+    BOOST_CHECK(map.Deleted(65535));
+    BOOST_CHECK(map.Deleted(65536));
 }
 
 BOOST_AUTO_TEST_CASE(FailedSerializationReopensAdmission)
