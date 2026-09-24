@@ -31,9 +31,11 @@ namespace SPTAG
 
             virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
-            float L2DistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const override;
+            virtual float L2DistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const;
+
+            virtual float CosineDistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const;
             
@@ -113,7 +115,7 @@ namespace SPTAG
         float PQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const
             // pX must be query distance table for ADC
         {
-            float out = 0;
+            float out = 0;        
             if (GetEnableADC()) {          
                 float* ptr = (float*)pX;
                 for (int i = 0; i < m_NumSubvectors; i++) {
@@ -139,6 +141,14 @@ namespace SPTAG
 
         template <typename T>
         float PQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const
+            // pX must be query distance table for ADC
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Quantizer does not support CosineDistance!\n");
+            return 0;
+        }
+
+        template <typename T>
+        float PQQuantizer<T>::CosineDistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const
             // pX must be query distance table for ADC
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Quantizer does not support CosineDistance!\n");

@@ -216,6 +216,13 @@ float RaBitQQuantizer::CosineDistance(const std::uint8_t* p_x, const std::uint8_
     return std::numeric_limits<float>::infinity();
 }
 
+float RaBitQQuantizer::CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
+{
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                 "RaBitQ official full-code adapter supports L2 distance only.\n");
+    return std::numeric_limits<float>::infinity();
+}
+
 void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc) const
 {
     thread_local std::vector<float> prepared;

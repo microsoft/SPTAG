@@ -70,7 +70,7 @@ public:
         const auto* y = static_cast<const std::uint8_t*>(pY);
         return GetDistCalcMethod() == DistCalcMethod::L2
             ? m_pQuantizer->L2DistanceSDC(x, y)
-            : m_pQuantizer->CosineDistance(x, y);
+            : m_pQuantizer->CosineDistanceSDC(x, y);
     }
     virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;

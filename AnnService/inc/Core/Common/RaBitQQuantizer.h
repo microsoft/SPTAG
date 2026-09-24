@@ -31,6 +31,7 @@ public:
     float L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float L2DistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
+    float CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     void QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc = true) const override;
     int QuantizeSize() const override;
     void ReconstructVector(const std::uint8_t* p_code, void* p_output) const override;

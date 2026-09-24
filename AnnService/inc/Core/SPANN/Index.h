@@ -14,7 +14,6 @@
 #include "inc/Core/Common/BKTree.h"
 #include "inc/Core/Common/WorkSpacePool.h"
 #include "inc/Core/Common/FineGrainedLock.h"
-#include "inc/Core/Common/VersionLabel.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
 
 #include "inc/Core/Common/LabelSet.h"

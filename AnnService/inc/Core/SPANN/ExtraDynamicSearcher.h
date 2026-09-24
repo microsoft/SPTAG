@@ -761,14 +761,7 @@ namespace SPTAG::SPANN {
                 }
 
                 std::vector<int> ks(2, 0);
-                std::string headVecData(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
-                if (m_headIndex->m_pQuantizer && m_headIndex->m_pQuantizer->GetEnableADC()) {
-                    headVecData.resize(m_headIndex->m_pQuantizer->QuantizeSize());
-                    std::shared_ptr<std::uint8_t> rec_query((uint8_t*)ALIGN_ALLOC(m_headIndex->m_pQuantizer->ReconstructSize()), [=](std::uint8_t* ptr) { ALIGN_FREE(ptr); });
-                    m_headIndex->m_pQuantizer->ReconstructVector((uint8_t*)(headVec->c_str() + m_metaDataSize), rec_query.get());
-                    m_headIndex->m_pQuantizer->QuantizeVector(rec_query.get(), (uint8_t*)headVecData.data());
-                }
-                if (m_headIndex->ComputeDistance(headVecData.c_str(), args.centers) < m_headIndex->ComputeDistance(headVecData.c_str(), args.centers + args._D)) {
+                if (m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers) < m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + args._D)) {
                     ks[0] = 1;
                 } else {
                     ks[1] = 1;
@@ -786,7 +779,7 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
-                    if (!theSameHead && m_headIndex->ComputeDistance(headVecData.c_str(), args.centers + k * args._D) < Epsilon) {
+                    if (!theSameHead && m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + k * args._D) < Epsilon) {
                         newHeadsID[k] = headID;
                         newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
@@ -2000,17 +1993,12 @@ namespace SPTAG::SPANN {
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
 		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%lld\n", (std::int64_t)vectorID);
-                    // Merge eligibility needs a deletion check for every physical record.
-                    if (!isTiKV && !m_opt->m_asyncMergeInSearch && p_exWorkSpace->Deduper().Contains(vectorID)) {
+                    if(p_exWorkSpace->Deduper().CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
                     if (!isTiKV && m_versionMap->Deleted(vectorID)) {
                         realNum--;
-                        listElements--;
-                        continue;
-                    }
-                    if(p_exWorkSpace->Deduper().CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
@@ -2134,13 +2122,11 @@ namespace SPTAG::SPANN {
 
                     if (vectorID < 0 || vectorID >= m_versionMap->Count())
                         return ErrorCode::Key_OverFlow;
-                    if (!isTiKV && p_exWorkSpace->Deduper().Contains(vectorID))
+                    if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
                         continue;
                     if (!isTiKV && m_versionMap->Deleted(vectorID))
                         continue;
-                    if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
-                        continue;
-
+                    
                     auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
                         queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);

@@ -144,23 +144,6 @@ namespace SPTAG
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx + 1) == 0;
             }
 
-            inline bool Contains(SizeType idx) const
-            {
-                ++idx;
-                for (int block = 0; block < 2; ++block)
-                {
-                    const SizeType* table = m_hashTable.get() + block * (m_poolSize + 1);
-                    std::uint64_t index = hash_func((std::uint64_t)idx, m_poolSize);
-                    for (int loop = 0; loop < m_maxLoop; ++loop)
-                    {
-                        if (!table[index]) return false;
-                        if (table[index] == idx) return true;
-                        index = hash_func2(index, m_poolSize, loop);
-                    }
-                }
-                return false;
-            }
-
             inline void DoubleSize()
             {
                 std::uint64_t new_poolSize = ((m_poolSize + 1) << 1) - 1; 
