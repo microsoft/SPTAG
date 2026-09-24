@@ -8,6 +8,8 @@
 #include "inc/Helper/ConcurrentSet.h"
 #include <array>
 #include <atomic>
+#include <cassert>
+#include <limits>
 #include <mutex>
 #include <shared_mutex>
 
@@ -22,6 +24,62 @@ namespace SPTAG
 #if defined(TBB) && !defined(_MSC_VER)
             using VersionMap = Helper::Concurrent::ConcurrentHashMap<SizeType, uint8_t>;
             VersionMap m_label;
+
+            // Low 32-bit IDs use lazy 8 KiB pages; wider/negative sparse IDs use the map.
+            struct PresencePage {
+                static constexpr std::size_t Bits = 65536;
+                std::array<std::atomic<std::uint64_t>, Bits / 64> words;
+
+                PresencePage() {
+                    for (auto& word : words) word.store(0, std::memory_order_relaxed);
+                }
+                std::atomic<std::uint64_t>& Word(SizeType key) {
+                    return words[(static_cast<std::uint32_t>(key) % Bits) / 64];
+                }
+                static std::uint64_t Mask(SizeType key) {
+                    return std::uint64_t{1} << (static_cast<std::uint32_t>(key) % 64);
+                }
+            };
+
+            class PresenceDirectory {
+                static constexpr std::size_t PageCount = 65536;
+                std::unique_ptr<std::atomic<PresencePage*>[]> m_pages;
+
+            public:
+                PresenceDirectory()
+                    : m_pages(new std::atomic<PresencePage*>[PageCount]) {
+                    for (std::size_t i = 0; i < PageCount; ++i)
+                        m_pages[i].store(nullptr, std::memory_order_relaxed);
+                }
+                ~PresenceDirectory() { Clear(); }
+
+                static bool Supports(SizeType key) {
+                    return key >= 0 && static_cast<std::uint64_t>(key) <=
+                        (std::numeric_limits<std::uint32_t>::max)();
+                }
+                PresencePage* Get(SizeType key) const {
+                    return m_pages[static_cast<std::uint32_t>(key) / PresencePage::Bits]
+                        .load(std::memory_order_acquire);
+                }
+                PresencePage* Ensure(SizeType key) {
+                    auto& slot = m_pages[static_cast<std::uint32_t>(key) / PresencePage::Bits];
+                    auto* page = slot.load(std::memory_order_acquire);
+                    if (page != nullptr) return page;
+                    auto created = std::make_unique<PresencePage>();
+                    if (slot.compare_exchange_strong(page, created.get(),
+                            std::memory_order_acq_rel, std::memory_order_acquire))
+                        return created.release();
+                    return page;
+                }
+                // Only destruction or an all-slot maintenance guard may reclaim pages.
+                void Clear() {
+                    for (std::size_t i = 0; i < PageCount; ++i) {
+                        delete m_pages[i].load(std::memory_order_relaxed);
+                        m_pages[i].store(nullptr, std::memory_order_relaxed);
+                    }
+                }
+            };
+            PresenceDirectory m_presence;
 
             // Readers use thread-assigned lanes; only maintenance locks every lane.
             static constexpr std::size_t OperationSlotCount = 64;
@@ -88,6 +146,9 @@ namespace SPTAG
             void DeleteAll() override { 
                 auto lock = LockTable();
                 m_label.clear(); 
+#if defined(TBB) && !defined(_MSC_VER)
+                m_presence.Clear();
+#endif
             }
 
             SizeType Count() override { 
@@ -103,8 +164,12 @@ namespace SPTAG
             bool Deleted(const SizeType& key) override {
                 auto lock = LockOperation();
 #if defined(TBB) && !defined(_MSC_VER)
-                VersionMap::const_accessor entry;
-                return !m_label.find(entry, key);
+                if (PresenceDirectory::Supports(key)) {
+                    auto* page = m_presence.Get(key);
+                    return page == nullptr ||
+                        (page->Word(key).load(std::memory_order_acquire) & PresencePage::Mask(key)) == 0;
+                }
+                return m_label.count(key) == 0;
 #else
                 if (m_label.find(key) != m_label.end()) return false;
                 return true;
@@ -113,7 +178,15 @@ namespace SPTAG
             bool Delete(const SizeType& key) override { 
 #if defined(TBB) && !defined(_MSC_VER)
                 auto lock = LockOperation();
-                return m_label.erase(key);
+                VersionMap::accessor entry;
+                if (!m_label.find(entry, key)) return false;
+                if (PresenceDirectory::Supports(key)) {
+                    auto* page = m_presence.Get(key);
+                    assert(page != nullptr);
+                    page->Word(key).fetch_and(~PresencePage::Mask(key), std::memory_order_release);
+                }
+                // Keep this key exclusively held until both representations are updated.
+                return m_label.erase(entry);
 #else
                 auto lock = LockTable();
                 return m_label.unsafe_erase(key); 
@@ -144,9 +217,12 @@ namespace SPTAG
             void SetVersion(const SizeType& key, const uint8_t& version) override { 
 #if defined(TBB) && !defined(_MSC_VER)
                 auto lock = LockOperation();
+                auto* page = PresenceDirectory::Supports(key) ? m_presence.Ensure(key) : nullptr;
                 VersionMap::accessor entry;
                 m_label.insert(entry, key);
                 entry->second = version;
+                if (page != nullptr)
+                    page->Word(key).fetch_or(PresencePage::Mask(key), std::memory_order_release);
 #else
                 auto lock = LockTable();
                 m_label[key] = version;
@@ -197,9 +273,12 @@ namespace SPTAG
                     IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&key);
                     IOBINARY(ptr, ReadBinary, sizeof(uint8_t), (char*)&value);
 #if defined(TBB) && !defined(_MSC_VER)
+                    auto* page = PresenceDirectory::Supports(key) ? m_presence.Ensure(key) : nullptr;
                     VersionMap::accessor entry;
                     m_label.insert(entry, key);
                     entry->second = value;
+                    if (page != nullptr)
+                        page->Word(key).fetch_or(PresencePage::Mask(key), std::memory_order_release);
 #else
                     m_label[key] = value;
 #endif
