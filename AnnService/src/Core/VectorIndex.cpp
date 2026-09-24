@@ -1211,8 +1211,8 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet> &fullVectors, std::u
                     bool rngAccpeted = true;
                     for (int j = 0; j < currReplicaCount; ++j)
                     {
-                        float nnDist = ComputeDistance(GetSample(queryResults[i].VID),
-                                                       GetSample(selections[selectionOffset + j].node));
+                        float nnDist = ComputeDistanceBetweenStoredVectors(
+                            GetSample(queryResults[i].VID), GetSample(selections[selectionOffset + j].node));
 
                         if (RNGFactor * nnDist < queryResults[i].Dist)
                         {

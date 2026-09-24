@@ -14,7 +14,6 @@
 #include "inc/Core/Common/BKTree.h"
 #include "inc/Core/Common/WorkSpacePool.h"
 #include "inc/Core/Common/FineGrainedLock.h"
-#include "inc/Core/Common/VersionLabel.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
 
 #include "inc/Core/Common/LabelSet.h"
@@ -106,11 +105,13 @@ namespace SPTAG
 
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) const
             {
+                // STATIC reads whole postings; dynamic storage addresses individual pages.
+                const bool blockIO = m_options.m_storage != Storage::STATIC;
                 if (clear) {
-                    p_exWorkSpace->Clear(m_options.m_searchInternalResultNum, (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, true, m_options.m_enableDataCompression);
+                    p_exWorkSpace->Clear(m_options.m_searchInternalResultNum, (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, blockIO, m_options.m_enableDataCompression);
                 }
                 else {
-                    p_exWorkSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, max(m_options.m_searchInternalResultNum, m_options.m_reassignK), (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, true, m_options.m_enableDataCompression);
+                    p_exWorkSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, max(m_options.m_searchInternalResultNum, m_options.m_reassignK), (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, blockIO, m_options.m_enableDataCompression);
                     int wid = 0;
                     if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
                     {

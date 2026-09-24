@@ -240,6 +240,8 @@ namespace SPTAG
             DimensionType colStart = 0;
             DimensionType mycols = 0;
 
+            uint8_t defaultValue = -1;
+
         public:
             Dataset() {}
 
@@ -285,7 +287,7 @@ namespace SPTAG
                         return ErrorCode::MemoryOverFlow;
                     }
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols);
-                    else std::memset(data, -1, ((size_t)rows) * cols);
+                    else std::memset(data, defaultValue, ((size_t)rows) * cols);
                 }
                 maxRows = capacity_;
                 rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
@@ -302,6 +304,8 @@ namespace SPTAG
             bool IsReady() const { return data != nullptr; }
 
             void SetName(const std::string& name_) { name = name_; }
+            void SetDefaultValue(uint8_t value) { defaultValue = value; }
+            
             const std::string& Name() const { return name; }
 
             void SetR(SizeType R_)
@@ -359,7 +363,7 @@ namespace SPTAG
                     if (curBlockIdx >= (SizeType)(incBlocks->size())) {
                         char* newBlock = (char*)ALIGN_ALLOC(((size_t)rowsInBlock + 1) * cols);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
-                        std::memset(newBlock, -1, ((size_t)rowsInBlock + 1) * cols);
+                        std::memset(newBlock, defaultValue, ((size_t)rowsInBlock + 1) * cols);
                         incBlocks->push_back(newBlock);
                     }
                     SizeType curBlockPos = ((incRows + written) & rowsInBlock);

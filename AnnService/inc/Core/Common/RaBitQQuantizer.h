@@ -25,10 +25,13 @@ public:
     RaBitQQuantizer(DimensionType p_dimension, int p_bits, bool p_normalize);
 
     ErrorCode Train(const std::shared_ptr<VectorSet>& p_vectors);
+    ErrorCode SetLocalCentroids(const std::shared_ptr<VectorSet>& p_centroids);
     std::shared_ptr<RaBitQQuantizer> CloneWithBits(int p_bits) const;
 
     float L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
+    float L2DistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
+    float CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     void QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc = true) const override;
     int QuantizeSize() const override;
     void ReconstructVector(const std::uint8_t* p_code, void* p_output) const override;
@@ -48,6 +51,7 @@ public:
 
     DimensionType Dimension() const { return m_dimension; }
     int Bits() const { return m_bits; }
+    std::size_t LocalCentroidCount() const;
     bool Ready() const;
     bool Trained() const { return m_trained; }
 
@@ -63,13 +67,20 @@ private:
     };
 
     static constexpr std::uint32_t kModelMagic = 0x32464252U; // RBF2
-    static constexpr std::uint32_t kModelVersion = 2U;
+    static constexpr std::uint32_t kLegacyModelVersion = 2U;
+    static constexpr std::uint32_t kModelVersion = 3U;
+    static constexpr std::uint32_t kLocalModelVersion = 4U;
+    static constexpr std::uint32_t kMaxLocalCentroids = 65536U;
     static constexpr std::size_t kCodeFactorCount = 5;
     static constexpr std::size_t kQueryFactorCount = 2;
 
     ErrorCode Initialize(DimensionType p_dimension, int p_bits, bool p_normalize);
     ErrorCode LoadHeader(const ModelHeader& p_header);
+    ErrorCode InitializeLocalCentroids(std::uint32_t p_count);
+    std::uint32_t CentroidId(const std::uint8_t* p_code) const;
+    const float* Centroid(std::uint32_t p_id) const;
     void Decode(const std::uint8_t* p_code, std::vector<float>& p_output) const;
+    float ComputeL2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const;
     void PrepareInput(const float* p_input, std::vector<float>& p_output) const;
     void UnpackCode(const std::uint8_t* p_code, std::uint8_t* p_output) const;
     void ReadCodeFactors(const std::uint8_t* p_code,
@@ -92,6 +103,8 @@ private:
     rabitqlib::quant::RabitqConfig m_quantizer_config;
     rabitqlib::ex_ipfunc m_ip_func = nullptr;
     std::vector<float> m_centroid;
+    std::vector<float> m_rotation;
+    std::vector<float> m_localCentroids;
     bool m_trained = false;
 };
 

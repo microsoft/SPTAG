@@ -38,7 +38,7 @@ namespace SPTAG
                     tmpNode = nodes[k];
                     if (tmpNode < -1) break;
 
-                    if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist
+                    if (tmpNode < 0 || (tmpDist = index->ComputeDistanceBetweenStoredVectors(index->GetSample(node), index->GetSample(tmpNode))) > insertDist
                         || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         nodes[k] = insertNode;

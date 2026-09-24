@@ -14,6 +14,7 @@
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/SPANN/Index.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/SSDServing/main.h"
 
@@ -765,6 +766,43 @@ SCSSD(Int16, Cosine, KDT, XVEC, XVEC)
 BOOST_AUTO_TEST_CASE(RUN_FROM_MAP)
 {
     RunFromMap();
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+BOOST_AUTO_TEST_SUITE(SpannWorkspaceTest)
+
+BOOST_AUTO_TEST_CASE(RequestBuffersFollowStorageLayout)
+{
+    SPTAG::SPANN::Index<std::uint8_t> index;
+    SPTAG::SPANN::ExtraWorkSpace workspace;
+    index.SetParameter("SearchInternalResultNum", "32", "BuildSSDIndex");
+    index.SetParameter("PostingPageLimit", "12", "BuildSSDIndex");
+    index.SetParameter("SearchPostingPageLimit", "12", "BuildSSDIndex");
+    index.SetParameter("BufferLength", "3", "BuildSSDIndex");
+
+    auto checkLayout = [&](const char* storage, bool blockIO, int postings, int pages) {
+        index.SetParameter("Storage", storage, "BuildSSDIndex");
+        index.SetParameter("SearchInternalResultNum", std::to_string(postings).c_str(), "BuildSSDIndex");
+        index.InitWorkSpace(&workspace, true);
+        BOOST_CHECK_EQUAL(workspace.m_blockIO, blockIO);
+        const int requestsPerPosting = blockIO ? pages : 1;
+        BOOST_REQUIRE_EQUAL(workspace.m_diskRequests.size(), postings * requestsPerPosting);
+        for (int posting = 0; posting < postings; ++posting) {
+            auto* buffer = reinterpret_cast<char*>(workspace.m_pageBuffers[posting].GetBuffer());
+            for (int page = 0; page < requestsPerPosting; ++page) {
+                auto& request = workspace.m_diskRequests[posting * requestsPerPosting + page];
+                BOOST_CHECK(request.m_buffer == buffer + (page << SPTAG::PageSizeEx));
+            }
+        }
+    };
+
+    checkLayout("STATIC", false, 32, 15);
+    checkLayout("STATIC", false, 32, 15);
+    checkLayout("FILEIO", true, 32, 15);
+    checkLayout("STATIC", false, 32, 15);
+    checkLayout("STATIC", false, 64, 15);
+    checkLayout("FILEIO", true, 64, 15);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

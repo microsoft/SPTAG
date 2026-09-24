@@ -8,7 +8,6 @@
 
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/IVersionMap.h"
-#include "inc/Core/Common/VersionLabel.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/ConcurrentSet.h"

@@ -235,9 +235,6 @@
     <ClInclude Include="inc\Helper\KeyValueIO.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\Common\VersionLabel.h">
-      <Filter>Header Files\Core\Common</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Core\SPANN\ExtraSPDKController.h">
       <Filter>Header Files\Core\SPANN</Filter>
     </ClInclude>
@@ -252,9 +249,6 @@
     </ClInclude>
     <ClInclude Include="inc\Helper\KeyValueIO.h">
       <Filter>Header Files\Helper</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\Common\VersionLabel.h">
-      <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
     <ClInclude Include="inc\Core\SPANN\ExtraSPDKController.h">
       <Filter>Header Files\Core\SPANN</Filter>
