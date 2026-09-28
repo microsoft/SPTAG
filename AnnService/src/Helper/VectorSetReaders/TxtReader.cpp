@@ -5,7 +5,9 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
-#include <omp.h>
+// <omp.h> was included historically but no OpenMP primitives are actually used
+// in this translation unit. Drop it — ClickHouse's contrib build does not
+// configure an OpenMP runtime.
 
 using namespace SPTAG;
 using namespace SPTAG::Helper;

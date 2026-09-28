@@ -37,7 +37,14 @@ namespace SPTAG
 
         class LoggerHolder
         {
-#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 	202002L) || __cplusplus >= 	202002L)
+        // The C++20 path uses `std::atomic<std::shared_ptr<Logger>>`, which the
+        // libc++ shipped with ClickHouse rejects (it requires the value type to
+        // be trivially copyable). The pre-C++20 path with `std::atomic_load` /
+        // `std::atomic_store` works under both standards, so force it
+        // unconditionally — same workaround SPTAG-cmake uses for `_sptag` via
+        // `-std=c++17`, but applied at the header so consumers compiled at
+        // higher standards (e.g. ClickHouse's `dbms` at C++23) are unaffected.
+#if 0
         private:
             std::atomic<std::shared_ptr<Logger>> m_logger;
         public:

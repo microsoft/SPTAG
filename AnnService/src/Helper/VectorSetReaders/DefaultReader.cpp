@@ -4,6 +4,7 @@
 #include "inc/Helper/VectorSetReaders/DefaultReader.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Helper/MemoryMappedFile.h"
 
 using namespace SPTAG;
 using namespace SPTAG::Helper;
@@ -33,6 +34,40 @@ ErrorCode DefaultVectorReader::LoadFile(const std::string &p_filePaths)
 
 std::shared_ptr<VectorSet> DefaultVectorReader::GetVectorSet(SizeType start, SizeType end) const
 {
+    if (m_options->m_useMmap)
+    {
+        auto mmf = std::make_shared<Helper::MemoryMappedFile>();
+        if (mmf->Open(m_vectorOutput) &&
+            mmf->Length() >= (std::uint64_t)(sizeof(SizeType) + sizeof(DimensionType)))
+        {
+            const std::uint8_t *base = mmf->Data();
+            SizeType row = *reinterpret_cast<const SizeType *>(base);
+            DimensionType col = *reinterpret_cast<const DimensionType *>(base + sizeof(SizeType));
+
+            if (start > row)
+                start = row;
+            if (end < 0 || end > row)
+                end = row;
+
+            std::uint64_t perVec = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * col;
+            std::uint64_t dataOffset = sizeof(SizeType) + sizeof(DimensionType) + ((std::uint64_t)start) * perVec;
+            std::uint64_t dataLen = ((std::uint64_t)(end - start)) * perVec;
+
+            if (dataOffset + dataLen <= mmf->Length())
+            {
+                std::uint8_t *dataPtr = const_cast<std::uint8_t *>(base) + dataOffset;
+                // Aliasing shared_ptr: shares ownership with mmf (so the mapping outlives every
+                // copy of the ByteArray / BasicVectorSet) but get() returns the data pointer.
+                std::shared_ptr<std::uint8_t> holder(mmf, dataPtr);
+                ByteArray vectorSet(dataPtr, dataLen, holder);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mmap Vector(%d,%d)\n", end - start, col);
+                return std::make_shared<BasicVectorSet>(vectorSet, m_options->m_inputValueType, col, end - start);
+            }
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "mmap failed for %s, falling back to in-memory read.\n", m_vectorOutput.c_str());
+    }
+
     auto ptr = f_createIO();
     if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in))
     {
