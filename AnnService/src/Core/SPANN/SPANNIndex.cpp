@@ -938,6 +938,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         bkt->m_iSamples = m_options.m_iSamples;
         bkt->m_iTreeNumber = m_options.m_iTreeNumber;
         bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
+        bkt->m_parallelBuild = m_options.m_parallelBKTBuild;
         bkt->m_pQuantizer = m_pQuantizer;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
         SPTAGLIB_LOG(
@@ -1082,6 +1083,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
         m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+        m_index->SetParameter("ParallelBKTBuild", m_options.m_parallelBKTBuild ? "true" : "false");
         m_index->SetQuantizer(m_pQuantizer);
         for (const auto &iter : m_headParameters)
         {

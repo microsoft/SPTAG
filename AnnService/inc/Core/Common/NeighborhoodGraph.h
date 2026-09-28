@@ -64,8 +64,7 @@ namespace SPTAG
 
             virtual float GraphAccuracyEstimation(VectorIndex* index, const SizeType samples, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                DimensionType* correct = new DimensionType[samples];
-
+                std::vector<DimensionType> correct(samples, 0);
                 std::vector<std::thread> mythreads;
                 mythreads.reserve(m_iThreadNum);
                 std::atomic_size_t sent(0);
@@ -85,7 +84,7 @@ namespace SPTAG
                                 {
                                     if ((idmap != nullptr && idmap->find(y) != idmap->end()))
                                         continue;
-                                    float dist = index->ComputeDistance(index->GetSample(x), index->GetSample(y));
+                                    float dist = index->ComputeDistanceBetweenStoredVectors(index->GetSample(x), index->GetSample(y));
                                     query.AddPoint(y, dist);
                                 }
                                 query.SortResult();
@@ -123,9 +122,8 @@ namespace SPTAG
                 mythreads.clear();
 
                 float acc = 0;
-                for (SizeType i = 0; i < samples; i++) acc += float(correct[i]);
+                for (SizeType i = 0; i < samples; i++) acc += (float)(correct[i]);
                 acc = acc / samples / m_iNeighborhoodSize;
-                delete[] correct;
                 return acc;
             }
 
@@ -333,9 +331,32 @@ break;
                 std::vector<std::vector<SizeType>> TptreeDataIndices(m_iTPTNumber, std::vector<SizeType>(m_iGraphSize));
                 std::vector<std::vector<std::pair<SizeType, SizeType>>> TptreeLeafNodes(m_iTPTNumber, std::vector<std::pair<SizeType, SizeType>>());
 
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
-                        (NeighborhoodDists)[i][j] = MaxDist;
+                // Parallel initialization of NeighborhoodDists
+                {
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
+                    {
+                        mythreads.emplace_back([&]() {
+                            size_t i = 0;
+                            while (true)
+                            {
+                                i = sent.fetch_add(1);
+                                if (i < m_iGraphSize)
+                                {
+                                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
+                                        (NeighborhoodDists)[i][j] = MaxDist;
+                                }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                        });
+                    }
+                    for (auto &t : mythreads) t.join();
+                }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
@@ -380,6 +401,80 @@ break;
                 auto t2 = std::chrono::high_resolution_clock::now();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
 
+                /*
+                // Collect all leaf tasks from all trees, then process in one parallel pass
+                struct LeafTask {
+                    int treeIdx;
+                    SizeType startIndex;
+                    SizeType endIndex;
+                };
+                std::vector<LeafTask> allLeafTasks;
+                for (int i = 0; i < m_iTPTNumber; i++) {
+                    for (size_t j = 0; j < TptreeLeafNodes[i].size(); j++) {
+                        allLeafTasks.push_back({i, TptreeLeafNodes[i][j].first, TptreeLeafNodes[i][j].second});
+                    }
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total leaf tasks across %d trees: %zu\n", m_iTPTNumber, allLeafTasks.size());
+
+                {
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(m_iThreadNum);
+                    std::atomic_size_t sent(0);
+                    size_t totalTasks = allLeafTasks.size();
+                    for (int tid = 0; tid < m_iThreadNum; tid++)
+                    {
+                        mythreads.emplace_back([&, tid]() {
+                            size_t j = 0;
+                            while (true)
+                            {
+                                j = sent.fetch_add(1);
+                                if (j < totalTasks)
+                                {
+                                    const auto& task = allLeafTasks[j];
+                                    SizeType start_index = task.startIndex;
+                                    SizeType end_index = task.endIndex;
+                                    int i = task.treeIdx;
+                                    if ((j * 5) % totalTasks == 0)
+                                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Processing leaf tasks %d%%\n",
+                                                     static_cast<int>(j * 1.0 / totalTasks * 100));
+                                    for (SizeType x = start_index; x < end_index; x++)
+                                    {
+                                        for (SizeType y = x + 1; y <= end_index; y++)
+                                        {
+                                            SizeType p1 = TptreeDataIndices[i][x];
+                                            SizeType p2 = TptreeDataIndices[i][y];
+                                            float dist =
+                                                index->ComputeDistanceBetweenStoredVectors(index->GetSample(p1), index->GetSample(p2));
+                                            if (idmap != nullptr)
+                                            {
+                                                p1 = (idmap->find(p1) == idmap->end()) ? p1 : idmap->at(p1);
+                                                p2 = (idmap->find(p2) == idmap->end()) ? p2 : idmap->at(p2);
+                                            }
+                                            COMMON::Utils::AddNeighbor(p2, dist, (m_pNeighborhoodGraph)[p1],
+                                                                       (NeighborhoodDists)[p1], m_iNeighborhoodSize);
+                                            COMMON::Utils::AddNeighbor(p1, dist, (m_pNeighborhoodGraph)[p2],
+                                                                       (NeighborhoodDists)[p2], m_iNeighborhoodSize);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    return;
+                                }
+                            }
+                        });
+                    }
+                    for (auto &t : mythreads)
+                    {
+                        t.join();
+                    }
+                    mythreads.clear();
+                }
+                allLeafTasks.clear();
+                allLeafTasks.shrink_to_fit();
+                TptreeDataIndices.clear();
+                TptreeLeafNodes.clear();
+                */
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {
                     std::vector<std::thread> mythreads;
