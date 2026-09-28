@@ -582,6 +582,11 @@ break;
                 std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, 
                 bool dynamicK = false, IAbortOperation* abort = nullptr)
             {
+                if (m_parallelBuild) {
+                    BuildTreesParallel<T>(data, distMethod, numOfThreads, indices, reverseIndices, dynamicK, abort);
+                    return;
+                }
+                
                 struct  BKTStackItem {
                     SizeType index, first, last;
                     bool debug;

@@ -413,14 +413,14 @@ namespace SPTAG::SPANN {
 
         bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead)
         {
-            float_t splitHeadDist = m_headIndex->ComputeDistance(data, splitHeadVec);
+            float_t splitHeadDist = m_headIndex->ComputeDistanceBetweenStoredVectors(data, splitHeadVec);
 
             if (isInSplitHead) {
                 if (splitHeadDist >= currentHeadDist) return false;
             }
             else {
-                float_t newHeadDist_1 = m_headIndex->ComputeDistance(data, newHeadsVec[0]->data());
-                float_t newHeadDist_2 = m_headIndex->ComputeDistance(data, newHeadsVec[1]->data());
+                float_t newHeadDist_1 = m_headIndex->ComputeDistanceBetweenStoredVectors(data, newHeadsVec[0]->data());
+                float_t newHeadDist_2 = m_headIndex->ComputeDistanceBetweenStoredVectors(data, newHeadsVec[1]->data());
                 if (splitHeadDist <= newHeadDist_1 && splitHeadDist <= newHeadDist_2) return false;
                 if (currentHeadDist <= newHeadDist_1 && currentHeadDist <= newHeadDist_2) return false;
             }
@@ -1197,8 +1197,8 @@ namespace SPTAG::SPANN {
                         uint8_t version = *(vectorId + sizeof(SizeType));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                         if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
-                        float origin_dist = m_headIndex->ComputeDistance(deletedHeadVec->data() + m_metaDataSize, vector);
-                        float current_dist = m_headIndex->ComputeDistance(nextHeadVec->data() + m_metaDataSize, vector);
+                        float origin_dist = m_headIndex->ComputeDistanceBetweenStoredVectors(deletedHeadVec->data() + m_metaDataSize, vector);
+                        float current_dist = m_headIndex->ComputeDistanceBetweenStoredVectors(nextHeadVec->data() + m_metaDataSize, vector);
                         if (current_dist > origin_dist) {
                             m_stat.m_reassignSubmittedFromMerge.fetch_add(1, std::memory_order_relaxed);
                             ReassignAsync(std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), nextHeadID);
@@ -1351,8 +1351,8 @@ namespace SPTAG::SPANN {
 
             std::vector<float> newHeadsDist(2, 0.0f);
             std::set<SizeType> reAssignVectorsTopK;
-            if (newHeadsVec[0]) newHeadsDist[0] = m_headIndex->ComputeDistance(headVector, newHeadsVec[0]->data());
-            if (newHeadsVec[1]) newHeadsDist[1] = m_headIndex->ComputeDistance(headVector, newHeadsVec[1]->data());
+            if (newHeadsVec[0]) newHeadsDist[0] = m_headIndex->ComputeDistanceBetweenStoredVectors(headVector, newHeadsVec[0]->data());
+            if (newHeadsVec[1]) newHeadsDist[1] = m_headIndex->ComputeDistanceBetweenStoredVectors(headVector, newHeadsVec[1]->data());
             for (int i = 0; i < postingLists.size(); i++) {
                 if (!newHeadsVec[i]) continue;
                 auto& postingList = postingLists[i];
@@ -1371,7 +1371,7 @@ namespace SPTAG::SPANN {
                     }
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
-                        float dist = m_headIndex->ComputeDistance(newHeadsVec[i]->data(), vector);
+                        float dist = m_headIndex->ComputeDistanceBetweenStoredVectors(newHeadsVec[i]->data(), vector);
                         if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, true)) {
                             tryBatchReassign(vectorId, newHeadsID[i]);
                             reAssignVectorsTopK.insert(vid);
@@ -1447,7 +1447,7 @@ namespace SPTAG::SPANN {
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                             m_stat.m_reAssignScanNum++;
-                            float dist = m_headIndex->ComputeDistance(HeadPrevTopKVec[i]->data(), vector);
+                            float dist = m_headIndex->ComputeDistanceBetweenStoredVectors(HeadPrevTopKVec[i]->data(), vector);
                             if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, false)) {
                                 tryBatchReassign(vectorId, HeadPrevTopK[i]);
                                 reAssignVectorsTopK.insert(vid);
@@ -1511,7 +1511,7 @@ namespace SPTAG::SPANN {
                 bool rngAccpeted = true;
                 for (int j = 0; j < replicaCount; ++j)
                 {
-                    float nnDist = m_headIndex->ComputeDistance((queryResult->Vec).Data(), selections[j].Vec.Data());
+                    float nnDist = m_headIndex->ComputeDistanceBetweenStoredVectors((queryResult->Vec).Data(), selections[j].Vec.Data());
                     if (m_opt->m_rngFactor * nnDist <= queryResult->Dist)
                     {
                         rngAccpeted = false;
