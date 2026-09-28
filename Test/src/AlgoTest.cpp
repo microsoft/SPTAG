@@ -256,9 +256,151 @@ BOOST_AUTO_TEST_CASE(BKTTest)
     Test<float>(SPTAG::IndexAlgoType::BKT, "L2");
 }
 
+BOOST_AUTO_TEST_CASE(BKTParallelBuildTest)
+{
+    // Test the parallel BKT tree build path (BuildTreesParallel)
+    SPTAG::SizeType n = 2000, q = 3;
+    SPTAG::DimensionType m = 10;
+    int k = 3;
+    std::vector<float> vec;
+    for (SPTAG::SizeType i = 0; i < n; i++)
+        for (SPTAG::DimensionType j = 0; j < m; j++)
+            vec.push_back((float)i);
+
+    std::vector<float> query;
+    for (SPTAG::SizeType i = 0; i < q; i++)
+        for (SPTAG::DimensionType j = 0; j < m; j++)
+            query.push_back((float)(i * 2));
+
+    std::vector<char> meta;
+    std::vector<std::uint64_t> metaoffset;
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        metaoffset.push_back((std::uint64_t)meta.size());
+        std::string a = std::to_string(i);
+        for (size_t j = 0; j < a.length(); j++) meta.push_back(a[j]);
+    }
+    metaoffset.push_back((std::uint64_t)meta.size());
+
+    std::shared_ptr<SPTAG::VectorSet> vecset(new SPTAG::BasicVectorSet(
+        SPTAG::ByteArray((std::uint8_t*)vec.data(), sizeof(float) * n * m, false),
+        SPTAG::GetEnumValueType<float>(), m, n));
+    std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
+        SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
+        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false), n));
+
+    // Build BKT index with ParallelBKTBuild enabled
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::BKT, SPTAG::GetEnumValueType<float>());
+    BOOST_CHECK(nullptr != vecIndex);
+    vecIndex->SetParameter("DistCalcMethod", "L2");
+    vecIndex->SetParameter("NumberOfThreads", "4");
+    vecIndex->SetParameter("ParallelBKTBuild", "true");
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vecset, metaset));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex("testindices_parallel_bkt"));
+
+    // Reload and search — results must match the sequential build
+    std::shared_ptr<SPTAG::VectorIndex> loaded;
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex("testindices_parallel_bkt", loaded));
+    BOOST_CHECK(nullptr != loaded);
+
+    std::string truthmeta[] = {"0", "1", "2", "2", "1", "3", "4", "3", "5"};
+    float* qptr = query.data();
+    for (SPTAG::SizeType i = 0; i < q; i++) {
+        SPTAG::QueryResult res(qptr, k, true);
+        loaded->SearchIndex(res);
+        std::unordered_set<std::string> resmeta;
+        for (int j = 0; j < k; j++)
+            resmeta.insert(std::string((char*)res.GetMetadata(j).Data(), res.GetMetadata(j).Length()));
+        for (int j = 0; j < k; j++)
+            BOOST_CHECK(resmeta.find(truthmeta[i * k + j]) != resmeta.end());
+        qptr += loaded->GetFeatureDim();
+    }
+    loaded.reset();
+}
+
 BOOST_AUTO_TEST_CASE(SPANNTest)
 {
     Test<float>(SPTAG::IndexAlgoType::SPANN, "L2");
+}
+
+BOOST_AUTO_TEST_CASE(SPANNParallelBuildTest)
+{
+    // Test the SPANN path with ParallelBKTBuild enabled in SelectHead
+    SPTAG::SizeType n = 2000, q = 3;
+    SPTAG::DimensionType m = 10;
+    int k = 3;
+    std::vector<float> vec;
+    for (SPTAG::SizeType i = 0; i < n; i++)
+        for (SPTAG::DimensionType j = 0; j < m; j++)
+            vec.push_back((float)i);
+
+    std::vector<float> query;
+    for (SPTAG::SizeType i = 0; i < q; i++)
+        for (SPTAG::DimensionType j = 0; j < m; j++)
+            query.push_back((float)(i * 2));
+
+    std::vector<char> meta;
+    std::vector<std::uint64_t> metaoffset;
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        metaoffset.push_back((std::uint64_t)meta.size());
+        std::string a = std::to_string(i);
+        for (size_t j = 0; j < a.length(); j++) meta.push_back(a[j]);
+    }
+    metaoffset.push_back((std::uint64_t)meta.size());
+
+    std::shared_ptr<SPTAG::VectorSet> vecset(new SPTAG::BasicVectorSet(
+        SPTAG::ByteArray((std::uint8_t*)vec.data(), sizeof(float) * n * m, false),
+        SPTAG::GetEnumValueType<float>(), m, n));
+    std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
+        SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
+        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false), n));
+
+    // Build SPANN index with ParallelBKTBuild enabled
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::SPANN, SPTAG::GetEnumValueType<float>());
+    BOOST_CHECK(nullptr != vecIndex);
+    vecIndex->SetParameter("IndexAlgoType", "BKT", "Base");
+    vecIndex->SetParameter("DistCalcMethod", "L2", "Base");
+
+    vecIndex->SetParameter("isExecute", "true", "SelectHead");
+    vecIndex->SetParameter("NumberOfThreads", "4", "SelectHead");
+    vecIndex->SetParameter("Ratio", "0.2", "SelectHead");
+    vecIndex->SetParameter("ParallelBKTBuild", "true", "SelectHead");
+
+    vecIndex->SetParameter("isExecute", "true", "BuildHead");
+    vecIndex->SetParameter("RefineIterations", "3", "BuildHead");
+    vecIndex->SetParameter("NumberOfThreads", "4", "BuildHead");
+
+    vecIndex->SetParameter("isExecute", "true", "BuildSSDIndex");
+    vecIndex->SetParameter("BuildSsdIndex", "true", "BuildSSDIndex");
+    vecIndex->SetParameter("NumberOfThreads", "4", "BuildSSDIndex");
+    vecIndex->SetParameter("PostingPageLimit", "12", "BuildSSDIndex");
+    vecIndex->SetParameter("SearchPostingPageLimit", "12", "BuildSSDIndex");
+    vecIndex->SetParameter("InternalResultNum", "64", "BuildSSDIndex");
+    vecIndex->SetParameter("SearchInternalResultNum", "64", "BuildSSDIndex");
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vecset, metaset));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex("testindices_parallel_spann"));
+
+    // Reload and search
+    std::shared_ptr<SPTAG::VectorIndex> loaded;
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex("testindices_parallel_spann", loaded));
+    BOOST_CHECK(nullptr != loaded);
+
+    std::string truthmeta[] = {"0", "1", "2", "2", "1", "3", "4", "3", "5"};
+    float* qptr = query.data();
+    for (SPTAG::SizeType i = 0; i < q; i++) {
+        SPTAG::QueryResult res(qptr, k, true);
+        loaded->SearchIndex(res);
+        std::unordered_set<std::string> resmeta;
+        for (int j = 0; j < k; j++)
+            resmeta.insert(std::string((char*)res.GetMetadata(j).Data(), res.GetMetadata(j).Length()));
+        for (int j = 0; j < k; j++)
+            BOOST_CHECK(resmeta.find(truthmeta[i * k + j]) != resmeta.end());
+        qptr += loaded->GetFeatureDim();
+    }
+    loaded.reset();
 }
 
 BOOST_AUTO_TEST_SUITE_END()
