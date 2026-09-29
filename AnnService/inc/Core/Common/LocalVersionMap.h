@@ -217,13 +217,19 @@ namespace SPTAG
                     return false;
                 }
 
+                auto* value = reinterpret_cast<char*>(m_data[key]);
+                uint8_t oldVersion = expectedOld != 0xff ? expectedOld :
+                    static_cast<uint8_t>(InterlockedCompareExchange(value, char(0), char(0)));
                 while (true) {
-                    if (Deleted(key)) return false;
-                    uint8_t oldVersion = GetVersion(key);
-                    *newVersion = (oldVersion+1) & 0x7f;
-                    if (((uint8_t)InterlockedCompareExchange((char*)m_data[key], (char)*newVersion, (char)oldVersion)) == oldVersion) {
+                    if (oldVersion == 0xfe || (expectedOld != 0xff && oldVersion != expectedOld)) return false;
+                    const uint8_t next = (oldVersion + 1) & 0x7f;
+                    const uint8_t observed = static_cast<uint8_t>(
+                        InterlockedCompareExchange(value, static_cast<char>(next), static_cast<char>(oldVersion)));
+                    if (observed == oldVersion) {
+                        *newVersion = next;
                         return true;
                     }
+                    oldVersion = observed;
                 }
             }
 

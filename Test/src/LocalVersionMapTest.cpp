@@ -65,6 +65,104 @@ namespace
 
 BOOST_AUTO_TEST_SUITE(LocalVersionMapTest)
 
+BOOST_AUTO_TEST_CASE(ExpectedVersionRejectsStaleReassignments)
+{
+    LocalVersionMap map;
+    uint8_t next = 99;
+    map.SetVersion(7, 12);
+    BOOST_CHECK(!map.IncVersion(7, &next, 10));
+    BOOST_CHECK_EQUAL(next, 99);
+    BOOST_CHECK_EQUAL(map.GetVersion(7), 12);
+
+    for (uint8_t old : {uint8_t(0), uint8_t(10), uint8_t(127)}) {
+        map.SetVersion(7, old);
+        next = old;
+        BOOST_REQUIRE(map.IncVersion(7, &next, next));
+        BOOST_CHECK_EQUAL(next, (old + 1) & 0x7f);
+        uint8_t staleOutput = 99;
+        BOOST_CHECK(!map.IncVersion(7, &staleOutput, old));
+        BOOST_CHECK_EQUAL(staleOutput, 99);
+        BOOST_CHECK_EQUAL(map.GetVersion(7), next);
+    }
+    BOOST_REQUIRE(map.Delete(7));
+    next = 99;
+    BOOST_CHECK(!map.IncVersion(7, &next, 0));
+    BOOST_CHECK(!map.IncVersion(7, &next));
+    BOOST_CHECK_EQUAL(next, 99);
+    BOOST_CHECK_EQUAL(map.GetVersion(7), 0xfe);
+    BOOST_CHECK(!map.IncVersion(-1, &next, 0));
+    BOOST_CHECK(!map.IncVersion(map.Count(), &next, 0));
+    BOOST_CHECK_EQUAL(next, 99);
+
+    map.SetVersion(7, 0xff);
+    BOOST_REQUIRE(map.IncVersion(7, &next));
+    BOOST_CHECK_EQUAL(next, 0);
+}
+
+BOOST_AUTO_TEST_CASE(ExpectedVersionHasOneConcurrentWinner)
+{
+    LocalVersionMap map;
+    constexpr int threadCount = 8;
+    for (uint8_t old : {uint8_t(0), uint8_t(10), uint8_t(127)}) {
+        map.SetVersion(7, old);
+        std::array<uint8_t, threadCount> outputs;
+        outputs.fill(99);
+        std::array<bool, threadCount> accepted{};
+        Workers workers;
+        for (int i = 0; i < threadCount; ++i) {
+            workers.Launch([&, i]() { accepted[i] = map.IncVersion(7, &outputs[i], old); });
+        }
+        workers.Start();
+        workers.Join();
+        int winners = 0;
+        for (int i = 0; i < threadCount; ++i) {
+            winners += accepted[i];
+            BOOST_CHECK_EQUAL(outputs[i], accepted[i] ? ((old + 1) & 0x7f) : 99);
+        }
+        BOOST_CHECK_EQUAL(winners, 1);
+        BOOST_CHECK_EQUAL(map.GetVersion(7), (old + 1) & 0x7f);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(UnconditionalVersionIncrementsRemainAtomic)
+{
+    LocalVersionMap map;
+    map.SetVersion(7, 0);
+    std::atomic<int> failures{0};
+    Workers workers;
+    for (int i = 0; i < 8; ++i) {
+        workers.Launch([&]() {
+            for (int j = 0; j < 1003; ++j) {
+                uint8_t next = 0xfe;
+                if (!map.IncVersion(7, &next) || next > 127) ++failures;
+            }
+        });
+    }
+    workers.Start();
+    workers.Join();
+    BOOST_CHECK_EQUAL(failures.load(), 0);
+    BOOST_CHECK_EQUAL(map.GetVersion(7), (8 * 1003) & 0x7f);
+}
+
+BOOST_AUTO_TEST_CASE(ConcurrentVersionIncrementDoesNotResurrectDeletedVector)
+{
+    LocalVersionMap map;
+    for (int round = 0; round < 64; ++round) {
+        map.SetVersion(7, 10);
+        Workers workers;
+        workers.Launch([&]() {
+            for (int i = 0; i < 100; ++i) {
+                uint8_t next = 99;
+                map.IncVersion(7, &next);
+            }
+        });
+        workers.Launch([&]() { map.Delete(7); });
+        workers.Start();
+        workers.Join();
+        BOOST_CHECK_EQUAL(map.GetVersion(7), 0xfe);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(SparseKeysVersionsAndLegacySerialization)
 {
     LocalVersionMap map;

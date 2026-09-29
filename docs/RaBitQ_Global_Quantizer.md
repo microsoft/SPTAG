@@ -39,6 +39,13 @@ accepts the current head vector and computes this distance itself, rather than
 accepting a caller-provided scalar that may have the opposite direction.
 This does not change the estimator, centroid, model, or version-update rules.
 
+Local reassign version updates separately enforce `expectedOld` with atomic
+compare-and-swap. An outdated task must not advance a newer version, and a
+failed update must not change the posting's version or append its selected
+replicas. Both batched split reassign and individual reassign check the update
+result. Unconditional increments (`expectedOld=0xff`) and 7-bit wraparound
+remain supported; the existing TiKV idempotent-update behavior is unchanged.
+
 Train the model and encode Float base vectors with `Release/quantizer`:
 
 ```bash
