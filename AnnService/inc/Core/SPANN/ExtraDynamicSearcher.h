@@ -411,8 +411,10 @@ namespace SPTAG::SPANN {
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
 
-        bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead)
+        bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, const void* currentHeadVec, bool isInSplitHead)
         {
+            // RaBitQ SDC is directional; compare every head with data as the first operand.
+            float_t currentHeadDist = m_headIndex->ComputeDistanceBetweenStoredVectors(data, currentHeadVec);
             float_t splitHeadDist = m_headIndex->ComputeDistanceBetweenStoredVectors(data, splitHeadVec);
 
             if (isInSplitHead) {
@@ -1371,8 +1373,7 @@ namespace SPTAG::SPANN {
                     }
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
-                        float dist = m_headIndex->ComputeDistanceBetweenStoredVectors(newHeadsVec[i]->data(), vector);
-                        if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, true)) {
+                        if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], newHeadsVec[i]->data(), true)) {
                             tryBatchReassign(vectorId, newHeadsID[i]);
                             reAssignVectorsTopK.insert(vid);
                         }
@@ -1447,8 +1448,7 @@ namespace SPTAG::SPANN {
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                             m_stat.m_reAssignScanNum++;
-                            float dist = m_headIndex->ComputeDistanceBetweenStoredVectors(HeadPrevTopKVec[i]->data(), vector);
-                            if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, false)) {
+                            if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], HeadPrevTopKVec[i]->data(), false)) {
                                 tryBatchReassign(vectorId, HeadPrevTopK[i]);
                                 reAssignVectorsTopK.insert(vid);
                             }

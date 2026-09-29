@@ -32,6 +32,13 @@ quantizer's mode inside a parallel build. Quantized indexes previously built
 with ADC enabled must have their head graph and postings rebuilt to correct
 these comparisons; the model and encoded base vectors can be reused.
 
+RaBitQ's stored-code estimator is directional, unlike PQ's symmetric codebook
+L2 distance. Split reassign checks must compare the current, old, and new heads
+with the data vector as the first operand throughout. The reassign predicate
+accepts the current head vector and computes this distance itself, rather than
+accepting a caller-provided scalar that may have the opposite direction.
+This does not change the estimator, centroid, model, or version-update rules.
+
 Train the model and encode Float base vectors with `Release/quantizer`:
 
 ```bash
