@@ -4,7 +4,6 @@
 #ifndef _SPTAG_COMMON_RNG_H_
 #define _SPTAG_COMMON_RNG_H_
 
-#include <xmmintrin.h>
 #include "NeighborhoodGraph.h"
 
 namespace SPTAG
@@ -25,7 +24,7 @@ namespace SPTAG
 
                     bool good = true;
                     for (DimensionType k = 0; k < count; k++) {
-                        if (m_fRNGFactor * index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) < item.Dist) {
+                        if (m_fRNGFactor * index->ComputeDistanceBetweenStoredVectors(index->GetSample(nodes[k]), index->GetSample(item.VID)) < item.Dist) {
                             good = false;
                             break;
                         }
@@ -47,7 +46,9 @@ namespace SPTAG
                 _mm_prefetch((const char*)(nodeVec), _MM_HINT_T0);
                 _mm_prefetch((const char*)(insertVec), _MM_HINT_T0);
                 for (DimensionType i = 0; i < m_iNeighborhoodSize; i++) {
-                    _mm_prefetch((const char*)(index->GetSample(nodes[i])), _MM_HINT_T0);
+                    auto futureNode = nodes[i];
+                    if (futureNode < 0) break;
+                    _mm_prefetch((const char*)(index->GetSample(futureNode)), _MM_HINT_T0);
                 }
 
                 SizeType tmpNode;
@@ -63,18 +64,18 @@ namespace SPTAG
                     }
 
                     tmpVec = index->GetSample(tmpNode);
-                    tmpDist = index->ComputeDistance(tmpVec, nodeVec);
+                    tmpDist = index->ComputeDistanceBetweenStoredVectors(tmpVec, nodeVec);
                     if (tmpDist > insertDist || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         nodes[k] = insertNode;
-                        while (++k < checkNeighborhoodSize && index->ComputeDistance(tmpVec, nodeVec) <= index->ComputeDistance(tmpVec, insertVec)) {
+                        while (++k < checkNeighborhoodSize && index->ComputeDistanceBetweenStoredVectors(tmpVec, nodeVec) <= index->ComputeDistanceBetweenStoredVectors(tmpVec, insertVec)) {
                             std::swap(tmpNode, nodes[k]);
                             if (tmpNode < 0) return;
                             tmpVec = index->GetSample(tmpNode);
                         }
                         break;
                     }
-                    else if (index->ComputeDistance(tmpVec, insertVec) < insertDist) {
+                    else if (index->ComputeDistanceBetweenStoredVectors(tmpVec, insertVec) < insertDist) {
                         break;
                     }
                 }

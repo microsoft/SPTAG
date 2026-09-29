@@ -5,6 +5,7 @@
 #define _SPTAG_HELPER_INIREADER_H_
 
 #include "inc/Core/Common.h"
+#include "inc/Helper/DiskIO.h"
 #include "StringConvert.h"
 
 #include <vector>

@@ -9,10 +9,9 @@
 using namespace SPTAG;
 using namespace SPTAG::Helper;
 
-void
-StrUtils::ToLowerInPlace(std::string& p_str)
+void StrUtils::ToLowerInPlace(std::string &p_str)
 {
-    for (char& ch : p_str)
+    for (char &ch : p_str)
     {
         if (std::isupper(ch))
         {
@@ -21,9 +20,7 @@ StrUtils::ToLowerInPlace(std::string& p_str)
     }
 }
 
-
-std::vector<std::string>
-StrUtils::SplitString(const std::string& p_str, const std::string& p_separator)
+std::vector<std::string> StrUtils::SplitString(const std::string &p_str, const std::string &p_separator)
 {
     std::vector<std::string> ret;
 
@@ -47,11 +44,8 @@ StrUtils::SplitString(const std::string& p_str, const std::string& p_separator)
     return ret;
 }
 
-
-std::pair<const char*, const char*>
-StrUtils::FindTrimmedSegment(const char* p_begin,
-                             const char* p_end,
-                             const std::function<bool(char)>& p_isSkippedChar)
+std::pair<const char *, const char *> StrUtils::FindTrimmedSegment(const char *p_begin, const char *p_end,
+                                                                   const std::function<bool(char)> &p_isSkippedChar)
 {
     while (p_begin < p_end)
     {
@@ -76,9 +70,7 @@ StrUtils::FindTrimmedSegment(const char* p_begin,
     return std::make_pair(p_begin, p_end);
 }
 
-
-bool
-StrUtils::StartsWith(const char* p_str, const char* p_prefix)
+bool StrUtils::StartsWith(const char *p_str, const char *p_prefix)
 {
     if (nullptr == p_prefix)
     {
@@ -103,9 +95,7 @@ StrUtils::StartsWith(const char* p_str, const char* p_prefix)
     return '\0' == *p_prefix;
 }
 
-
-bool
-StrUtils::StrEqualIgnoreCase(const char* p_left, const char* p_right)
+bool StrUtils::StrEqualIgnoreCase(const char *p_left, const char *p_right)
 {
     if (p_left == p_right)
     {
@@ -117,8 +107,7 @@ StrUtils::StrEqualIgnoreCase(const char* p_left, const char* p_right)
         return false;
     }
 
-    auto tryConv = [](char p_ch) -> char
-    {
+    auto tryConv = [](char p_ch) -> char {
         if ('a' <= p_ch && p_ch <= 'z')
         {
             return p_ch - 32;
@@ -141,15 +130,15 @@ StrUtils::StrEqualIgnoreCase(const char* p_left, const char* p_right)
     return *p_left == *p_right;
 }
 
-
-std::string
-StrUtils::ReplaceAll(const std::string& orig, const std::string& from, const std::string& to)
+std::string StrUtils::ReplaceAll(const std::string &orig, const std::string &from, const std::string &to)
 {
     std::string ret = orig;
-    if (from.empty()) return ret;
+    if (from.empty())
+        return ret;
 
     size_t pos = 0;
-    while ((pos = ret.find(from, pos)) != std::string::npos) {
+    while ((pos = ret.find(from, pos)) != std::string::npos)
+    {
         ret.replace(pos, from.length(), to);
         pos += to.length();
     }

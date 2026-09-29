@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <Native-Platform>x64</Native-Platform>
+    <_nugetNativeFolder>$(MSBuildThisFileDirectory)..\runtimes\win-$(Native-Platform)\native\</_nugetNativeFolder>
+  </PropertyGroup>
+  <ItemGroup>
+    <SPTAGRedistFiles Include="$(_nugetNativeFolder)*.dll" />
+    <None Include="@(SPTAGRedistFiles)">
+      <Link>%(FileName)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

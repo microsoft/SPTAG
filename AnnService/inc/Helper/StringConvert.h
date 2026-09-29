@@ -95,7 +95,7 @@ inline bool ConvertStringToUnsignedInt(const char* p_str, DataType& p_value)
         return false;
     }
 
-    if (val < (std::numeric_limits<DataType>::min)() || val >(std::numeric_limits<DataType>::max)())
+    if (val >(std::numeric_limits<DataType>::max)())
     {
         return false;
     }
@@ -353,6 +353,68 @@ inline bool ConvertStringTo<QuantizerType>(const char* p_str, QuantizerType& p_v
     return false;
 }
 
+template <>
+inline bool ConvertStringTo<NumaStrategy>(const char* p_str, NumaStrategy& p_value)
+{
+    if (nullptr == p_str)
+    {
+        return false;
+    }
+
+#define DefineNumaStrategy(Name) \
+    else if (StrUtils::StrEqualIgnoreCase(p_str, #Name)) \
+    { \
+        p_value = NumaStrategy::Name; \
+        return true; \
+    } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineNumaStrategy
+
+    return false;
+}
+
+template <>
+inline bool ConvertStringTo<OrderStrategy>(const char* p_str, OrderStrategy& p_value)
+{
+    if (nullptr == p_str)
+    {
+        return false;
+    }
+
+#define DefineOrderStrategy(Name) \
+    else if (StrUtils::StrEqualIgnoreCase(p_str, #Name)) \
+    { \
+        p_value = OrderStrategy::Name; \
+        return true; \
+    } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineOrderStrategy
+
+    return false;
+}
+
+template <>
+inline bool ConvertStringTo<Storage>(const char* p_str, Storage& p_value)
+{
+    if (nullptr == p_str)
+    {
+        return false;
+    }
+
+#define DefineStorage(Name) \
+    else if (StrUtils::StrEqualIgnoreCase(p_str, #Name)) \
+    { \
+        p_value = Storage::Name; \
+        return true; \
+    } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineStorage
+
+    return false;
+}
 // Specialization of ConvertToString<>().
 
 template<>
@@ -476,6 +538,63 @@ inline std::string ConvertToString<TruthFileType>(const TruthFileType& p_value)
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineTruthFileType
+
+    default:
+        break;
+    }
+
+    return "Undefined";
+}
+
+template <>
+inline std::string ConvertToString<NumaStrategy>(const NumaStrategy& p_value)
+{
+    switch (p_value)
+    {
+#define DefineNumaStrategy(Name) \
+    case NumaStrategy::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineNumaStrategy
+
+    default:
+        break;
+    }
+
+    return "Undefined";
+}
+
+template <>
+inline std::string ConvertToString<OrderStrategy>(const OrderStrategy& p_value)
+{
+    switch (p_value)
+    {
+#define DefineOrderStrategy(Name) \
+    case OrderStrategy::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineOrderStrategy
+
+    default:
+        break;
+    }
+
+    return "Undefined";
+}
+
+template <>
+inline std::string ConvertToString<Storage>(const Storage& p_value)
+{
+    switch (p_value)
+    {
+#define DefineStorage(Name) \
+    case Storage::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineStorage
 
     default:
         break;

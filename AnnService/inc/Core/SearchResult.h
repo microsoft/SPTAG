@@ -67,12 +67,14 @@ namespace SPTAG
         SizeType VID;
         float Dist;
         ByteArray Meta;
+        bool RelaxedMono;
 
-        BasicResult() : VID(-1), Dist(MaxDist) {}
+        BasicResult() : VID(-1), Dist(MaxDist), RelaxedMono(false) {}
 
-        BasicResult(SizeType p_vid, float p_dist) : VID(p_vid), Dist(p_dist) {}
+        BasicResult(SizeType p_vid, float p_dist) : VID(p_vid), Dist(p_dist), RelaxedMono(false) {}
 
-        BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta) : VID(p_vid), Dist(p_dist), Meta(p_meta) {}
+        BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta) : VID(p_vid), Dist(p_dist), Meta(p_meta), RelaxedMono(false) {}
+        BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta, bool p_relaxedMono) : VID(p_vid), Dist(p_dist), Meta(p_meta), RelaxedMono(p_relaxedMono) {}
     };
 
 } // namespace SPTAG

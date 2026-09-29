@@ -2,44 +2,36 @@
 // Licensed under the MIT License.
 
 #include "inc/Server/SearchExecutionContext.h"
-#include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/Base64Encode.h"
+#include "inc/Helper/CommonHelper.h"
 
 using namespace SPTAG;
 using namespace SPTAG::Service;
 
-SearchExecutionContext::SearchExecutionContext(const std::shared_ptr<const ServiceSettings>& p_serviceSettings)
-    : c_serviceSettings(p_serviceSettings),
-      m_vectorDimension(0),
-      m_inputValueType(VectorValueType::Undefined),
-      m_extractMetadata(false),
-      m_resultNum(p_serviceSettings->m_defaultMaxResultNumber)
+SearchExecutionContext::SearchExecutionContext(const std::shared_ptr<const ServiceSettings> &p_serviceSettings)
+    : c_serviceSettings(p_serviceSettings), m_vectorDimension(0), m_inputValueType(VectorValueType::Undefined),
+      m_extractMetadata(false), m_resultNum(p_serviceSettings->m_defaultMaxResultNumber)
 {
 }
-
 
 SearchExecutionContext::~SearchExecutionContext()
 {
     m_results.clear();
 }
 
-
-ErrorCode
-SearchExecutionContext::ParseQuery(const std::string& p_query)
+ErrorCode SearchExecutionContext::ParseQuery(const std::string &p_query)
 {
     return m_queryParser.Parse(p_query, c_serviceSettings->m_vectorSeparator.c_str());
 }
 
-
-ErrorCode
-SearchExecutionContext::ExtractOption()
+ErrorCode SearchExecutionContext::ExtractOption()
 {
-    for (const auto& optionPair : m_queryParser.GetOptions())
+    for (const auto &optionPair : m_queryParser.GetOptions())
     {
         if (Helper::StrUtils::StrEqualIgnoreCase(optionPair.first, "indexname"))
         {
-            const char* begin = optionPair.second;
-            const char* end = optionPair.second;
+            const char *begin = optionPair.second;
+            const char *end = optionPair.second;
             while (*end != '\0')
             {
                 while (*end != '\0' && *end != ',')
@@ -76,18 +68,16 @@ SearchExecutionContext::ExtractOption()
     return ErrorCode::Success;
 }
 
-
-ErrorCode
-SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
+ErrorCode SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
 {
     if (!m_queryParser.GetVectorElements().empty())
     {
         switch (p_targetType)
         {
-#define DefineVectorValueType(Name, Type) \
-        case VectorValueType::Name: \
-            return ConvertVectorFromString<Type>(m_queryParser.GetVectorElements(), m_vector, m_vectorDimension); \
-            break; \
+#define DefineVectorValueType(Name, Type)                                                                              \
+    case VectorValueType::Name:                                                                                        \
+        return ConvertVectorFromString<Type>(m_queryParser.GetVectorElements(), m_vector, m_vectorDimension);          \
+        break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
@@ -96,8 +86,7 @@ SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
             break;
         }
     }
-    else if (m_queryParser.GetVectorBase64() != nullptr
-             && m_queryParser.GetVectorBase64Length() != 0)
+    else if (m_queryParser.GetVectorBase64() != nullptr && m_queryParser.GetVectorBase64Length() != 0)
     {
         SizeType estLen = m_queryParser.GetVectorBase64Length();
         auto temp = ByteArray::Alloc(Helper::Base64::CapacityForDecode(estLen));
@@ -121,67 +110,49 @@ SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
     return ErrorCode::Fail;
 }
 
-
-const std::vector<std::string>&
-SearchExecutionContext::GetSelectedIndexNames() const
+const std::vector<std::string> &SearchExecutionContext::GetSelectedIndexNames() const
 {
     return m_indexNames;
 }
 
-
-void
-SearchExecutionContext::AddResults(std::string p_indexName, QueryResult& p_results)
+void SearchExecutionContext::AddResults(std::string p_indexName, QueryResult &p_results)
 {
     m_results.emplace_back();
     m_results.back().m_indexName.swap(p_indexName);
     m_results.back().m_results = p_results;
 }
 
-
-std::vector<SearchResult>&
-SearchExecutionContext::GetResults()
+std::vector<SearchResult> &SearchExecutionContext::GetResults()
 {
     return m_results;
 }
 
-
-const std::vector<SearchResult>&
-SearchExecutionContext::GetResults() const
+const std::vector<SearchResult> &SearchExecutionContext::GetResults() const
 {
     return m_results;
 }
 
-
-const ByteArray&
-SearchExecutionContext::GetVector() const
+const ByteArray &SearchExecutionContext::GetVector() const
 {
     return m_vector;
 }
 
-
-const SizeType
-SearchExecutionContext::GetVectorDimension() const
+const SizeType SearchExecutionContext::GetVectorDimension() const
 {
     return m_vectorDimension;
 }
 
-
-const std::vector<QueryParser::OptionPair>&
-SearchExecutionContext::GetOptions() const
+const std::vector<QueryParser::OptionPair> &SearchExecutionContext::GetOptions() const
 {
     return m_queryParser.GetOptions();
 }
 
-
-const SizeType
-SearchExecutionContext::GetResultNum() const
+const SizeType SearchExecutionContext::GetResultNum() const
 {
     return m_resultNum;
 }
 
-
-const bool
-SearchExecutionContext::GetExtractMetadata() const
+const bool SearchExecutionContext::GetExtractMetadata() const
 {
     return m_extractMetadata;
 }

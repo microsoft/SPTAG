@@ -26,8 +26,6 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\SSDServing\main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
+    <CudaCompile Include="src\SSDServing\main.cpp" />
   </ItemGroup>
 </Project>

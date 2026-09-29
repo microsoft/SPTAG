@@ -14,7 +14,7 @@ std::shared_ptr<NeighborhoodGraph> NeighborhoodGraph::CreateInstance(std::string
     {
         res.reset(new RelativeNeighborhoodGraph);
     }
-    else if (type == "NNG") 
+    else if (type == "NNG")
     {
         res.reset(new KNearestNeighborhoodGraph);
     }

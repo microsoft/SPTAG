@@ -5,7 +5,7 @@
 
 SPTAG::Service::SearchService g_service;
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     if (!g_service.Initialize(argc, argv))
     {
@@ -16,4 +16,3 @@ int main(int argc, char* argv[])
 
     return 0;
 }
-

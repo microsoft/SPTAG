@@ -1,32 +1,31 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Test.h"
 #include "inc/Helper/StringConvert.h"
+#include "inc/Test.h"
 
 namespace
 {
-    namespace Local
+namespace Local
+{
+
+template <typename ValueType> void TestConvertSuccCase(ValueType p_val, const char *p_valStr)
+{
+    using namespace SPTAG::Helper::Convert;
+
+    std::string str = ConvertToString<ValueType>(p_val);
+    if (nullptr != p_valStr)
     {
-
-        template <typename ValueType>
-        void TestConvertSuccCase(ValueType p_val, const char* p_valStr)
-        {
-            using namespace SPTAG::Helper::Convert;
-
-            std::string str = ConvertToString<ValueType>(p_val);
-            if (nullptr != p_valStr)
-            {
-                BOOST_CHECK(str == p_valStr);
-            }
-
-            ValueType val;
-            BOOST_CHECK(ConvertStringTo<ValueType>(str.c_str(), val));
-            BOOST_CHECK(val == p_val);
-        }
-
+        BOOST_CHECK(str == p_valStr);
     }
+
+    ValueType val;
+    BOOST_CHECK(ConvertStringTo<ValueType>(str.c_str(), val));
+    BOOST_CHECK(val == p_val);
 }
+
+} // namespace Local
+} // namespace
 
 BOOST_AUTO_TEST_SUITE(StringConvertTest)
 

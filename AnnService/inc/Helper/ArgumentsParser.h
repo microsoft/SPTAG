@@ -118,7 +118,7 @@ protected:
             std::size_t padding = 40;
             if (!m_representStringShort.empty())
             {
-                LOG(Helper::LogLevel::LL_Empty, "%s", m_representStringShort.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "%s", m_representStringShort.c_str());
                 padding -= m_representStringShort.size();
             }
 
@@ -126,26 +126,26 @@ protected:
             {
                 if (!m_representStringShort.empty())
                 {
-                    LOG(Helper::LogLevel::LL_Empty, ", ");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, ", ");
                     padding -= 2;
                 }
 
-                LOG(Helper::LogLevel::LL_Empty, "%s", m_representString.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "%s", m_representString.c_str());
                 padding -= m_representString.size();
             }
 
             if (m_followedValue)
             {
-                LOG(Helper::LogLevel::LL_Empty, " <value>");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, " <value>");
                 padding -= 8;
             }
 
             while (padding-- > 0)
             {
-                LOG(Helper::LogLevel::LL_Empty, " ");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, " ");
             }
 
-            LOG(Helper::LogLevel::LL_Empty, "%s", m_description.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "%s", m_description.c_str());
         }
 
 

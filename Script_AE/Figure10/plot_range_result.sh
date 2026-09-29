@@ -1,0 +1,2 @@
+python process_para_range.py log_top
+gnuplot parameter_study_range.p 

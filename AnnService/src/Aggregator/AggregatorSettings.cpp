@@ -6,9 +6,6 @@
 using namespace SPTAG;
 using namespace SPTAG::Aggregator;
 
-AggregatorSettings::AggregatorSettings()
-    : m_searchTimeout(100),
-      m_threadNum(8),
-      m_socketThreadNum(8)
+AggregatorSettings::AggregatorSettings() : m_searchTimeout(100), m_threadNum(8), m_socketThreadNum(8)
 {
 }

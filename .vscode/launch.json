@@ -1,0 +1,219 @@
+{
+  "version": "2.0.0",
+  "configurations": [
+    {
+      "name": "(gdb) Launch SPFresh Test",
+      "type": "cppdbg",
+      "request": "launch",
+      "preLaunchTask": "Build Debug",
+      "stopAtEntry": false,
+      "program": "${workspaceFolder}/Debug/SPTAGTest",
+      "args": [ "--run_test=SPFreshTest/CacheTest" ],
+      "cwd": "${workspaceFolder}/Debug",
+      "environment": [
+        {
+          "name": "UDF_RUNTIME_DIR",
+          "value": "${workspaceFolder}"
+        },
+        {
+          "name": "STARROCKS_HOME",
+          "value": "${workspaceFolder}"
+        },
+        {
+          "name": "PYTHON_INSTALL_DIR",
+          "value": "${workspaceFolder}/thirdparty/installed/python"
+        },
+        {
+          "name": "LD_LIBRARY_PATH",
+          "value": "/usr/lib/jvm/java-1.11.0-openjdk-amd64/lib/server:${workspaceFolder}/Debug"
+        },
+        {
+          "name": "LD_PRELOAD",
+          "value": "/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so"
+        },
+        {
+          "name": "PCI_ALLOWED",
+          "value": "1462:00:00.0"
+        },
+        {
+          "name": "SPFRESH_SPDK_USE_SSD_IMPL",
+          "value": "1"
+        },
+        {
+          "name": "SPFRESH_SPDK_CONF",
+          "value": "./bdev.json"
+        },
+        {
+          "name": "SPFRESH_SPDK_BDEV",
+          "value": "Nvme0n1"
+        },
+        {
+          "name": "BENCHMARK_CONFIG",
+          "value": "benchmark.ini"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "additionalSOLibSearchPath": "${workspaceFolder}/Debug",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Skip standard library files",
+          "text": "-gdb-set skip-solib-deps on",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "(gdb) Launch All Tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "stopAtEntry": false,
+      "program": "${workspaceFolder}/Debug/SPTAGTest",
+      "args": [ "--run_test=SPFreshTest" ],
+      "cwd": "${workspaceFolder}/Debug",
+      "environment": [
+        {
+          "name": "UDF_RUNTIME_DIR",
+          "value": "${workspaceFolder}"
+        },
+        {
+          "name": "STARROCKS_HOME",
+          "value": "${workspaceFolder}"
+        },
+        {
+          "name": "PYTHON_INSTALL_DIR",
+          "value": "${workspaceFolder}/thirdparty/installed/python"
+        },
+        {
+          "name": "LD_LIBRARY_PATH",
+          "value": "/usr/lib/jvm/java-1.11.0-openjdk-amd64/lib/server:${workspaceFolder}/Debug"
+        },
+        {
+          "name": "LD_PRELOAD",
+          "value": "/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so"
+        },
+        {
+          "name": "PCI_ALLOWED",
+          "value": "1462:00:00.0"
+        },
+        {
+          "name": "SPFRESH_SPDK_USE_SSD_IMPL",
+          "value": "1"
+        },
+        {
+          "name": "SPFRESH_SPDK_CONF",
+          "value": "./bdev.json"
+        },
+        {
+          "name": "SPFRESH_SPDK_BDEV",
+          "value": "Nvme0n1"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "additionalSOLibSearchPath": "${workspaceFolder}/Debug",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Skip standard library files",
+          "text": "-gdb-set skip-solib-deps on",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "(gdb) Launch SPFresh Benchmark",
+      "type": "cppdbg",
+      "request": "launch",
+      "preLaunchTask": "Build Debug",
+      "stopAtEntry": false,
+      "program": "${workspaceFolder}/Debug/SPTAGTest",
+      "args": [ "--run_test=SPFreshTest/BenchmarkFromConfig" ],
+      "cwd": "${workspaceFolder}/Debug",
+      "environment": [
+        {
+          "name": "UDF_RUNTIME_DIR",
+          "value": "${workspaceFolder}"
+        },
+        {
+          "name": "STARROCKS_HOME",
+          "value": "${workspaceFolder}"
+        },
+        {
+          "name": "PYTHON_INSTALL_DIR",
+          "value": "${workspaceFolder}/thirdparty/installed/python"
+        },
+        {
+          "name": "LD_LIBRARY_PATH",
+          "value": "/usr/lib/jvm/java-1.11.0-openjdk-amd64/lib/server:${workspaceFolder}/Debug"
+        },
+        {
+          "name": "LD_PRELOAD",
+          "value": "/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so"
+        },
+        {
+          "name": "PCI_ALLOWED",
+          "value": "1462:00:00.0"
+        },
+        {
+          "name": "SPFRESH_SPDK_USE_SSD_IMPL",
+          "value": "1"
+        },
+        {
+          "name": "SPFRESH_SPDK_CONF",
+          "value": "./bdev.json"
+        },
+        {
+          "name": "SPFRESH_SPDK_BDEV",
+          "value": "Nvme0n1"
+        },
+        {
+          "name": "BENCHMARK_CONFIG",
+          "value": "benchmark.ini"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "additionalSOLibSearchPath": "${workspaceFolder}/Debug",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Skip standard library files",
+          "text": "-gdb-set skip-solib-deps on",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}

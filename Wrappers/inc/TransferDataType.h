@@ -6,6 +6,7 @@
 
 #include "inc/Core/CommonDataStructure.h"
 #include "inc/Core/SearchQuery.h"
+#include "inc/Core/ResultIterator.h"
 #include "inc/Socket/RemoteSearchQuery.h"
 
 typedef SPTAG::ByteArray ByteArray;

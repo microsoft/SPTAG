@@ -23,14 +23,14 @@ namespace SPTAG
                 {
                     truth[i].clear();
                     if (ptr->ReadString(lineBufferSize, currentLine, '\n') == 0) {
-                        LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
                         exit(1);
                     }
                     char* tmp = strtok(currentLine.get(), " ");
                     for (int j = 0; j < K; ++j)
                     {
                         if (tmp == nullptr) {
-                            LOG(Helper::LogLevel::LL_Error, "Truth number(%d, %d) and query number(%d) are not match!\n", i, j, p_iTruthNumber);
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number(%d, %d) and query number(%d) are not match!\n", i, j, p_iTruthNumber);
                             exit(1);
                         }
                         int vid = std::atoi(tmp);
@@ -47,12 +47,12 @@ namespace SPTAG
                 std::vector<int> vec(K);
                 for (int i = 0; i < p_iTruthNumber; i++) {
                     if (ptr->ReadBinary(4, (char*)&originalK) != 4 || originalK < K) {
-                        LOG(Helper::LogLevel::LL_Error, "Error: Xvec file has No.%d vector whose dims are fewer than expected. Expected: %d, Fact: %d\n", i, K, originalK);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Xvec file has No.%d vector whose dims are fewer than expected. Expected: %d, Fact: %d\n", i, K, originalK);
                         exit(1);
                     }
                     if (originalK > K) vec.resize(originalK);
                     if (ptr->ReadBinary(originalK * 4, (char*)vec.data()) != originalK * 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
                         exit(1);
                     }
                     truth[i].insert(vec.begin(), vec.begin() + K);
@@ -63,7 +63,7 @@ namespace SPTAG
                 if (ptr->TellP() == 0) {
                     int row;
                     if (ptr->ReadBinary(4, (char*)&row) != 4 || ptr->ReadBinary(4, (char*)&originalK) != 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
                         exit(1);
                     }
                 }
@@ -73,7 +73,7 @@ namespace SPTAG
                 for (int i = 0; i < p_iTruthNumber; i++)
                 {
                     if (ptr->ReadBinary(4 * originalK, (char*)vec.data()) != 4 * originalK) {
-                        LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
                         exit(1);
                     }
                     truth[i].insert(vec.begin(), vec.begin() + K);
@@ -95,7 +95,7 @@ namespace SPTAG
                 }
                 else
                 {
-                    LOG(Helper::LogLevel::LL_Error, "TruthFileType Unsupported.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TruthFileType Unsupported.\n");
                     exit(1);
                 }
             }
@@ -103,7 +103,7 @@ namespace SPTAG
             static void writeTruthFile(const std::string truthFile, SizeType queryNumber, const int K, std::vector<std::vector<SPTAG::SizeType>>& truthset, std::vector<std::vector<float>>& distset, SPTAG::TruthFileType TFT) {
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(truthFile.c_str(), std::ios::out | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", truthFile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", truthFile.c_str());
                     exit(1);
                 }
 
@@ -114,12 +114,12 @@ namespace SPTAG
                         for (int k = 0; k < K; k++)
                         {
                             if (ptr->WriteString((std::to_string(truthset[i][k]) + " ").c_str()) == 0) {
-                                LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
                                 exit(1);
                             }
                         }
                         if (ptr->WriteString("\n") == 0) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
                             exit(1);
                         }
                     }
@@ -129,7 +129,7 @@ namespace SPTAG
                     for (SizeType i = 0; i < queryNumber; i++)
                     {
                         if (ptr->WriteBinary(sizeof(K), (char*)&K) != sizeof(K) || ptr->WriteBinary(K * 4, (char*)(truthset[i].data())) != K * 4) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
                             exit(1);
                         }
                     }
@@ -141,83 +141,27 @@ namespace SPTAG
                     for (SizeType i = 0; i < queryNumber; i++)
                     {
                         if (ptr->WriteBinary(K * 4, (char*)(truthset[i].data())) != K * 4) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
                             exit(1);
                         }
                     }
                     for (SizeType i = 0; i < queryNumber; i++)
                     {
                         if (ptr->WriteBinary(K * 4, (char*)(distset[i].data())) != K * 4) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
                             exit(1);
                         }
                     }
                 }
                 else {
-                    LOG(Helper::LogLevel::LL_Error, "Found unsupported file type for generating truth.");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Found unsupported file type for generating truth.");
                     exit(-1);
                 }
             }
 
             template<typename T>
             static void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
-                const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer) {
-                if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
-                {
-                    LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
-                    exit(1);
-                }
-
-                LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
-                std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
-                std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
-                auto fComputeDistance = quantizer ? quantizer->DistanceCalcSelector<T>(distMethod) : COMMON::DistanceCalcSelector<T>(distMethod);
-#pragma omp parallel for
-                for (int i = 0; i < querySet->Count(); ++i)
-                {
-                    SPTAG::COMMON::QueryResultSet<T> query((const T*)(querySet->GetVector(i)), K);
-                    query.SetTarget((const T*)(querySet->GetVector(i)), quantizer);
-                    for (SPTAG::SizeType j = 0; j < vectorSet->Count(); j++)
-                    {
-                        float dist = fComputeDistance(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension());
-                        query.AddPoint(j, dist);
-                    }
-                    query.SortResult();
-
-                    for (int k = 0; k < K; k++)
-                    {
-                        truthset[i][k] = (query.GetResult(k))->VID;
-                        distset[i][k] = (query.GetResult(k))->Dist;
-                    }
-
-                }
-                LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
-                writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
-
-                auto ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize((truthFile + ".dist.bin").c_str(), std::ios::out | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
-                    exit(1);
-                }
-
-                int int32_queryNumber = (int)querySet->Count();
-                ptr->WriteBinary(4, (char*)&int32_queryNumber);
-                ptr->WriteBinary(4, (char*)&K);
-
-                for (size_t i = 0; i < int32_queryNumber; i++)
-                {
-                    for (int k = 0; k < K; k++) {
-                        if (ptr->WriteBinary(4, (char*)(&(truthset[i][k]))) != 4) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
-                            exit(1);
-                        }
-                        if (ptr->WriteBinary(4, (char*)(&(distset[i][k]))) != 4) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
-                            exit(1);
-                        }
-                    }
-                }
-            }
+                const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer);
 
             template <typename T>
             static float CalculateRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, SizeType NumQuerys, std::ofstream* log = nullptr, bool debug = false, float* MRR = nullptr)
@@ -277,11 +221,11 @@ namespace SPTAG
                         std::sort(truthvec.begin(), truthvec.end());
                         for (int j = 0; j < truthvec.size(); j++)
                             ll += std::to_string(truthvec[j].node) + "@" + std::to_string(truthvec[j].distance) + ",";
-                        LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
                         ll = "ann:";
                         for (int j = 0; j < K; j++)
                             ll += std::to_string(results[i].GetResult(j)->VID) + "@" + std::to_string(results[i].GetResult(j)->Dist) + ",";
-                        LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
                     }
                 }
                 meanrecall /= NumQuerys;
@@ -342,5 +286,6 @@ namespace SPTAG
         };
     }
 }
+
 
 #endif // _SPTAG_COMMON_TRUTHSET_H_

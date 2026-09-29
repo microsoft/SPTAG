@@ -1,0 +1,5 @@
+{
+    "BKTKmeansK": {"_type": "choice", "_value": [4,8,16,32]},
+    "CEF": {"_type": "choice", "_value": [1000, 1100, 1200, 1400, 1800,2000]}
+}
+

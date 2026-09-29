@@ -9,9 +9,10 @@
 using namespace SPTAG;
 using namespace SPTAG::Helper;
 
-
-ReaderOptions::ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, VectorFileType p_fileType, std::string p_vectorDelimiter, std::uint32_t p_threadNum, bool p_normalized)
-    :  m_inputValueType(p_valueType), m_dimension(p_dimension), m_inputFileType(p_fileType), m_vectorDelimiter(p_vectorDelimiter), m_threadNum(p_threadNum), m_normalized(p_normalized)
+ReaderOptions::ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, VectorFileType p_fileType,
+                             std::string p_vectorDelimiter, std::uint32_t p_threadNum, bool p_normalized)
+    : m_inputValueType(p_valueType), m_dimension(p_dimension), m_inputFileType(p_fileType),
+      m_vectorDelimiter(p_vectorDelimiter), m_threadNum(p_threadNum), m_normalized(p_normalized)
 {
     AddOptionalOption(m_threadNum, "-t", "--thread", "Thread Number.");
     AddOptionalOption(m_vectorDelimiter, "-dl", "--delimiter", "Vector delimiter.");
@@ -21,36 +22,31 @@ ReaderOptions::ReaderOptions(VectorValueType p_valueType, DimensionType p_dimens
     AddRequiredOption(m_inputFileType, "-f", "--filetype", "Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.");
 }
 
-
 ReaderOptions::~ReaderOptions()
 {
 }
 
-
-VectorSetReader::VectorSetReader(std::shared_ptr<ReaderOptions> p_options)
-    : m_options(p_options)
+VectorSetReader::VectorSetReader(std::shared_ptr<ReaderOptions> p_options) : m_options(p_options)
 {
 }
 
-
-VectorSetReader:: ~VectorSetReader()
+VectorSetReader::~VectorSetReader()
 {
 }
 
-
-std::shared_ptr<VectorSetReader>
-VectorSetReader::CreateInstance(std::shared_ptr<ReaderOptions> p_options)
+std::shared_ptr<VectorSetReader> VectorSetReader::CreateInstance(std::shared_ptr<ReaderOptions> p_options)
 {
-    if (p_options->m_inputFileType == VectorFileType::DEFAULT) {
+    if (p_options->m_inputFileType == VectorFileType::DEFAULT)
+    {
         return std::make_shared<DefaultVectorReader>(p_options);
     }
-    else if (p_options->m_inputFileType == VectorFileType::TXT) {
+    else if (p_options->m_inputFileType == VectorFileType::TXT)
+    {
         return std::make_shared<TxtVectorReader>(p_options);
     }
-    else if (p_options->m_inputFileType == VectorFileType::XVEC) {
+    else if (p_options->m_inputFileType == VectorFileType::XVEC)
+    {
         return std::make_shared<XvecVectorReader>(p_options);
     }
     return nullptr;
 }
-
-

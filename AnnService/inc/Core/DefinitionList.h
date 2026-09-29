@@ -82,6 +82,12 @@ DefineErrorCode(ReadIni_DuplicatedParam, 0x3003)
 DefineErrorCode(Socket_FailedResolveEndPoint, 0x4000)
 DefineErrorCode(Socket_FailedConnectToEndPoint, 0x4001)
 
+// 0x5000 ~ -0x5FFF Block File Status
+DefineErrorCode(Key_OverFlow, 0x5000) 
+DefineErrorCode(Key_NotFound, 0x5001) 
+DefineErrorCode(Posting_OverFlow, 0x5002) 
+DefineErrorCode(Posting_SizeError, 0x5003)
+DefineErrorCode(Block_IDError, 0x5004)
 
 #endif // DefineErrorCode
 
@@ -126,3 +132,26 @@ DefineTruthFileType(XVEC)
 DefineTruthFileType(DEFAULT)
 
 #endif // DefineTruthFileType
+
+#ifdef DefineNumaStrategy
+
+DefineNumaStrategy(LOCAL)
+DefineNumaStrategy(SCATTER)
+
+#endif // DefineNumaStrategy
+
+#ifdef DefineOrderStrategy
+
+DefineOrderStrategy(ASC)
+DefineOrderStrategy(DESC)
+
+#endif // DefineOrderStrategy
+
+#ifdef DefineStorage
+
+DefineStorage(STATIC)
+DefineStorage(FILEIO)
+DefineStorage(SPDKIO)
+DefineStorage(ROCKSDBIO)
+
+#endif // DefineStorage

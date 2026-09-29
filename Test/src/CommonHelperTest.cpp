@@ -1,18 +1,16 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Test.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Test.h"
 
 #include <memory>
 
 BOOST_AUTO_TEST_SUITE(CommonHelperTest)
 
-
 BOOST_AUTO_TEST_CASE(ToLowerInPlaceTest)
 {
-    auto runTestCase = [](std::string p_input, const std::string& p_expected)
-    {
+    auto runTestCase = [](std::string p_input, const std::string &p_expected) {
         SPTAG::Helper::StrUtils::ToLowerInPlace(p_input);
         BOOST_CHECK(p_input == p_expected);
     };
@@ -24,12 +22,11 @@ BOOST_AUTO_TEST_CASE(ToLowerInPlaceTest)
     runTestCase("123!-=aBc", "123!-=abc");
 }
 
-
 BOOST_AUTO_TEST_CASE(SplitStringTest)
 {
     std::string input("seg1 seg2 seg3  seg4");
 
-    const auto& segs = SPTAG::Helper::StrUtils::SplitString(input, " ");
+    const auto &segs = SPTAG::Helper::StrUtils::SplitString(input, " ");
     BOOST_CHECK(segs.size() == 4);
     BOOST_CHECK(segs[0] == "seg1");
     BOOST_CHECK(segs[1] == "seg2");
@@ -37,23 +34,17 @@ BOOST_AUTO_TEST_CASE(SplitStringTest)
     BOOST_CHECK(segs[3] == "seg4");
 }
 
-
 BOOST_AUTO_TEST_CASE(FindTrimmedSegmentTest)
 {
     using namespace SPTAG::Helper::StrUtils;
     std::string input("\t Space   End    \r\n\t");
 
-    const auto& pos = FindTrimmedSegment(input.c_str(),
-        input.c_str() + input.size(),
-        [](char p_val)->bool
-    {
-        return std::isspace(p_val) > 0;
-    });
+    const auto &pos = FindTrimmedSegment(input.c_str(), input.c_str() + input.size(),
+                                         [](char p_val) -> bool { return std::isspace(p_val) > 0; });
 
     BOOST_CHECK(pos.first == input.c_str() + 2);
     BOOST_CHECK(pos.second == input.c_str() + 13);
 }
-
 
 BOOST_AUTO_TEST_CASE(StartsWithTest)
 {
@@ -72,7 +63,6 @@ BOOST_AUTO_TEST_CASE(StartsWithTest)
     BOOST_CHECK(!StartsWith("Abcd", "Abcde"));
 }
 
-
 BOOST_AUTO_TEST_CASE(StrEqualIgnoreCaseTest)
 {
     using namespace SPTAG::Helper::StrUtils;
@@ -87,7 +77,5 @@ BOOST_AUTO_TEST_CASE(StrEqualIgnoreCaseTest)
     BOOST_CHECK(!StrEqualIgnoreCase("Abcd", " abcd"));
     BOOST_CHECK(!StrEqualIgnoreCase("000", "OOO"));
 }
-
-
 
 BOOST_AUTO_TEST_SUITE_END()

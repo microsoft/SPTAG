@@ -4,6 +4,7 @@
 #ifndef _SPTAG_HELPER_THREADPOOL_H_
 #define _SPTAG_HELPER_THREADPOOL_H_
 
+#include <atomic>
 #include <queue>
 #include <vector>
 #include <thread>
@@ -34,6 +35,8 @@ namespace SPTAG
             public:
                 virtual ~Job() {}
                 virtual void exec(IAbortOperation* p_abort) = 0;
+
+                virtual void exec(void* p_workspace, IAbortOperation* p_abort) = 0;
             };
 
             ThreadPool() {}
@@ -55,16 +58,18 @@ namespace SPTAG
                         Job *j;
                         while (get(j))
                         {
-                            try 
+                            try
                             {
                                 j->exec(&m_abort);
                             }
-                            catch (std::exception& e) {
-                                LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
+                            catch (std::exception &e)
+                            {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n",
+                                             typeid(*j).name(), e.what());
                             }
-                            
                             delete j;
-                        }
+                            currentJobs--;
+                        }   
                     });
                 }
             }
@@ -84,9 +89,11 @@ namespace SPTAG
                 while (m_jobs.empty() && !m_abort.ShouldAbort()) m_cond.wait(lock);
                 if (!m_abort.ShouldAbort()) {
                     j = m_jobs.front();
+                    currentJobs++;
                     m_jobs.pop();
+                    return true;
                 }
-                return !m_abort.ShouldAbort();
+                return false;
             }
 
             size_t jobsize()
@@ -95,7 +102,17 @@ namespace SPTAG
                 return m_jobs.size();
             }
 
+            inline uint32_t runningJobs() { return currentJobs; }
+
+            inline bool allClear() {
+                size_t totaljobs = jobsize();
+                if (totaljobs % 10000 == 0)
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "jobsize: %zu\n", totaljobs);
+                return currentJobs == 0 && totaljobs == 0; 
+            }
+
         protected:
+            std::atomic_uint32_t currentJobs{ 0 };
             std::queue<Job*> m_jobs;
             Abort m_abort;
             std::mutex m_lock;
