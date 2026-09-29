@@ -941,8 +941,10 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
         }
         else
         {
-            while (m_deletedID.Contains(newR - 1) && newR > i)
+            while (m_deletedID.Contains(newR - 1) && newR > i) {
+                (*p_mapping)[newR - 1] = -1;
                 newR--;
+            }
             if (newR == i)
                 break;
             indices.push_back(newR - 1);
@@ -950,7 +952,6 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
             newR--;
         }
     }
-
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
     if (newR == 0)
         return ErrorCode::EmptyIndex;

@@ -282,7 +282,7 @@ namespace SPTAG::SPANN {
                 // RNG Check.
                 bool rngAccpeted = true;
                 for (int j = 0; j < replicaCount; ++j) {
-                    float nnDist = p_index->ComputeDistance(
+                    float nnDist = p_index->ComputeDistanceBetweenStoredVectors(
                         p_index->GetSample(queryResults[i].VID),
                         p_index->GetSample(selections[j].node));
                     if (nnDist < queryResults[i].Dist) {
@@ -316,28 +316,13 @@ namespace SPTAG::SPANN {
                 uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                 SizeType vid = *(reinterpret_cast<int*>(vectorId));
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
-                float_t dist = p_index->ComputeDistance(reinterpret_cast<ValueType*>(vectorId + m_metaDataSize), p_index->GetSample(headID));
+                float_t dist = p_index->ComputeDistanceBetweenStoredVectors(reinterpret_cast<ValueType*>(vectorId + m_metaDataSize), p_index->GetSample(headID));
                 // if (dist < Epsilon) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "head found: vid: %d, head: %d\n", vid, headID);
                 avgDist += dist;
                 distanceSet.push_back(dist);
                 if (m_versionMap->Deleted(vid) || m_versionMap->GetVersion(vid) != version) continue;
                 
                 if (brokenID.find(vid) == brokenID.end() && IsAssumptionBroken(p_index, headID, reinterpret_cast<ValueType*>(vectorId + m_metaDataSize), vid)) {
-                    /*
-                    float_t headDist = p_index->ComputeDistance(headCandidates.GetTarget(), p_index->GetSample(SplitHead));
-                    float_t newHeadDist_1 = p_index->ComputeDistance(headCandidates.GetTarget(), p_index->GetSample(newHeads[0]));
-                    float_t newHeadDist_2 = p_index->ComputeDistance(headCandidates.GetTarget(), p_index->GetSample(newHeads[1]));
-
-                    float_t splitDist = p_index->ComputeDistance(p_index->GetSample(SplitHead), p_index->GetSample(headID));
-
-                    float_t headToNewHeadDist_1 = p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeads[0]));
-                    float_t headToNewHeadDist_2 = p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeads[1]));
-
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "broken vid to head distance: %f, to split head distance: %f\n", dist, headDist);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "broken vid to new head 1 distance: %f, to new head 2 distance: %f\n", newHeadDist_1, newHeadDist_2);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "head to spilit head distance: %f\n", splitDist);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "head to new head 1 distance: %f, to new head 2 distance: %f\n", headToNewHeadDist_1, headToNewHeadDist_2);
-                    */
                     assumptionBrokenNum++;
                     brokenID.insert(vid);
                 }
@@ -349,10 +334,10 @@ namespace SPTAG::SPANN {
                 maxDist = distanceSet.back();
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "distance: min: %f, max: %f, avg: %f, 50th: %f\n", minDist, maxDist, avgDist/postVectorNum, distanceSet[distanceSet.size() * 0.5]);
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "assumption broken num: %d\n", assumptionBrokenNum);
-                float_t splitDist = p_index->ComputeDistance(p_index->GetSample(SplitHead), p_index->GetSample(headID));
+                float_t splitDist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(SplitHead), p_index->GetSample(headID));
 
-                float_t headToNewHeadDist_1 = p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeads[0]));
-                float_t headToNewHeadDist_2 = p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeads[1]));
+                float_t headToNewHeadDist_1 = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(headID), p_index->GetSample(newHeads[0]));
+                float_t headToNewHeadDist_2 = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(headID), p_index->GetSample(newHeads[1]));
 
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "head to spilt head distance: %f/%d/%.2f\n", splitDist, topK, ratio);
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "head to new head 1 distance: %f, to new head 2 distance: %f\n", headToNewHeadDist_1, headToNewHeadDist_2);
@@ -425,14 +410,14 @@ namespace SPTAG::SPANN {
         bool CheckIsNeedReassign(VectorIndex* p_index, std::vector<SizeType>& newHeads, ValueType* data, SizeType splitHead, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead, SizeType currentHead)
         {
 
-            float_t splitHeadDist = p_index->ComputeDistance(data, p_index->GetSample(splitHead));
+            float_t splitHeadDist = p_index->ComputeDistanceBetweenStoredVectors(data, p_index->GetSample(splitHead));
 
             if (isInSplitHead) {
                 if (splitHeadDist >= currentHeadDist) return false;
             }
             else {
-                float_t newHeadDist_1 = p_index->ComputeDistance(data, p_index->GetSample(newHeads[0]));
-                float_t newHeadDist_2 = p_index->ComputeDistance(data, p_index->GetSample(newHeads[1]));
+                float_t newHeadDist_1 = p_index->ComputeDistanceBetweenStoredVectors(data, p_index->GetSample(newHeads[0]));
+                float_t newHeadDist_2 = p_index->ComputeDistanceBetweenStoredVectors(data, p_index->GetSample(newHeads[1]));
                 if (splitHeadDist <= newHeadDist_1 && splitHeadDist <= newHeadDist_2) return false;
                 if (currentHeadDist <= newHeadDist_1 && currentHeadDist <= newHeadDist_2) return false;
             }
@@ -812,7 +797,7 @@ namespace SPTAG::SPANN {
                     float totaldist = 0.0f;
                     for (int j = 0; j < cut; j++, ptr += m_vectorInfoSize)
                     {
-                        totaldist += p_index->ComputeDistance(ptr + sizeof(int) + 1, args.centers);
+                        totaldist += p_index->ComputeDistanceBetweenStoredVectors(ptr + m_metaDataSize, args.centers);
                         memcpy(ptr, postingList.c_str() + localIndices[j] * m_vectorInfoSize, m_vectorInfoSize);
                         //Serialize(ptr, localIndicesInsert[j], localIndicesInsertVersion[j], smallSample[j]);
                     }
@@ -850,7 +835,7 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         //Serialize(ptr, localIndicesInsert[localIndices[first + j]], localIndicesInsertVersion[localIndices[first + j]], smallSample[localIndices[first + j]]);
                     }
-                    if (!theSameHead && p_index->ComputeDistance(args.centers + k * args._D, p_index->GetSample(headID)) < Epsilon) {
+                    if (!theSameHead && p_index->ComputeDistanceBetweenStoredVectors(args.centers + k * args._D, p_index->GetSample(headID)) < Epsilon) {
                         newHeadsID.push_back(headID);
                         newHeadVID = headID;
                         theSameHead = true;
@@ -1157,8 +1142,8 @@ namespace SPTAG::SPANN {
                                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                                     // SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                                    float origin_dist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID), vector);
-                                    float current_dist = p_index->ComputeDistance(p_index->GetSample(headID), vector);
+                                    float origin_dist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(queryResult->VID), vector);
+                                    float current_dist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(headID), vector);
                                     if (current_dist > origin_dist)
                                         ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), headID);
                                 }
@@ -1171,8 +1156,8 @@ namespace SPTAG::SPANN {
                                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                                     // SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                                    float origin_dist = p_index->ComputeDistance(p_index->GetSample(headID), vector);
-                                    float current_dist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID), vector);
+                                    float origin_dist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(headID), vector);
+                                    float current_dist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(queryResult->VID), vector);
                                     if (current_dist > origin_dist)
                                         ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), queryResult->VID);
                                 }
@@ -1290,8 +1275,8 @@ namespace SPTAG::SPANN {
             }
             std::vector<float> newHeadsDist;
             std::set<SizeType> reAssignVectorsTopK;
-            newHeadsDist.push_back(p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeadsID[0])));
-            newHeadsDist.push_back(p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeadsID[1])));
+            newHeadsDist.push_back(p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(headID), p_index->GetSample(newHeadsID[0])));
+            newHeadsDist.push_back(p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(headID), p_index->GetSample(newHeadsID[1])));
             for (int i = 0; i < postingLists.size(); i++) {
                 auto& postingList = postingLists[i];
                 size_t postVectorNum = postingList.size() / m_vectorInfoSize;
@@ -1304,7 +1289,7 @@ namespace SPTAG::SPANN {
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
-                        float dist = p_index->ComputeDistance(p_index->GetSample(newHeadsID[i]), vector);
+                        float dist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(newHeadsID[i]), vector);
                         if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, true, newHeadsID[i])) {
                             ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), newHeadsID[i]);
                             reAssignVectorsTopK.insert(vid);
@@ -1362,7 +1347,7 @@ namespace SPTAG::SPANN {
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                             m_stat.m_reAssignScanNum++;
-                            float dist = p_index->ComputeDistance(p_index->GetSample(HeadPrevTopK[i]), vector);
+                            float dist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(HeadPrevTopK[i]), vector);
                             if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, false, HeadPrevTopK[i])) {
                                 ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), HeadPrevTopK[i]);
                                 reAssignVectorsTopK.insert(vid);
@@ -1396,7 +1381,7 @@ namespace SPTAG::SPANN {
                 bool rngAccpeted = true;
                 for (int j = 0; j < replicaCount; ++j)
                 {
-                    float nnDist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID),
+                    float nnDist = p_index->ComputeDistanceBetweenStoredVectors(p_index->GetSample(queryResult->VID),
                         p_index->GetSample(selections[j].node));
                     if (m_opt->m_rngFactor * nnDist <= queryResult->Dist)
                     {
@@ -2102,7 +2087,7 @@ namespace SPTAG::SPANN {
             if (upperBound > 0) fullCount = upperBound;
 
             // m_metaDataSize = sizeof(int) + sizeof(uint8_t) + sizeof(float);
-            m_metaDataSize = sizeof(int) + sizeof(uint8_t);
+            m_metaDataSize = sizeof(SizeType) + sizeof(uint8_t);
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build SSD Index.\n");
 
@@ -2294,8 +2279,9 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                 }
             }
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting cut original:%lld relax:%lld\n", originalSize.load(),
-                         relaxSize.load());
+            size_t zeroReplicaCount = zeroReplicaSet.size();
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting cut original:%lld relax:%lld zeroReplicaCount:%zu\n", originalSize.load(),
+                         relaxSize.load(), zeroReplicaCount);
 
     //         if (m_opt->m_outputEmptyReplicaID)
     //         {
@@ -2352,13 +2338,128 @@ namespace SPTAG::SPANN {
 
             if (ErrorCode::Success != WriteDownAllPostingToDB(selections, fullVectors)) return false;
 
-            if (m_opt->m_update && !m_opt->m_allowZeroReplica && zeroReplicaSet.size() > 0)
+            if (m_opt->m_update && !m_opt->m_allowZeroReplica && zeroReplicaCount > 0)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
                 m_splitThreadPool = std::make_shared<SPDKThreadPool>();
                 m_splitThreadPool->initSPDK(m_opt->m_appendThreadNum, this);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization, zeroReplicaCount:%d\n", (int)(zeroReplicaSet.size()));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization, zeroReplicaCount:%zu\n", zeroReplicaCount);
 
+                
+                int zeroReplicaWorkerNum = (std::max)(1, (std::min)(static_cast<int>(zeroReplicaCount), m_opt->m_appendThreadNum));
+                size_t zeroReplicaBatchSize = 4096;
+                size_t zeroReplicaQueueLimit = (std::max)(static_cast<size_t>(4), static_cast<size_t>(zeroReplicaWorkerNum) * 2);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                             "SPFresh: zero-replica refill workers:%d batchSize:%zu queueLimit:%zu\n",
+                             zeroReplicaWorkerNum, zeroReplicaBatchSize, zeroReplicaQueueLimit);
+
+                std::mutex zeroReplicaQueueLock;
+                std::condition_variable zeroReplicaQueueCv;
+                std::deque<std::vector<SizeType>> zeroReplicaQueue;
+                bool zeroReplicaQueueDone = false;
+                std::atomic<bool> zeroReplicaFailed(false);
+                std::atomic<SizeType> zeroReplicaProcessed(0);
+                ErrorCode zeroReplicaRet = ErrorCode::Success;
+
+                auto zeroReplicaFail = [&](ErrorCode code, SizeType vid) {
+                    bool expected = false;
+                    if (zeroReplicaFailed.compare_exchange_strong(expected, true)) {
+                        zeroReplicaRet = code;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Fail to add index for zero replica ID: %lld, err=%d\n",
+                                     static_cast<std::int64_t>(vid), static_cast<int>(code));
+                    }
+                    zeroReplicaQueueCv.notify_all();
+                };
+
+                auto enqueueZeroReplicaBatch = [&](std::vector<SizeType>& batch) {
+                    std::unique_lock<std::mutex> lock(zeroReplicaQueueLock);
+                    zeroReplicaQueueCv.wait(lock, [&]() {
+                        return zeroReplicaFailed.load() || zeroReplicaQueue.size() < zeroReplicaQueueLimit;
+                    });
+                    if (zeroReplicaFailed.load()) return;
+                    zeroReplicaQueue.emplace_back(std::move(batch));
+                    lock.unlock();
+                    zeroReplicaQueueCv.notify_one();
+                };
+
+                std::vector<std::thread> zeroReplicaWorkers;
+                zeroReplicaWorkers.reserve(zeroReplicaWorkerNum);
+                for (int workerId = 0; workerId < zeroReplicaWorkerNum; ++workerId)
+                {
+                    zeroReplicaWorkers.emplace_back([&, workerId]() {
+                        ExtraWorkSpace workSpace;
+                        InitWorkSpace(&workSpace);
+                        while (true)
+                        {
+                            std::vector<SizeType> batch;
+                            {
+                                std::unique_lock<std::mutex> lock(zeroReplicaQueueLock);
+                                zeroReplicaQueueCv.wait(lock, [&]() {
+                                    return zeroReplicaFailed.load() || !zeroReplicaQueue.empty() || zeroReplicaQueueDone;
+                                });
+
+                                if (zeroReplicaFailed.load()) return;
+                                if (zeroReplicaQueue.empty()) {
+                                    if (zeroReplicaQueueDone) return;
+                                    continue;
+                                }
+
+                                batch = std::move(zeroReplicaQueue.front());
+                                zeroReplicaQueue.pop_front();
+                            }
+                            zeroReplicaQueueCv.notify_one();
+
+                            for (SizeType it : batch)
+                            {
+                                std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)fullVectors->GetVector(it), m_vectorInfoSize - m_metaDataSize, false),
+                                    GetEnumValueType<ValueType>(), m_opt->m_dim, 1));
+                                ErrorCode addRet = AddIndex(&workSpace, vectorSet, p_headIndex, it);
+                                if (addRet != ErrorCode::Success) {
+                                    zeroReplicaFail(addRet, it);
+                                    return;
+                                }
+
+                                SizeType processed = zeroReplicaProcessed.fetch_add(1) + 1;
+                                if (processed % 1000000 == 0) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                                 "SPFresh: zero-replica refill progress %lld/%zu\n",
+                                                 static_cast<std::int64_t>(processed), zeroReplicaCount);
+                                }
+                            }
+                        }
+                    });
+                }
+
+                std::vector<SizeType> zeroReplicaBatch;
+                zeroReplicaBatch.reserve(zeroReplicaBatchSize);
+                for (SizeType it : zeroReplicaSet)
+                {
+                    if (zeroReplicaFailed.load()) break;
+                    zeroReplicaBatch.push_back(it);
+                    if (zeroReplicaBatch.size() >= zeroReplicaBatchSize) {
+                        enqueueZeroReplicaBatch(zeroReplicaBatch);
+                        zeroReplicaBatch.clear();
+                    }
+                }
+                if (!zeroReplicaFailed.load() && !zeroReplicaBatch.empty()) {
+                    enqueueZeroReplicaBatch(zeroReplicaBatch);
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(zeroReplicaQueueLock);
+                    zeroReplicaQueueDone = true;
+                }
+                zeroReplicaQueueCv.notify_all();
+
+                for (auto& worker : zeroReplicaWorkers) {
+                    worker.join();
+                }
+                if (zeroReplicaFailed.load()) {
+                    return false;
+                }
+                
+                /*
                 ExtraWorkSpace workSpace;
                 InitWorkSpace(&workSpace);
                 for (SizeType it : zeroReplicaSet)
@@ -2370,19 +2471,36 @@ namespace SPTAG::SPANN {
                         return false;
                     }
                 }
+                */
                 while (!AllFinished())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
 
-                if (p_headIndex->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder) != ErrorCode::Success) {
+                std::vector<SizeType> headOldtoNew;
+                if (p_headIndex->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder, &headOldtoNew) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to save head index!\n");
                     return false;
                 }
-
-                if (m_vectorTranslateMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile) != ErrorCode::Success) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to save vector ID translate map!\n");
-                    return false;
+                if (!headOldtoNew.empty()) {
+                    COMMON::Dataset<SizeType> new_topLocalToGlobalID(p_headIndex->GetNumSamples() - p_headIndex->GetNumDeleted(), 1,
+                                                                     p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
+                    for (int i = 0; i < m_vectorTranslateMap->R(); i++)
+                    {
+                        if (p_headIndex->ContainSample(i))
+                        {
+                            *(new_topLocalToGlobalID[headOldtoNew[i]]) = *(m_vectorTranslateMap->At(i));
+                        }
+                    }
+                    if (new_topLocalToGlobalID.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile) != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to save vector ID translate map!\n");
+                        return false;
+                    }
+                } else {
+                    if (m_vectorTranslateMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile) != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to save vector ID translate map!\n");
+                        return false;
+                    }
                 }
             }
 

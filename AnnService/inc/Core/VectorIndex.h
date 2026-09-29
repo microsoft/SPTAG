@@ -64,6 +64,14 @@ public:
 
     virtual float AccurateDistance(const void* pX, const void* pY) const = 0;
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
+    float ComputeDistanceBetweenStoredVectors(const void* pX, const void* pY) const {
+        if (!m_pQuantizer) return ComputeDistance(pX, pY);
+        const auto* x = static_cast<const std::uint8_t*>(pX);
+        const auto* y = static_cast<const std::uint8_t*>(pY);
+        return GetDistCalcMethod() == DistCalcMethod::L2
+            ? m_pQuantizer->L2DistanceSDC(x, y)
+            : m_pQuantizer->CosineDistanceSDC(x, y);
+    }
     virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
@@ -86,11 +94,11 @@ public:
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
-    virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
+    virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs,  std::vector<SizeType>* p_mapping = nullptr);
 
-    virtual ErrorCode SaveIndex(const std::string& p_folderPath);
+    virtual ErrorCode SaveIndex(const std::string& p_folderPath,  std::vector<SizeType>* p_mapping = nullptr);
 
-    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
+    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr,  std::vector<SizeType>* p_mapping = nullptr);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false, bool p_shareOwnership = false);
     
