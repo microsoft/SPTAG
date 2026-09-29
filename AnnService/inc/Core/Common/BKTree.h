@@ -711,7 +711,7 @@ break;
                 std::mt19937 rg;
                 m_pSampleCenterMap.clear();
 
-                for (char treeIdx = 0; treeIdx < m_iTreeNumber; treeIdx++)
+                for (int treeIdx = 0; treeIdx < m_iTreeNumber; treeIdx++)
                 {
                     std::shuffle(localindices.begin(), localindices.end(), rg);
 
