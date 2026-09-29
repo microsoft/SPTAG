@@ -63,7 +63,7 @@ DefineSelectHeadParameter(m_headVectorCount, SizeType, 0, "Count")
 DefineSelectHeadParameter(m_recursiveCheckSmallCluster, bool, true, "RecursiveCheckSmallCluster")
 DefineSelectHeadParameter(m_printSizeCount, bool, true, "PrintSizeCount")
 DefineSelectHeadParameter(m_selectType, std::string, "BKT", "SelectHeadType")
-DefineSelectHeadParameter(m_parallelBKTBuild, bool, false, "ParallelBKTBuild")
+DefineSelectHeadParameter(m_parallelBKTBuild, bool, true, "ParallelBKTBuild")
 #endif
 
 #ifdef DefineBuildHeadParameter

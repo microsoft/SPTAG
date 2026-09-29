@@ -239,6 +239,25 @@ MaxDistRatio=8.0
 SearchPostingPageLimit=12
 ```
 
+### **Local SPFresh version tracking**
+
+Non-TiKV dynamic storage uses `LocalVersionMap` with the same serialized ID and
+version format as before. In non-MSVC builds with TBB enabled, version reads,
+updates, and erases use concurrent-hash-map accessors. Membership checks use a
+segmented atomic bitmap for nonnegative 32-bit IDs; negative and wider IDs use
+the concurrent map. Lazy 8 KiB pages each cover 65,536 IDs, with a 512 KiB
+directory on 64-bit platforms.
+
+The bitmap tracks presence, not version values. Same-key accessors synchronize
+map and bitmap updates; striped operation gates protect whole-table maintenance
+and page reclamation. This is not a globally lock-free map. Other builds retain
+the locked fallback. Existing version-map files need no conversion: loading
+reconstructs the bitmap.
+
+Dynamic search skips already accepted duplicate candidates before local
+membership checks without inserting unseen IDs into the deduper. The existing
+TiKV visibility path and merge accounting remain unchanged.
+
 ### **Global RaBitQ Quantizer**
 
 RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the

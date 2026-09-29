@@ -288,7 +288,7 @@ float TestDataGenerator<T>::EvaluateRecall(const std::vector<SPTAG::QueryResult>
     SizeType distbase = truth->Count() - (totalbatches + 1) * res.size();
     for (SizeType i = 0; i < res.size(); ++i)
     {
-        const SizeType *truthNN = reinterpret_cast<const SizeType *>(truth->GetData()) + batch * res.size() + i;
+        const SizeType *truthNN = reinterpret_cast<const SizeType *>(truth->GetData()) + (batch * res.size() + i) * truth->Dimension();
         float *truthD = nullptr;
         if (truth->Count() > distbase)
         {

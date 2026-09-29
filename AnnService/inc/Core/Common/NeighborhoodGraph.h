@@ -84,7 +84,7 @@ namespace SPTAG
                                 {
                                     if ((idmap != nullptr && idmap->find(y) != idmap->end()))
                                         continue;
-                                    float dist = index->ComputeDistance(index->GetSample(x), index->GetSample(y));
+                                    float dist = index->ComputeDistanceBetweenStoredVectors(index->GetSample(x), index->GetSample(y));
                                     query.AddPoint(y, dist);
                                 }
                                 query.SortResult();
@@ -397,7 +397,7 @@ break;
                                             SizeType p1 = TptreeDataIndices[x];
                                             SizeType p2 = TptreeDataIndices[y];
                                             float dist =
-                                                index->ComputeDistance(index->GetSample(p1), index->GetSample(p2));
+                                                index->ComputeDistanceBetweenStoredVectors(index->GetSample(p1), index->GetSample(p2));
                                             if (idmap != nullptr)
                                             {
                                                 p1 = (idmap->find(p1) == idmap->end()) ? p1 : idmap->at(p1);
@@ -549,7 +549,7 @@ break;
                                             SizeType p1 = TptreeDataIndices[i][x];
                                             SizeType p2 = TptreeDataIndices[i][y];
                                             float dist =
-                                                index->ComputeDistance(index->GetSample(p1), index->GetSample(p2));
+                                                index->ComputeDistanceBetweenStoredVectors(index->GetSample(p1), index->GetSample(p2));
                                             if (idmap != nullptr)
                                             {
                                                 p1 = (idmap->find(p1) == idmap->end()) ? p1 : idmap->at(p1);
