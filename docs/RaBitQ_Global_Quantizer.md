@@ -11,6 +11,18 @@ The SDC compatibility path reconstructs its query code with the official
 `reconstruct_vec` API before invoking the same official asymmetric estimator.
 Online search with `EnableADC=true` does not reconstruct base vectors.
 
+Use `SetQuantizerADC(true)` on the SPANN index to enable ADC at runtime and
+persist `EnableADC=true` for save/load and cloning. Calling
+`GetQuantizer()->SetEnableADC(true)` directly changes only the live quantizer,
+not the index configuration. Keep this setting fixed when measuring incremental
+recall: with ADC disabled, raw queries are quantized before distance estimation.
+Previously, the SPANN setter also changed only the live mode, so an ADC initial
+measurement could silently become SDC after the benchmark reloaded or cloned
+the index. Attaching a quantizer now also applies the configured mode, including
+when model loading follows configuration loading. For existing indexes, set
+the intended mode explicitly and save it;
+the quantizer model and stored codes do not need conversion.
+
 Graph construction/refinement and posting replica selection compare **two stored
 codes**, not a query buffer and a code. They use
 `VectorIndex::ComputeDistanceBetweenStoredVectors` and the quantizer's explicit

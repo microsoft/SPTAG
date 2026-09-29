@@ -412,6 +412,68 @@ BOOST_AUTO_TEST_CASE(SpannAppliesConfiguredADCWhenAttachingQuantizer)
     index->SetQuantizer(quantizer);
     index->SetParameter("EnableADC", "true", "BuildSSDIndex");
     BOOST_CHECK(quantizer->GetEnableADC());
+
+    quantizer->SetEnableADC(false);
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(quantizer->GetEnableADC());
+
+    index->SetParameter("EnableADC", "false", "BuildSSDIndex");
+    quantizer->SetEnableADC(true);
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(!quantizer->GetEnableADC());
+
+    index->SetQuantizer(nullptr);
+    index->SetQuantizerADC(true);
+    BOOST_CHECK_EQUAL(index->GetParameter("EnableADC", "BuildSSDIndex"), "true");
+    quantizer->SetEnableADC(false);
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(quantizer->GetEnableADC());
+}
+
+BOOST_AUTO_TEST_CASE(SpannADCSetterSurvivesSaveLoadAndClone)
+{
+    const std::string directory = "rabitq_spann_adc_roundtrip_test";
+    const std::string cloneDirectory = "rabitq_spann_adc_roundtrip_clone";
+    const auto raw = MakeRawVectors();
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+        kDimension, kRaBitQBits, false);
+    BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
+    const auto codes = QuantizeVectors(raw, quantizer);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
+    BOOST_REQUIRE(index != nullptr);
+    index->SetQuantizer(quantizer);
+    index->SetQuantizerFileName("quantizer.bin");
+    ConfigureSpannIndex(index, directory, nullptr, "STATIC", false);
+    BOOST_REQUIRE(index->BuildIndex(codes, nullptr, false, true) == ErrorCode::Success);
+
+    for (bool enableADC : {true, false}) {
+        index->SetQuantizerADC(enableADC);
+        BOOST_CHECK_EQUAL(index->GetParameter("EnableADC", "BuildSSDIndex"),
+                          enableADC ? "true" : "false");
+        QueryResult before(raw->GetVector(37), 8, false);
+        BOOST_REQUIRE(index->SearchIndex(before) == ErrorCode::Success);
+        BOOST_REQUIRE(index->SaveIndex(directory) == ErrorCode::Success);
+
+        std::shared_ptr<VectorIndex> loaded;
+        BOOST_REQUIRE(VectorIndex::LoadIndex(directory, loaded) == ErrorCode::Success);
+        auto clone = loaded->Clone(cloneDirectory);
+        BOOST_REQUIRE(clone != nullptr);
+        for (const auto& restored : {loaded, clone}) {
+            BOOST_REQUIRE(restored->GetQuantizer() != nullptr);
+            BOOST_CHECK_EQUAL(restored->GetQuantizer()->GetEnableADC(), enableADC);
+            BOOST_CHECK_EQUAL(restored->GetParameter("EnableADC", "BuildSSDIndex"),
+                              enableADC ? "true" : "false");
+            QueryResult after(raw->GetVector(37), 8, false);
+            BOOST_REQUIRE(restored->SearchIndex(after) == ErrorCode::Success);
+            for (int rank = 0; rank < 8; ++rank) {
+                BOOST_CHECK_EQUAL(before.GetResult(rank)->VID, after.GetResult(rank)->VID);
+                BOOST_CHECK_CLOSE(before.GetResult(rank)->Dist, after.GetResult(rank)->Dist, 0.001F);
+            }
+        }
+    }
+    index.reset();
+    std::filesystem::remove_all(directory);
+    std::filesystem::remove_all(cloneDirectory);
 }
 
 BOOST_AUTO_TEST_CASE(RaBitQAutoTuneSelectsFirstQualifyingBit)

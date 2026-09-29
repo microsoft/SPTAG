@@ -97,6 +97,7 @@ namespace SPTAG
 
             void SetQuantizerADC(bool p_enableADC) override
             {
+                m_options.m_enableADC = p_enableADC;
                 VectorIndex::SetQuantizerADC(p_enableADC);
                 if (m_topIndex) {
                     m_topIndex->SetQuantizerADC(p_enableADC);
