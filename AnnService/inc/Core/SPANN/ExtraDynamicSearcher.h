@@ -1237,6 +1237,9 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            // Read-only indexes do not initialize the update thread pool.
+            if (m_splitThreadPool == nullptr) return;
+
             Helper::Concurrent::ConcurrentMap<SizeType, SizeType>::value_type workPair(headID, headID);
             {
                 std::shared_lock<std::shared_timed_mutex> lock(m_mergeListLock);
