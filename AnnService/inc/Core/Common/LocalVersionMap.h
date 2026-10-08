@@ -18,41 +18,37 @@ namespace SPTAG
     namespace COMMON
     {
         
-        class VersionLabel : public IVersionMap
+        class LocalVersionMap : public IVersionMap
         {
         private:
-            Helper::Concurrent::ConcurrentMap<SizeType, uint8_t> m_label;
-            std::shared_timed_mutex m_updateMutex;
+            Helper::Concurrent::ConcurrentHashMap<SizeType, uint8_t> m_label;
+            uint8_t m_default = 0xff;
         public:
-            VersionLabel() = default;
+            LocalVersionMap() = default;
 
             void DeleteAll() override { 
-                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 m_label.clear(); 
             }
 
+            uint8_t& Default() override { return m_default; }
+
             SizeType Count() override { 
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 return (SizeType)(m_label.size()); 
             }
             SizeType GetDeleteCount() override { return 0; }
             std::uint64_t BufferSize() override { 
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 return m_label.size() * (sizeof(uint8_t) + sizeof(SizeType)); 
             }
 
             bool Deleted(const SizeType& key) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 if (m_label.find(key) != m_label.end()) return false;
                 return true;
             }
             bool Delete(const SizeType& key) override { 
-                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
-                return m_label.unsafe_erase(key); 
+                return m_label.erase(key); 
             }
 
             ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 globalIDs.clear();
                 for (const auto& it : m_label) {
                     globalIDs.push_back(it.first);
@@ -61,27 +57,24 @@ namespace SPTAG
             }
 
             uint8_t GetVersion(const SizeType& key) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 auto iter = m_label.find(key);
                 if (iter == m_label.end()) return 0xfe;
                 return iter->second; 
             }
-            void SetVersion(const SizeType& key, const uint8_t& version) override { 
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
-                m_label[key] = version;
+            void SetVersion(SizeType& key, uint8_t& version) override { 
+                m_label.insert_or_assign(std::forward<SizeType>(key), std::forward<uint8_t>(version));
             }
-            bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+
+            bool IncVersion(SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override {
                 auto iter = m_label.find(key);
                 if (iter == m_label.end()) return false;
                 uint8_t oldVersion = iter->second;
                 *newVersion = (oldVersion+1) & 0x7f;
-                iter->second = *newVersion;
+                m_label.assign_if_equal(std::forward<SizeType>(key), oldVersion, std::forward<uint8_t>(*newVersion));
                 return true; 
             }
 
             ErrorCode Save(std::shared_ptr<Helper::DiskIO> ptr) override { 
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 SizeType CR = m_label.size();
                 IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
                 for (auto& it : m_label) {
@@ -104,7 +97,7 @@ namespace SPTAG
                     uint8_t value;
                     IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&key);
                     IOBINARY(ptr, ReadBinary, sizeof(uint8_t), (char*)&value);
-                    m_label[key] = value;
+                    m_label.insert_or_assign(std::forward<SizeType>(key), std::forward<uint8_t>(value));
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%lld, 1) Finish!\n", (std::int64_t)CR);
                 return ErrorCode::Success;
@@ -117,21 +110,21 @@ namespace SPTAG
             }
         };
 
-        class LocalVersionMap : public IVersionMap
+        class VersionLabel : public IVersionMap
         {
         private:
             std::atomic<SizeType> m_deleted;
             Dataset<std::uint8_t> m_data;
             std::mutex m_mutex;
-            
+            uint8_t m_default = 0xff;
+
         public:
-            LocalVersionMap() : m_deleted(0) { 
+            VersionLabel() : m_deleted(0) { 
                 m_data.SetName("versionLabelID"); 
                 m_data.SetDefaultValue(0xfe);
                 m_data.Initialize(1024 * 1024, 1, 1024 * 1024, MaxSize);
                 m_deleted = m_data.R();
             }
-            //VersionLabel(): m_deleted(0) { m_data.SetName("versionLabelID"); }
 
             void DeleteAll() override
             {
@@ -141,6 +134,8 @@ namespace SPTAG
                 }
             }
 
+            uint8_t& Default() override { return m_default; }
+            
             SizeType Count() override { return m_data.R(); }
 
             SizeType GetDeleteCount() override { return m_deleted.load();}
@@ -192,7 +187,7 @@ namespace SPTAG
                 return *m_data[key];
             }
 
-            void SetVersion(const SizeType& key, const uint8_t& version) override
+            void SetVersion(SizeType& key, uint8_t& version) override
             {
                 if (key >= m_data.R()) {
                     std::lock_guard<std::mutex> lock(m_mutex);
@@ -209,7 +204,7 @@ namespace SPTAG
                 if (oldvalue == 0xfe && version != 0xfe) m_deleted--;
             }
 
-            bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
+            bool IncVersion(SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
             {
                 if (key < 0 || key >= m_data.R()) 
                 {

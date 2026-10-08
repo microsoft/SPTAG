@@ -94,11 +94,11 @@ namespace SPTAG
                 std::string data;
                 auto ret = m_db->Get(key, &data, MaxTimeout, nullptr);
                 if (ret == ErrorCode::Success) {
-                    value = data.empty() ? m_defaultVersion : static_cast<uint8_t>(data[0]);
+                    value = data.empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(data[0]);
                     return true;
                 }
                 if (ret == ErrorCode::Key_NotFound) {
-                    value = m_defaultVersion;
+                    value = DefaultVersionForLayer();
                     return true;
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
@@ -162,12 +162,12 @@ namespace SPTAG
                 auto ret = m_db->Get(VersionKey(vid), &data, MaxTimeout, nullptr);
                 if (ret == ErrorCode::Success) {
                     notExist = false;
-                    value = data.empty() ? m_defaultVersion : static_cast<uint8_t>(data[0]);
+                    value = data.empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(data[0]);
                     return true;
                 }
                 if (ret == ErrorCode::Key_NotFound) {
                     notExist = true;
-                    value = m_defaultVersion;
+                    value = DefaultVersionForLayer();
                     return true;
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
@@ -208,7 +208,7 @@ namespace SPTAG
             TiKVVersionMap() = default;
 
             void SetDB(std::shared_ptr<Helper::KeyValueIO> db) { m_db = db; }
-            void SetLayer(int layer) { m_layer = layer; m_defaultVersion = DefaultVersionForLayer(); }
+            void SetLayer(int layer) { m_layer = layer; }
             void SetChunkSize(int) {}
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
@@ -221,7 +221,6 @@ namespace SPTAG
                 m_count = size;
 
                 if (m_layer > 0 && globalIDs != nullptr && globalIDs->R() > 0) {
-                    m_defaultVersion = DefaultVersionForLayer();
                     std::unordered_set<SizeType> aliveIDs;
                     aliveIDs.reserve(static_cast<size_t>(globalIDs->R()));
                     for (SizeType i = 0; i < globalIDs->R(); i++) {
@@ -245,12 +244,11 @@ namespace SPTAG
                         "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=deleted, alive=%d, written=%d, deleted=%d\n",
                         m_layer, size, static_cast<int>(aliveIDs.size()), written, m_deleted.load());
                 } else {
-                    m_defaultVersion = DefaultVersionForLayer();
-                    m_deleted = (m_defaultVersion == 0xfe) ? size : 0;
+                    m_deleted = (m_layer != 0) ? size : 0;
                     SaveMetadata();
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=%s, deleted=%d\n",
-                        m_layer, size, (m_defaultVersion == 0xfe) ? "deleted" : "alive", m_deleted.load());
+                        m_layer, size, (m_layer != 0) ? "deleted" : "alive", m_deleted.load());
                 }
             }
 
@@ -287,7 +285,7 @@ namespace SPTAG
                         size_t index = static_cast<size_t>(vid - batchStart);
                         uint8_t version = (index < values.size() && !values[index].empty())
                             ? static_cast<uint8_t>(values[index][0])
-                            : m_defaultVersion;
+                            : DefaultVersionForLayer();
                         if (version != 0xfe) {
                             globalIDs.push_back(vid);
                         }
@@ -299,7 +297,6 @@ namespace SPTAG
             
             void DeleteAll() override
             {
-                m_defaultVersion = 0xfe;
                 m_deleted = m_count.load();
                 SaveMetadata();
                 for (SizeType vid = 0; vid < m_count.load(); vid++) {
@@ -354,14 +351,9 @@ namespace SPTAG
                 return ReadVersionByte(key);
             }
 
-            bool TryGetDefaultVersionForNewVector(uint8_t& version) const override
-            {
-                if (m_defaultVersion == 0xfe) return false;
-                version = m_defaultVersion;
-                return true;
-            }
+            uint8_t& Default() override { return m_defaultVersion; }
 
-            void SetVersion(const SizeType& key, const uint8_t& version) override
+            void SetVersion(SizeType& key, uint8_t& version) override
             {
                 if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::SetVersion: invalid key %d (max %d)\n", key, m_count.load());
@@ -374,7 +366,7 @@ namespace SPTAG
                 UpdateDeleteCount(oldVal, storedVersion);
             }
 
-            bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
+            bool IncVersion(SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
             {
                 if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::IncVersion: invalid key %d (max %d)\n", key, m_count.load());
@@ -421,7 +413,7 @@ namespace SPTAG
                     }
 
                     currentNotExist = actualNotExist;
-                    current = actualNotExist || actualValue.empty() ? m_defaultVersion : static_cast<uint8_t>(actualValue[0]);
+                    current = actualNotExist || actualValue.empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(actualValue[0]);
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
@@ -497,7 +489,7 @@ namespace SPTAG
                     if (i < values.size() && !values[i].empty()) {
                         versions[validIndices[i]] = static_cast<uint8_t>(values[i][0]);
                     } else {
-                        versions[validIndices[i]] = m_defaultVersion;
+                        versions[validIndices[i]] = DefaultVersionForLayer();
                     }
                 }
             }
@@ -509,7 +501,6 @@ namespace SPTAG
                 if (!ReadSizeType(CountKey(), count)) {
                     m_count = 0;
                     m_deleted = 0;
-                    m_defaultVersion = DefaultVersionForLayer();
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                         "TiKVVersionMap: failed to read count key '%s' (layer=%d); set count=0.\n",
                         CountKey().c_str(), m_layer);
@@ -517,15 +508,13 @@ namespace SPTAG
                 }
                 m_count = count;
 
-                m_defaultVersion = DefaultVersionForLayer();
-
-                m_deleted = (m_defaultVersion == 0xfe) ? m_count.load() : 0;
+                m_deleted = (m_layer != 0) ? m_count.load() : 0;
                 m_lastPersistedCount = m_count.load();
                 m_metadataDirty.store(false, std::memory_order_release);
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "TiKVVersionMap: loaded per-VID metadata layer=%d count=%d deleted=%d default=%u\n",
-                    m_layer, m_count.load(), m_deleted.load(), static_cast<unsigned>(m_defaultVersion));
+                    m_layer, m_count.load(), m_deleted.load(), static_cast<unsigned>(DefaultVersionForLayer()));
                 return ErrorCode::Success;
             }
         };

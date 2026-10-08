@@ -605,21 +605,18 @@ namespace SPTAG::SPANN {
         }
 
         inline uintptr_t GetKey(SizeType key) {
-            {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
-                auto it = m_pBlockMapping.find(key);
-                if (it != m_pBlockMapping.end()) return it->second;
-            }
+            auto it = m_pBlockMapping.find(key);
+            if (it != m_pBlockMapping.end()) return it->second;
             return InvalidPointer;
         }
-        
-        inline uintptr_t& AtKey(SizeType key) {
-            uintptr_t* value;
-            {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
-                value = &(m_pBlockMapping[key]);
-            }
-            return *value;
+
+        inline void SetKey(SizeType key, uintptr_t value) {
+            m_pBlockMapping.insert_or_assign(std::forward<SizeType>(key), std::forward<uintptr_t>(value));
+        }
+
+        inline bool SetKeyIfEqual(SizeType key, uintptr_t expected, uintptr_t value) {
+            if (m_pBlockMapping.assign_if_equal(std::forward<SizeType>(key), std::forward<uintptr_t>(expected), std::forward<uintptr_t>(value))) return true;
+            return false;
         }
 
         ErrorCode Get(const SizeType key, std::string* value, const std::chrono::microseconds &timeout, std::vector<Helper::AsyncReadRequest>* reqs, bool useCache) {
@@ -808,7 +805,7 @@ namespace SPTAG::SPANN {
                         }
                         // The 0th element of the block address list represents the data size; set it to -1.
                         memset((AddressType *)tmpblocks, -1, sizeof(AddressType) * m_blockLimit);
-                        AtKey(key) = tmpblocks;
+                        SetKey(key, tmpblocks);
                     }
                     int64_t *postingSize = (int64_t *)GetKey(key);
                     int oldblocks = (static_cast<int>(*postingSize) < 0) ? 0 : ((static_cast<int>(*postingSize) + PageSize - 1) >> PageSizeEx);
@@ -877,7 +874,7 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Put] Update posting size for key %lld failed due to concurrent update! Retry...\n", (std::int64_t)key);
                     oldSize = *postingSize;
                 } 
-                AtKey(key) = tmpblocks;
+                SetKey(key, tmpblocks);
             }
             else {
                 uintptr_t partialtmpblocks = InvalidPointer;
@@ -905,7 +902,7 @@ namespace SPTAG::SPANN {
                 // Release the original blocks
                 m_pBlockController.ReleaseBlocks(postingSize + 1, (static_cast<int>(*postingSize) + PageSize - 1) >> PageSizeEx);
                 m_buffer.push((uintptr_t)postingSize);
-                while (InterlockedCompareExchange(&AtKey(key), partialtmpblocks, (uintptr_t)postingSize) != (uintptr_t)postingSize) {
+                while(!SetKeyIfEqual(key, (uintptr_t)postingSize, partialtmpblocks)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Put] Update key mapping failed due to concurrent update! Retry...\n");
                     postingSize = (int64_t*)GetKey(key);
                 }
@@ -976,11 +973,8 @@ namespace SPTAG::SPANN {
 
         int64_t GetApproximateMemoryUsage() override
         {
-            int64_t result = 0;
-            {
-                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
-                result = m_pBlockMapping.size() * m_blockLimit * sizeof(AddressType);
-            }
+            int64_t result = m_pBlockMapping.size() * m_blockLimit * sizeof(AddressType);
+            
             if (m_pShardedLRUCache)
             {
                 result += m_pShardedLRUCache->GetApproximateMemoryUsage();
@@ -1089,7 +1083,7 @@ namespace SPTAG::SPANN {
                 // This is also to ensure checkpoint correctness, so we release the partially used block and allocate a new one.
                 m_pBlockController.ReleaseBlocks(postingSize + 1 + oldblocks, 1);
                 m_buffer.push((uintptr_t)postingSize);
-                while (InterlockedCompareExchange(&AtKey(key), tmpblocks, (uintptr_t)postingSize) != (uintptr_t)postingSize) {
+                while (!SetKeyIfEqual(key, (uintptr_t)postingSize, tmpblocks)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Merge] Posting pointer changed during merge! Key %lld, Retry...\n", (int64_t)key);
                     postingSize = (int64_t*)GetKey(key);
                 }
@@ -1144,11 +1138,8 @@ namespace SPTAG::SPANN {
             int blocks = (static_cast<int>(*postingSize)+ PageSize - 1) >> PageSizeEx;
             m_pBlockController.ReleaseBlocks(postingSize + 1, blocks);
             m_buffer.push((uintptr_t)postingSize);
+            m_pBlockMapping.erase(key);
 
-            {
-                std::unique_lock<std::shared_timed_mutex> updatelock(m_updateMutex);
-                m_pBlockMapping.unsafe_erase(key);
-            }
             if (lock) lock->unlock();
             return ErrorCode::Success;
         }
@@ -1198,7 +1189,7 @@ namespace SPTAG::SPANN {
             for (int i = 0; i < CR; i++) {
                 AddressType key;
                 IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&key);
-                AtKey((SizeType)key) = (uintptr_t)(new AddressType[m_blockLimit]);
+                SetKey((SizeType)key, (uintptr_t)(new AddressType[m_blockLimit]));
                 IOBINARY(ptr, ReadBinary, sizeof(AddressType) * m_blockLimit, (char*)GetKey(key));
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%lld,%lld) Finish!\n", (std::int64_t)CR, (std::int64_t)mycols);
@@ -1217,7 +1208,6 @@ namespace SPTAG::SPANN {
             auto ptr = f_createIO();
             if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
-            std::unique_lock<std::shared_timed_mutex> updatelock(m_updateMutex);
             SizeType CR = m_pBlockMapping.size();
             SizeType CC = m_blockLimit + 1;
             IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
@@ -1250,7 +1240,7 @@ namespace SPTAG::SPANN {
         std::string m_mappingPath;
         int m_layer;
         SizeType m_blockLimit;
-        Helper::Concurrent::ConcurrentMap<SizeType, uintptr_t> m_pBlockMapping;
+        Helper::Concurrent::ConcurrentHashMap<SizeType, uintptr_t> m_pBlockMapping;
         bool m_checkSumMultiGet;
         COMMON::Checksum m_checkSum;
         SizeType m_bufferLimit;
@@ -1261,7 +1251,6 @@ namespace SPTAG::SPANN {
         ShardedLRUCache *m_pShardedLRUCache{nullptr};
 
         bool m_shutdownCalled;
-        std::shared_timed_mutex m_updateMutex;
     };
 }
 #endif

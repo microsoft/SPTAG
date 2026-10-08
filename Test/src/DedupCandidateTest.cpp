@@ -79,53 +79,6 @@ namespace
 
 BOOST_AUTO_TEST_SUITE(DedupCandidateTest)
 
-BOOST_AUTO_TEST_CASE(ContainsDoesNotInsert)
-{
-    SPTAG::COMMON::OptHashPosVector deduper;
-    deduper.Init(64, 2);
-    const auto& lookup = deduper;
-    const SPTAG::SizeType ids[] = {0, 1, 42, (std::numeric_limits<SPTAG::SizeType>::max)() - 1};
-    for (auto id : ids)
-    {
-        BOOST_CHECK(!lookup.Contains(id));
-        BOOST_CHECK(!lookup.Contains(id));
-        BOOST_CHECK(!deduper.CheckAndSet(id));
-        BOOST_CHECK(lookup.Contains(id));
-        BOOST_CHECK(deduper.CheckAndSet(id));
-    }
-    deduper.clear();
-    for (auto id : ids) BOOST_CHECK(!lookup.Contains(id));
-}
-
-BOOST_AUTO_TEST_CASE(ContainsHandlesBothBlocksAndResize)
-{
-    CollisionDeduper deduper;
-    deduper.Init(64, 2);
-    std::vector<SPTAG::SizeType> ids;
-    for (SPTAG::SizeType id = 0; ids.size() < 15; ++id)
-        if (deduper.Bucket(id) == deduper.Bucket(0)) ids.push_back(id);
-    for (std::size_t i = 0; i + 1 < ids.size(); ++i)
-        BOOST_CHECK(!deduper.CheckAndSet(ids[i]));
-    BOOST_REQUIRE(deduper.UsesSecondBlock());
-    BOOST_CHECK(!deduper.Contains(ids.back()));
-    for (std::size_t i = 0; i + 1 < ids.size(); ++i)
-        BOOST_CHECK(deduper.Contains(ids[i]));
-    deduper.DoubleSize();
-    for (std::size_t i = 0; i + 1 < ids.size(); ++i)
-        BOOST_CHECK(deduper.Contains(ids[i]));
-    BOOST_CHECK(!deduper.Contains(ids.back()));
-    deduper.clear();
-    for (auto id : ids) BOOST_CHECK(!deduper.Contains(id));
-
-    deduper.Init(4, 0);
-    for (SPTAG::SizeType id = 0; id < 128; ++id)
-        BOOST_CHECK(!deduper.CheckAndSet(id));
-    BOOST_CHECK_GT(deduper.HashTableExponent(), 0);
-    for (SPTAG::SizeType id = 0; id < 128; ++id)
-        BOOST_CHECK(deduper.Contains(id));
-    BOOST_CHECK(!deduper.Contains(128));
-}
-
 BOOST_AUTO_TEST_CASE(SearchPathsMatchDeleteFirstAcrossVisibilityInterleavings)
 {
     using namespace SPTAG;

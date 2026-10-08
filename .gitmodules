@@ -14,3 +14,6 @@
 [submodule "ThirdParty/RaBitQOfficial"]
 	path = ThirdParty/RaBitQOfficial
 	url = https://github.com/VectorDB-NTU/RaBitQ-Library.git
+[submodule "ThirdParty/folly"]
+	path = ThirdParty/folly
+	url = https://github.com/facebook/folly

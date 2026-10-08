@@ -220,16 +220,14 @@ namespace SPTAG::SPANN {
 
         std::shared_ptr<PersistentBuffer> m_wal;
 
-        std::shared_timed_mutex m_splitListLock;
-        Helper::Concurrent::ConcurrentMap<SizeType, int> m_splitList;
+        Helper::Concurrent::ConcurrentHashMap<SizeType, int> m_splitList;
         std::atomic_size_t m_splitJobsInFlight{ 0 };
         std::atomic_size_t m_totalSplitSubmitted{ 0 };
         std::atomic_size_t m_totalSplitCompleted{ 0 };
         std::atomic<uint64_t> m_totalSplitTimeUs{ 0 };
         std::atomic<uint64_t> m_maxSplitTimeUs{ 0 };
 
-        std::shared_timed_mutex m_mergeListLock;
-        Helper::Concurrent::ConcurrentSet<SizeType> m_mergeList;
+        Helper::Concurrent::ConcurrentHashMap<SizeType, bool> m_mergeList;
         std::atomic_size_t m_mergeJobsInFlight{ 0 };
         std::atomic_size_t m_totalMergeSubmitted{ 0 };
         std::atomic_size_t m_totalMergeCompleted{ 0 };
@@ -519,7 +517,7 @@ namespace SPTAG::SPANN {
 
                                 if (VID == globalID) hasHead = true;
 
-                                *(vectorId + sizeof(SizeType)) = 0xff;
+                                *(vectorId + sizeof(SizeType)) = m_versionMap->Default();
                                 if (j != vectorCount)
                                 {
                                     memcpy(postingP + vectorCount * m_vectorInfoSize, vectorId, m_vectorInfoSize);
@@ -561,7 +559,7 @@ namespace SPTAG::SPANN {
                 globalIDs.clear();
                 m_versionMap->GetContainedIDs(globalIDs);
                 for (auto id : globalIDs) {
-                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, 0xff);
+                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, m_versionMap->Default());
                 }
 
                 auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
@@ -630,10 +628,8 @@ namespace SPTAG::SPANN {
                     m_stat.m_splitLockSampleCount.fetch_add(1, std::memory_order_relaxed);
                 }
 
-                {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                    m_splitList.unsafe_erase(headID);
-                }
+                m_splitList.erase(headID);
+
                 int retry = 0;
              Retry:
                 if (!m_headIndex->ContainSample(headID, m_layer + 1)) return ErrorCode::Success;
@@ -995,16 +991,12 @@ namespace SPTAG::SPANN {
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
 
             if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
-                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                m_mergeList.unsafe_erase(headID);
+                m_mergeList.erase(headID);
                 return ErrorCode::Success;
             }
 
-            {
-                std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                if (m_mergeList.find(headID) == m_mergeList.end()) {
-                    return ErrorCode::Success;
-                }
+            if (m_mergeList.find(headID) == m_mergeList.end()) {
+                return ErrorCode::Success;
             }
 
             std::string mergedPostingList;
@@ -1060,10 +1052,8 @@ namespace SPTAG::SPANN {
                     return ret;
                 }
                 CheckCentroid(headID, mergedPostingList, "MergePostings-ignore");
-                {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                    m_mergeList.unsafe_erase(headID);
-                }
+
+                m_mergeList.erase(headID);
                 return ErrorCode::Success;
             }
 
@@ -1207,11 +1197,8 @@ namespace SPTAG::SPANN {
                 }
 
                 {
-                    {
-                        std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                        m_mergeList.unsafe_erase(headID);
-                        m_mergeList.unsafe_erase(queryResult->VID);
-                    }
+                    m_mergeList.erase(headID);
+                    m_mergeList.erase(queryResult->VID);
                     if (currentLength + dedupLength <= m_mergeThreshold) {
                         MergeAsync(nextHeadID);
                     }
@@ -1229,10 +1216,7 @@ namespace SPTAG::SPANN {
                 return ret;
             }
             CheckCentroid(headID, mergedPostingList, "MergePostings-GC");
-            {
-                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                m_mergeList.unsafe_erase(headID);
-            }
+            m_mergeList.erase(headID);
             return ErrorCode::Success;
         }
 
@@ -1245,15 +1229,12 @@ namespace SPTAG::SPANN {
             // }
             // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
             // m_splitList.insert(workPair);
+            std::pair<SizeType, int> workPair(headID, postingSize);
+            auto res = m_splitList.insert(std::forward<std::pair<SizeType, int>>(workPair));
+            if (!res.second)
             {
-                Helper::Concurrent::ConcurrentMap<SizeType, int>::value_type workPair(headID, postingSize);
-                std::shared_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                auto res = m_splitList.insert(workPair);
-                if (!res.second)
-                {
-                    m_splitList[headID] = max(res.first->second, postingSize);
-                    return;
-                }
+                m_splitList.assign_if(std::forward<SizeType>(headID), std::forward<int>(postingSize), [postingSize](int v){ return v < postingSize; });
+                return;
             }
 
             auto* curJob = new SplitAsyncJob(this, headID, p_callback);
@@ -1265,14 +1246,12 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            std::pair<SizeType, bool> workPair(headID, true);
+            auto res = m_mergeList.insert(std::forward<std::pair<SizeType, bool>>(workPair));
+            if (!res.second)
             {
-                std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                auto res = m_mergeList.insert(headID);
-                if (!res.second)
-                {
-                    // Already in queue
-                    return;
-                }
+                // Already in queue
+                return;
             }
 
             auto* curJob = new MergeAsyncJob(this, headID, p_callback);
@@ -1856,8 +1835,8 @@ namespace SPTAG::SPANN {
                                 {
                                     char *vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
                                     SizeType VID = *(reinterpret_cast<SizeType *>(vectorInfo));
-                                    m_versionMap->SetVersion(VID, 0xff);
-                                    Serialize(ptr, VID, 0xff, vectorInfo + sizeof(SizeType));
+                                    m_versionMap->SetVersion(VID, m_versionMap->Default());
+                                    Serialize(ptr, VID, m_versionMap->Default(), vectorInfo + sizeof(SizeType));
                                 }
                                 if (GetWritePosting(&workSpace, allPostingIDs[index], newPosting, true) != ErrorCode::Success)
                                 {
@@ -2461,11 +2440,11 @@ namespace SPTAG::SPANN {
             if (p_localToGlobal.R() > 0) {
                 for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
                     SizeType globalID = *(p_localToGlobal[i]);
-                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, 0xff);
+                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, m_versionMap->Default());
                 }
             } else {
                 for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
-                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, 0xff);
+                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, m_versionMap->Default());
                 }
             }
 
@@ -2744,11 +2723,8 @@ namespace SPTAG::SPANN {
             std::unordered_map<SizeType, std::string> headAppends;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
                 SizeType VID = begin + v;
-                uint8_t version;
-                if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
-                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, 0xff);
-                    version = m_versionMap->GetVersion(VID);
-                }
+                if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, m_versionMap->Default());
+                uint8_t version = m_versionMap->GetVersion(VID);
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
                 RNGSelection(p_exWorkSpace, selections, (ValueType*)(p_vectorSet->GetVector(v)), replicaCount);
@@ -2787,7 +2763,7 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode ResetIndex(SizeType p_id) override {
-            m_versionMap->SetVersion(p_id, 0xff);
+            m_versionMap->SetVersion(p_id, m_versionMap->Default());
             return ErrorCode::Success;
         }
 

@@ -457,13 +457,13 @@ float Search(std::shared_ptr<VectorIndex> &vecIndex, std::shared_ptr<VectorSet> 
 
 template <typename ValueType>
 void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step,
-                   std::shared_ptr<VectorSet> addset, std::shared_ptr<MetadataSet> &metaset, int searchThreads = 0, std::shared_ptr<VectorSet> queryset = nullptr, int numQueries = 0, int k = 5, std::ostream* benchmarkData = nullptr, int start = 0)
+                   std::shared_ptr<VectorSet> addset, std::shared_ptr<MetadataSet> &metaset, int start = 0, int searchThreads = 0, std::shared_ptr<VectorSet> queryset = nullptr, int numQueries = 0, int k = 5, std::ostream* benchmarkData = nullptr)
 {
     p_index->ForceCompaction();
     p_index->GetDBStat();
 
     std::vector<std::thread> threads;
-
+    threads.reserve(insertThreads + searchThreads);
     int printstep = step / 50;
     std::atomic_size_t vectorsSent(start);
     auto func = [&]() {
@@ -502,6 +502,10 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
             }
         }
     };
+    for (int j = 0; j < insertThreads; j++)
+    {
+        threads.emplace_back(func);
+    }
 
     if (searchThreads > 0 && queryset != nullptr && numQueries != 0 && benchmarkData != nullptr) {
         std::vector<float> latencies(numQueries);
@@ -528,10 +532,6 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
             duration[tid] = std::chrono::duration_cast<std::chrono::microseconds>(s2 - s1).count() / 1000.0f;
         };
 
-        for (int j = 0; j < insertThreads; j++)
-        {
-            threads.emplace_back(func);
-        }
         for (int j = 0; j < searchThreads; j++)
         {
             threads.emplace_back(search, j);
@@ -570,7 +570,13 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
         *benchmarkData << "        \"minLatency\": " << minLat << ",\n";
         *benchmarkData << "        \"maxLatency\": " << maxLat << ",\n";
         *benchmarkData << "        \"qps\": " << qps << ",\n";
+    } else {
+        for (auto &thread : threads)
+        {
+            thread.join();
+        }
     }
+
     auto barrierStart = std::chrono::high_resolution_clock::now();
     size_t barrierPolls = 0;
     while (!p_index->AllFinished())
@@ -1140,7 +1146,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                     std::shared_ptr<MetadataSet> addmetaset = TestUtils::TestDataGenerator<T>::LoadMetadataSet(paddmeta, paddmetaidx, insertStart, insertBatchSize);
                     start = std::chrono::high_resolution_clock::now();
                     InsertVectors<T>(static_cast<SPANN::Index<T> *>(cloneIndex.get()), numInsertThreads, insertBatchSize,
-                                     addset, addmetaset, numSearchDuringInsertThreads, queryset, numQueries, SearchK, &jsonFile, 0);
+                                     addset, addmetaset, 0, numSearchDuringInsertThreads, queryset, numQueries, SearchK, &jsonFile);
                     end = std::chrono::high_resolution_clock::now();
                 }
                 seconds =
