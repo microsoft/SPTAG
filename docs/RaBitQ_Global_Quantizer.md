@@ -11,6 +11,18 @@ The SDC compatibility path reconstructs its query code with the official
 `reconstruct_vec` API before invoking the same official asymmetric estimator.
 Online search with `EnableADC=true` does not reconstruct base vectors.
 
+Use `SetQuantizerADC(true)` on the SPANN index to enable ADC at runtime and
+persist `EnableADC=true` for save/load and cloning. Calling
+`GetQuantizer()->SetEnableADC(true)` directly changes only the live quantizer,
+not the index configuration. Keep this setting fixed when measuring incremental
+recall: with ADC disabled, raw queries are quantized before distance estimation.
+Previously, the SPANN setter also changed only the live mode, so an ADC initial
+measurement could silently become SDC after the benchmark reloaded or cloned
+the index. Attaching a quantizer now also applies the configured mode, including
+when model loading follows configuration loading. For existing indexes, set
+the intended mode explicitly and save it;
+the quantizer model and stored codes do not need conversion.
+
 Graph construction/refinement and posting replica selection compare **two stored
 codes**, not a query buffer and a code. They use
 `VectorIndex::ComputeDistanceBetweenStoredVectors` and the quantizer's explicit
@@ -19,6 +31,20 @@ code as the first operand of the ADC query-distance API or toggle a shared
 quantizer's mode inside a parallel build. Quantized indexes previously built
 with ADC enabled must have their head graph and postings rebuilt to correct
 these comparisons; the model and encoded base vectors can be reused.
+
+RaBitQ's stored-code estimator is directional, unlike PQ's symmetric codebook
+L2 distance. Split reassign checks must compare the current, old, and new heads
+with the data vector as the first operand throughout. The reassign predicate
+accepts the current head vector and computes this distance itself, rather than
+accepting a caller-provided scalar that may have the opposite direction.
+This does not change the estimator, centroid, model, or version-update rules.
+
+Local reassign version updates separately enforce `expectedOld` with atomic
+compare-and-swap. An outdated task must not advance a newer version, and a
+failed update must not change the posting's version or append its selected
+replicas. Both batched split reassign and individual reassign check the update
+result. Unconditional increments (`expectedOld=0xff`) and 7-bit wraparound
+remain supported; the existing TiKV idempotent-update behavior is unchanged.
 
 Train the model and encode Float base vectors with `Release/quantizer`:
 

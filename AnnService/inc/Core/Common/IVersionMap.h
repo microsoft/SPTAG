@@ -46,6 +46,7 @@ namespace SPTAG
             virtual void SetVersion(SizeType& key, uint8_t& version) = 0;
             /// Increment the version of a VID.
             /// @param expectedOld If not 0xff, the caller asserts the current version should be this value.
+            ///   LocalVersionMap uses strict compare-and-swap: only the winning caller succeeds.
             ///   If TiKV already holds (expectedOld+1)&0x7f, treat as success (another node did the same increment).
             ///   If TiKV holds a different value, return false (conflict).
             ///   If 0xff, just increment whatever the current value is (no check).

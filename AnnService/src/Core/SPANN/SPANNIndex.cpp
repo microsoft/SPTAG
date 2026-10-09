@@ -57,6 +57,7 @@ template <typename T> void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON:
     m_pQuantizer = quantizer;
     if (m_pQuantizer)
     {
+        m_pQuantizer->SetEnableADC(m_options.m_enableADC);
         m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(m_options.m_distCalcMethod);
         m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
                             ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase()

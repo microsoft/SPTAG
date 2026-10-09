@@ -8,6 +8,7 @@
 #include "inc/Core/Common/RaBitQAutoTuner.h"
 #include "inc/Core/Common/RaBitQQuantizer.h"
 #include "inc/Core/SPANN/Index.h"
+#include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/SSDServing/SSDIndex.h"
 
@@ -21,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -38,6 +40,51 @@ constexpr DimensionType kRaBitQCodeBytes =
 constexpr const char* kQuantizerFile = "rabitq_global_quantizer_test.bin";
 constexpr const char* kQueryFile = "rabitq_global_query_test.fvecs";
 constexpr SizeType kSearchQueryCount = 16;
+
+class DirectionalStoredQuantizer : public COMMON::RaBitQQuantizer
+{
+public:
+    DirectionalStoredQuantizer() : COMMON::RaBitQQuantizer(kDimension, kRaBitQBits, false) {}
+
+    float L2DistanceSDC(const std::uint8_t* x, const std::uint8_t* y) const override
+    {
+        BOOST_CHECK_EQUAL(x[0], 0);
+        return distances[x[0]][y[0]];
+    }
+
+    float distances[5][5]{};
+};
+
+class ReassignPredicateDB : public Helper::KeyValueIO
+{
+public:
+    void ShutDown() override {}
+    ErrorCode Get(SizeType, std::string*, const std::chrono::microseconds&,
+                  std::vector<Helper::AsyncReadRequest>*) override
+    {
+        throw std::logic_error("Reassign predicate must not access storage");
+    }
+    ErrorCode MultiGet(const std::vector<SizeType>&, std::vector<std::string>*,
+                       const std::chrono::microseconds&,
+                       std::vector<Helper::AsyncReadRequest>*) override
+    {
+        throw std::logic_error("Reassign predicate must not access storage");
+    }
+    ErrorCode Put(SizeType, const std::string&, const std::chrono::microseconds&,
+                  std::vector<Helper::AsyncReadRequest>*) override
+    {
+        throw std::logic_error("Reassign predicate must not access storage");
+    }
+    ErrorCode Merge(SizeType, const std::string&, const std::chrono::microseconds&,
+                    std::vector<Helper::AsyncReadRequest>*, int&) override
+    {
+        throw std::logic_error("Reassign predicate must not access storage");
+    }
+    ErrorCode Delete(SizeType) override
+    {
+        throw std::logic_error("Reassign predicate must not access storage");
+    }
+};
 
 class CheckedADCQuantizer : public COMMON::RaBitQQuantizer
 {
@@ -412,6 +459,68 @@ BOOST_AUTO_TEST_CASE(SpannAppliesConfiguredADCWhenAttachingQuantizer)
     index->SetQuantizer(quantizer);
     index->SetParameter("EnableADC", "true", "BuildSSDIndex");
     BOOST_CHECK(quantizer->GetEnableADC());
+
+    quantizer->SetEnableADC(false);
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(quantizer->GetEnableADC());
+
+    index->SetParameter("EnableADC", "false", "BuildSSDIndex");
+    quantizer->SetEnableADC(true);
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(!quantizer->GetEnableADC());
+
+    index->SetQuantizer(nullptr);
+    index->SetQuantizerADC(true);
+    BOOST_CHECK_EQUAL(index->GetParameter("EnableADC", "BuildSSDIndex"), "true");
+    quantizer->SetEnableADC(false);
+    index->SetQuantizer(quantizer);
+    BOOST_CHECK(quantizer->GetEnableADC());
+}
+
+BOOST_AUTO_TEST_CASE(SpannADCSetterSurvivesSaveLoadAndClone)
+{
+    const std::string directory = "rabitq_spann_adc_roundtrip_test";
+    const std::string cloneDirectory = "rabitq_spann_adc_roundtrip_clone";
+    const auto raw = MakeRawVectors();
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+        kDimension, kRaBitQBits, false);
+    BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
+    const auto codes = QuantizeVectors(raw, quantizer);
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::UInt8);
+    BOOST_REQUIRE(index != nullptr);
+    index->SetQuantizer(quantizer);
+    index->SetQuantizerFileName("quantizer.bin");
+    ConfigureSpannIndex(index, directory, nullptr, "STATIC", false);
+    BOOST_REQUIRE(index->BuildIndex(codes, nullptr, false, true) == ErrorCode::Success);
+
+    for (bool enableADC : {true, false}) {
+        index->SetQuantizerADC(enableADC);
+        BOOST_CHECK_EQUAL(index->GetParameter("EnableADC", "BuildSSDIndex"),
+                          enableADC ? "true" : "false");
+        QueryResult before(raw->GetVector(37), 8, false);
+        BOOST_REQUIRE(index->SearchIndex(before) == ErrorCode::Success);
+        BOOST_REQUIRE(index->SaveIndex(directory) == ErrorCode::Success);
+
+        std::shared_ptr<VectorIndex> loaded;
+        BOOST_REQUIRE(VectorIndex::LoadIndex(directory, loaded) == ErrorCode::Success);
+        auto clone = loaded->Clone(cloneDirectory);
+        BOOST_REQUIRE(clone != nullptr);
+        for (const auto& restored : {loaded, clone}) {
+            BOOST_REQUIRE(restored->GetQuantizer() != nullptr);
+            BOOST_CHECK_EQUAL(restored->GetQuantizer()->GetEnableADC(), enableADC);
+            BOOST_CHECK_EQUAL(restored->GetParameter("EnableADC", "BuildSSDIndex"),
+                              enableADC ? "true" : "false");
+            QueryResult after(raw->GetVector(37), 8, false);
+            BOOST_REQUIRE(restored->SearchIndex(after) == ErrorCode::Success);
+            for (int rank = 0; rank < 8; ++rank) {
+                BOOST_CHECK_EQUAL(before.GetResult(rank)->VID, after.GetResult(rank)->VID);
+                BOOST_CHECK_CLOSE(before.GetResult(rank)->Dist, after.GetResult(rank)->Dist, 0.001F);
+            }
+        }
+    }
+    index.reset();
+    std::filesystem::remove_all(directory);
+    std::filesystem::remove_all(cloneDirectory);
 }
 
 BOOST_AUTO_TEST_CASE(RaBitQAutoTuneSelectsFirstQualifyingBit)
@@ -711,6 +820,57 @@ BOOST_AUTO_TEST_CASE(QuantizedGraphAndReplicaBuildDoNotTreatCodesAsADCQueries)
         index->ApproximateRNG(mutableCodes, except, 32, selections.data(), 8, 1, 1, 64, 1.0F, 0);
         BOOST_CHECK_EQUAL(quantizer->invalidADCInputs.load(), 0);
         BOOST_CHECK(quantizer->GetEnableADC());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(ReassignComparesAllHeadsInDataToHeadDirection)
+{
+    auto quantizer = std::make_shared<DirectionalStoredQuantizer>();
+    SPANN::Index<std::uint8_t> index;
+    index.SetParameter("DistCalcMethod", "L2", "Base");
+    index.SetQuantizer(quantizer);
+    SPANN::Options options;
+    options.m_dim = kRaBitQCodeBytes;
+    SPANN::ExtraDynamicSearcher<std::uint8_t> extra(
+        options, 0, &index, std::make_shared<ReassignPredicateDB>());
+    std::vector<std::vector<std::uint8_t>> codes(5, std::vector<std::uint8_t>(kRaBitQCodeBytes));
+    for (std::size_t i = 0; i < codes.size(); ++i) codes[i][0] = static_cast<std::uint8_t>(i);
+    std::vector<std::shared_ptr<std::string>> heads;
+    for (int i : {2, 3}) {
+        heads.push_back(std::make_shared<std::string>(
+            reinterpret_cast<const char*>(codes[i].data()), codes[i].size()));
+    }
+    for (bool adc : {false, true}) {
+        index.SetQuantizerADC(adc);
+        quantizer->distances[0][1] = 10;
+        quantizer->distances[1][0] = 20;
+        BOOST_CHECK(!extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[1].data(), true));
+        quantizer->distances[0][2] = 20;
+        quantizer->distances[2][0] = 5;
+        BOOST_CHECK(extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[2].data(), true));
+        quantizer->distances[0][2] = 5;
+        quantizer->distances[2][0] = 20;
+        BOOST_CHECK(!extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[2].data(), true));
+        quantizer->distances[0][2] = 10;
+        BOOST_CHECK(!extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[2].data(), true));
+
+        quantizer->distances[0][2] = 5;
+        quantizer->distances[0][3] = 15;
+        quantizer->distances[0][4] = 3;
+        quantizer->distances[4][0] = 20;
+        BOOST_CHECK(!extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[4].data(), false));
+        quantizer->distances[0][4] = 7;
+        quantizer->distances[4][0] = 1;
+        BOOST_CHECK(extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[4].data(), false));
+        quantizer->distances[0][1] = 4;
+        BOOST_CHECK(!extra.CheckIsNeedReassign(
+            heads, codes[0].data(), codes[1].data(), 0, codes[4].data(), false));
     }
 }
 
