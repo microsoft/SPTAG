@@ -281,6 +281,11 @@ int main(int argc, char *argv[])
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load RaBitQ quantizer.\n");
                 exit(1);
             }
+            if (!options->m_rabitqCentroids.empty()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "--rabitq_centroids requires a new output model path. Omit it to reuse the saved model.\n");
+                exit(1);
+            }
         }
 
         quantizer->SetEnableADC(false);

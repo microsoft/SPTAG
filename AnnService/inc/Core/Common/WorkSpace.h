@@ -88,13 +88,13 @@ namespace SPTAG
             std::unique_ptr<SizeType[]> m_hashTable;
 
 
-            inline std::uint64_t hash_func2(std::uint64_t idx, std::uint64_t poolSize, int loop)
+            inline std::uint64_t hash_func2(std::uint64_t idx, std::uint64_t poolSize, int loop) const
             {
                 return (idx + loop) & poolSize;
             }
 
 
-            inline std::uint64_t hash_func(std::uint64_t idx, std::uint64_t poolSize)
+            inline std::uint64_t hash_func(std::uint64_t idx, std::uint64_t poolSize) const
             {
                 return ((std::uint64_t)(idx * 99991) + _rotl64(idx, 2) + 101) & poolSize;
             }

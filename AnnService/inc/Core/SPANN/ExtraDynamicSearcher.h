@@ -220,16 +220,14 @@ namespace SPTAG::SPANN {
 
         std::shared_ptr<PersistentBuffer> m_wal;
 
-        std::shared_timed_mutex m_splitListLock;
-        Helper::Concurrent::ConcurrentMap<SizeType, int> m_splitList;
+        Helper::Concurrent::ConcurrentHashMap<SizeType, int> m_splitList;
         std::atomic_size_t m_splitJobsInFlight{ 0 };
         std::atomic_size_t m_totalSplitSubmitted{ 0 };
         std::atomic_size_t m_totalSplitCompleted{ 0 };
         std::atomic<uint64_t> m_totalSplitTimeUs{ 0 };
         std::atomic<uint64_t> m_maxSplitTimeUs{ 0 };
 
-        std::shared_timed_mutex m_mergeListLock;
-        Helper::Concurrent::ConcurrentSet<SizeType> m_mergeList;
+        Helper::Concurrent::ConcurrentHashMap<SizeType, bool> m_mergeList;
         std::atomic_size_t m_mergeJobsInFlight{ 0 };
         std::atomic_size_t m_totalMergeSubmitted{ 0 };
         std::atomic_size_t m_totalMergeCompleted{ 0 };
@@ -411,16 +409,18 @@ namespace SPTAG::SPANN {
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
 
-        bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead)
+        bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, const void* currentHeadVec, bool isInSplitHead)
         {
-            float_t splitHeadDist = m_headIndex->ComputeDistance(data, splitHeadVec);
+            // RaBitQ SDC is directional; compare every head with data as the first operand.
+            float_t currentHeadDist = m_headIndex->ComputeDistanceBetweenStoredVectors(data, currentHeadVec);
+            float_t splitHeadDist = m_headIndex->ComputeDistanceBetweenStoredVectors(data, splitHeadVec);
 
             if (isInSplitHead) {
                 if (splitHeadDist >= currentHeadDist) return false;
             }
             else {
-                float_t newHeadDist_1 = m_headIndex->ComputeDistance(data, newHeadsVec[0]->data());
-                float_t newHeadDist_2 = m_headIndex->ComputeDistance(data, newHeadsVec[1]->data());
+                float_t newHeadDist_1 = m_headIndex->ComputeDistanceBetweenStoredVectors(data, newHeadsVec[0]->data());
+                float_t newHeadDist_2 = m_headIndex->ComputeDistanceBetweenStoredVectors(data, newHeadsVec[1]->data());
                 if (splitHeadDist <= newHeadDist_1 && splitHeadDist <= newHeadDist_2) return false;
                 if (currentHeadDist <= newHeadDist_1 && currentHeadDist <= newHeadDist_2) return false;
             }
@@ -519,7 +519,7 @@ namespace SPTAG::SPANN {
 
                                 if (VID == globalID) hasHead = true;
 
-                                *(vectorId + sizeof(SizeType)) = 0xff;
+                                *(vectorId + sizeof(SizeType)) = m_versionMap->Default();
                                 if (j != vectorCount)
                                 {
                                     memcpy(postingP + vectorCount * m_vectorInfoSize, vectorId, m_vectorInfoSize);
@@ -561,7 +561,7 @@ namespace SPTAG::SPANN {
                 globalIDs.clear();
                 m_versionMap->GetContainedIDs(globalIDs);
                 for (auto id : globalIDs) {
-                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, 0xff);
+                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, m_versionMap->Default());
                 }
 
                 auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
@@ -630,10 +630,8 @@ namespace SPTAG::SPANN {
                     m_stat.m_splitLockSampleCount.fetch_add(1, std::memory_order_relaxed);
                 }
 
-                {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                    m_splitList.unsafe_erase(headID);
-                }
+                m_splitList.erase(headID);
+
                 int retry = 0;
              Retry:
                 if (!m_headIndex->ContainSample(headID, m_layer + 1)) return ErrorCode::Success;
@@ -761,14 +759,7 @@ namespace SPTAG::SPANN {
                 }
 
                 std::vector<int> ks(2, 0);
-                std::string headVecData(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
-                if (m_headIndex->m_pQuantizer && m_headIndex->m_pQuantizer->GetEnableADC()) {
-                    headVecData.resize(m_headIndex->m_pQuantizer->QuantizeSize());
-                    std::shared_ptr<std::uint8_t> rec_query((uint8_t*)ALIGN_ALLOC(m_headIndex->m_pQuantizer->ReconstructSize()), [=](std::uint8_t* ptr) { ALIGN_FREE(ptr); });
-                    m_headIndex->m_pQuantizer->ReconstructVector((uint8_t*)(headVec->c_str() + m_metaDataSize), rec_query.get());
-                    m_headIndex->m_pQuantizer->QuantizeVector(rec_query.get(), (uint8_t*)headVecData.data());
-                }
-                if (m_headIndex->ComputeDistance(headVecData.c_str(), args.centers) < m_headIndex->ComputeDistance(headVecData.c_str(), args.centers + args._D)) {
+                if (m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers) < m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + args._D)) {
                     ks[0] = 1;
                 } else {
                     ks[1] = 1;
@@ -786,7 +777,7 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
-                    if (!theSameHead && m_headIndex->ComputeDistance(headVecData.c_str(), args.centers + k * args._D) < Epsilon) {
+                    if (!theSameHead && m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + k * args._D) < Epsilon) {
                         newHeadsID[k] = headID;
                         newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
@@ -1002,16 +993,12 @@ namespace SPTAG::SPANN {
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
 
             if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
-                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                m_mergeList.unsafe_erase(headID);
+                m_mergeList.erase(headID);
                 return ErrorCode::Success;
             }
 
-            {
-                std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                if (m_mergeList.find(headID) == m_mergeList.end()) {
-                    return ErrorCode::Success;
-                }
+            if (m_mergeList.find(headID) == m_mergeList.end()) {
+                return ErrorCode::Success;
             }
 
             std::string mergedPostingList;
@@ -1067,10 +1054,8 @@ namespace SPTAG::SPANN {
                     return ret;
                 }
                 CheckCentroid(headID, mergedPostingList, "MergePostings-ignore");
-                {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                    m_mergeList.unsafe_erase(headID);
-                }
+
+                m_mergeList.erase(headID);
                 return ErrorCode::Success;
             }
 
@@ -1204,8 +1189,8 @@ namespace SPTAG::SPANN {
                         uint8_t version = *(vectorId + sizeof(SizeType));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                         if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
-                        float origin_dist = m_headIndex->ComputeDistance(deletedHeadVec->data() + m_metaDataSize, vector);
-                        float current_dist = m_headIndex->ComputeDistance(nextHeadVec->data() + m_metaDataSize, vector);
+                        float origin_dist = m_headIndex->ComputeDistanceBetweenStoredVectors(deletedHeadVec->data() + m_metaDataSize, vector);
+                        float current_dist = m_headIndex->ComputeDistanceBetweenStoredVectors(nextHeadVec->data() + m_metaDataSize, vector);
                         if (current_dist > origin_dist) {
                             m_stat.m_reassignSubmittedFromMerge.fetch_add(1, std::memory_order_relaxed);
                             ReassignAsync(std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), nextHeadID);
@@ -1214,11 +1199,8 @@ namespace SPTAG::SPANN {
                 }
 
                 {
-                    {
-                        std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                        m_mergeList.unsafe_erase(headID);
-                        m_mergeList.unsafe_erase(queryResult->VID);
-                    }
+                    m_mergeList.erase(headID);
+                    m_mergeList.erase(queryResult->VID);
                     if (currentLength + dedupLength <= m_mergeThreshold) {
                         MergeAsync(nextHeadID);
                     }
@@ -1236,10 +1218,7 @@ namespace SPTAG::SPANN {
                 return ret;
             }
             CheckCentroid(headID, mergedPostingList, "MergePostings-GC");
-            {
-                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                m_mergeList.unsafe_erase(headID);
-            }
+            m_mergeList.erase(headID);
             return ErrorCode::Success;
         }
 
@@ -1252,15 +1231,12 @@ namespace SPTAG::SPANN {
             // }
             // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
             // m_splitList.insert(workPair);
+            std::pair<SizeType, int> workPair(headID, postingSize);
+            auto res = m_splitList.insert(std::forward<std::pair<SizeType, int>>(workPair));
+            if (!res.second)
             {
-                Helper::Concurrent::ConcurrentMap<SizeType, int>::value_type workPair(headID, postingSize);
-                std::shared_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                auto res = m_splitList.insert(workPair);
-                if (!res.second)
-                {
-                    m_splitList[headID] = max(res.first->second, postingSize);
-                    return;
-                }
+                m_splitList.assign_if(std::forward<SizeType>(headID), std::forward<int>(postingSize), [postingSize](int v){ return v < postingSize; });
+                return;
             }
 
             auto* curJob = new SplitAsyncJob(this, headID, p_callback);
@@ -1272,14 +1248,12 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            std::pair<SizeType, bool> workPair(headID, true);
+            auto res = m_mergeList.insert(std::forward<std::pair<SizeType, bool>>(workPair));
+            if (!res.second)
             {
-                std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                auto res = m_mergeList.insert(headID);
-                if (!res.second)
-                {
-                    // Already in queue
-                    return;
-                }
+                // Already in queue
+                return;
             }
 
             auto* curJob = new MergeAsyncJob(this, headID, p_callback);
@@ -1346,7 +1320,12 @@ namespace SPTAG::SPANN {
                 bool isNeedReassign = RNGSelection(p_exWorkSpace, selections, vectorData, replicaCount, headPrev);
 
                 if (isNeedReassign && m_versionMap->GetVersion(vid) == version) {
-                    m_versionMap->IncVersion(vid, &version, version);
+                    if (!m_versionMap->IncVersion(vid, &version, version)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
+                                     "CollectReAssign: version update rejected for VID %lld; skip stale assignment.\n",
+                                     (std::int64_t)vid);
+                        return;
+                    }
                     *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType))) = version;
                     batchReassignVids.insert(vid);
                     for (int r = 0; r < replicaCount && m_versionMap->GetVersion(vid) == version; r++) {
@@ -1358,8 +1337,8 @@ namespace SPTAG::SPANN {
 
             std::vector<float> newHeadsDist(2, 0.0f);
             std::set<SizeType> reAssignVectorsTopK;
-            if (newHeadsVec[0]) newHeadsDist[0] = m_headIndex->ComputeDistance(headVector, newHeadsVec[0]->data());
-            if (newHeadsVec[1]) newHeadsDist[1] = m_headIndex->ComputeDistance(headVector, newHeadsVec[1]->data());
+            if (newHeadsVec[0]) newHeadsDist[0] = m_headIndex->ComputeDistanceBetweenStoredVectors(headVector, newHeadsVec[0]->data());
+            if (newHeadsVec[1]) newHeadsDist[1] = m_headIndex->ComputeDistanceBetweenStoredVectors(headVector, newHeadsVec[1]->data());
             for (int i = 0; i < postingLists.size(); i++) {
                 if (!newHeadsVec[i]) continue;
                 auto& postingList = postingLists[i];
@@ -1378,8 +1357,7 @@ namespace SPTAG::SPANN {
                     }
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
-                        float dist = m_headIndex->ComputeDistance(newHeadsVec[i]->data(), vector);
-                        if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, true)) {
+                        if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], newHeadsVec[i]->data(), true)) {
                             tryBatchReassign(vectorId, newHeadsID[i]);
                             reAssignVectorsTopK.insert(vid);
                         }
@@ -1454,8 +1432,7 @@ namespace SPTAG::SPANN {
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                             m_stat.m_reAssignScanNum++;
-                            float dist = m_headIndex->ComputeDistance(HeadPrevTopKVec[i]->data(), vector);
-                            if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, false)) {
+                            if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], HeadPrevTopKVec[i]->data(), false)) {
                                 tryBatchReassign(vectorId, HeadPrevTopK[i]);
                                 reAssignVectorsTopK.insert(vid);
                             }
@@ -1518,7 +1495,7 @@ namespace SPTAG::SPANN {
                 bool rngAccpeted = true;
                 for (int j = 0; j < replicaCount; ++j)
                 {
-                    float nnDist = m_headIndex->ComputeDistance((queryResult->Vec).Data(), selections[j].Vec.Data());
+                    float nnDist = m_headIndex->ComputeDistanceBetweenStoredVectors((queryResult->Vec).Data(), selections[j].Vec.Data());
                     if (m_opt->m_rngFactor * nnDist <= queryResult->Dist)
                     {
                         rngAccpeted = false;
@@ -1771,7 +1748,12 @@ namespace SPTAG::SPANN {
             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Need ReAssign\n");
             if (isNeedReassign && m_versionMap->GetVersion(VID) == version) {
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %lld, version: %d, current version: %d\n", (std::int64_t)VID, (int)version, (int)m_versionMap->GetVersion(VID));
-                m_versionMap->IncVersion(VID, &version, version);
+                if (!m_versionMap->IncVersion(VID, &version, version)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
+                                 "Reassign: version update rejected for VID %lld; skip stale assignment.\n",
+                                 (std::int64_t)VID);
+                    return ErrorCode::Success;
+                }
                 (*vectorInfo)[sizeof(VID)] = version;
 
                 //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%lld, replicaCount:%d, candidateNum:%d, dist0:%f\n", (std::int64_t)oldVID, replicaCount, i, selections[0].distance);
@@ -1863,8 +1845,8 @@ namespace SPTAG::SPANN {
                                 {
                                     char *vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
                                     SizeType VID = *(reinterpret_cast<SizeType *>(vectorInfo));
-                                    m_versionMap->SetVersion(VID, 0xff);
-                                    Serialize(ptr, VID, 0xff, vectorInfo + sizeof(SizeType));
+                                    m_versionMap->SetVersion(VID, m_versionMap->Default());
+                                    Serialize(ptr, VID, m_versionMap->Default(), vectorInfo + sizeof(SizeType));
                                 }
                                 if (GetWritePosting(&workSpace, allPostingIDs[index], newPosting, true) != ErrorCode::Success)
                                 {
@@ -2000,12 +1982,12 @@ namespace SPTAG::SPANN {
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
 		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%lld\n", (std::int64_t)vectorID);
-                    if (!isTiKV && m_versionMap->Deleted(vectorID)) {
-                        realNum--;
+                    if(p_exWorkSpace->Deduper().CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
-                    if(p_exWorkSpace->Deduper().CheckAndSet(vectorID)) {
+                    if (!isTiKV && m_versionMap->Deleted(vectorID)) {
+                        realNum--;
                         listElements--;
                         continue;
                     }
@@ -2129,11 +2111,11 @@ namespace SPTAG::SPANN {
 
                     if (vectorID < 0 || vectorID >= m_versionMap->Count())
                         return ErrorCode::Key_OverFlow;
-                    if (!isTiKV && m_versionMap->Deleted(vectorID))
-                        continue;
                     if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
                         continue;
-
+                    if (!isTiKV && m_versionMap->Deleted(vectorID))
+                        continue;
+                    
                     auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
                         queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);
@@ -2468,11 +2450,11 @@ namespace SPTAG::SPANN {
             if (p_localToGlobal.R() > 0) {
                 for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
                     SizeType globalID = *(p_localToGlobal[i]);
-                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, 0xff);
+                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, m_versionMap->Default());
                 }
             } else {
                 for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
-                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, 0xff);
+                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, m_versionMap->Default());
                 }
             }
 
@@ -2751,11 +2733,8 @@ namespace SPTAG::SPANN {
             std::unordered_map<SizeType, std::string> headAppends;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
                 SizeType VID = begin + v;
-                uint8_t version;
-                if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
-                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, 0xff);
-                    version = m_versionMap->GetVersion(VID);
-                }
+                if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, m_versionMap->Default());
+                uint8_t version = m_versionMap->GetVersion(VID);
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
                 RNGSelection(p_exWorkSpace, selections, (ValueType*)(p_vectorSet->GetVector(v)), replicaCount);
@@ -2794,7 +2773,7 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode ResetIndex(SizeType p_id) override {
-            m_versionMap->SetVersion(p_id, 0xff);
+            m_versionMap->SetVersion(p_id, m_versionMap->Default());
             return ErrorCode::Success;
         }
 

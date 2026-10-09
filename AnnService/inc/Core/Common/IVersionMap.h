@@ -42,15 +42,15 @@ namespace SPTAG
 
             virtual uint8_t GetVersion(const SizeType& key) = 0;
             virtual uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) { return GetVersion(key); }
-            virtual bool TryGetDefaultVersionForNewVector(uint8_t& version) const { return false; }
-            virtual void SetR(SizeType num) {}
-            virtual void SetVersion(const SizeType& key, const uint8_t& version) = 0;
+            virtual uint8_t& Default() = 0;
+            virtual void SetVersion(SizeType& key, uint8_t& version) = 0;
             /// Increment the version of a VID.
             /// @param expectedOld If not 0xff, the caller asserts the current version should be this value.
+            ///   LocalVersionMap uses strict compare-and-swap: only the winning caller succeeds.
             ///   If TiKV already holds (expectedOld+1)&0x7f, treat as success (another node did the same increment).
             ///   If TiKV holds a different value, return false (conflict).
             ///   If 0xff, just increment whatever the current value is (no check).
-            virtual bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) = 0;
+            virtual bool IncVersion(SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) = 0;
 
             virtual ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) = 0;
             virtual ErrorCode Save(const std::string& filename) = 0;

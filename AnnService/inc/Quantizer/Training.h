@@ -8,6 +8,7 @@
 #include <memory>
 #include <inc/Core/VectorSet.h>
 #include "inc/Core/Common/BKTree.h"
+#include "inc/Helper/VectorSetReader.h"
 
 #define blockRows 4096
 using namespace SPTAG;
@@ -24,6 +25,8 @@ public:
         AddOptionalOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
         AddOptionalOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
         AddOptionalOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");
+        AddOptionalOption(m_rabitqCentroids, "-rc", "--rabitq_centroids",
+                          "Float XVEC local centroids for a new RaBitQ model (trained from base data only).");
 
         // We also use this to determine batch size (max number of vectors to load at once)
         AddOptionalOption(m_trainingSamples, "-ts", "--train_samples", "Number of samples for training.");
@@ -50,6 +53,8 @@ public:
     std::string m_outputQuantizerFile;
 
     DimensionType m_quantizedDim;
+
+    std::string m_rabitqCentroids;
 
     SizeType m_trainingSamples;
 
@@ -166,6 +171,17 @@ inline std::shared_ptr<COMMON::RaBitQQuantizer> TrainRaBitQQuantizer(
         raw_vectors->Dimension(), bits, options->m_normalized);
     if (quantizer->Train(raw_vectors) != ErrorCode::Success) {
         return nullptr;
+    }
+    if (!options->m_rabitqCentroids.empty()) {
+        auto reader = Helper::VectorSetReader::CreateInstance(
+            std::make_shared<Helper::ReaderOptions>(
+                VectorValueType::Float, raw_vectors->Dimension(), VectorFileType::XVEC));
+        if (reader->LoadFile(options->m_rabitqCentroids) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load local RaBitQ centroids: %s.\n",
+                        options->m_rabitqCentroids.c_str());
+            return nullptr;
+        }
+        if (quantizer->SetLocalCentroids(reader->GetVectorSet()) != ErrorCode::Success) return nullptr;
     }
     return quantizer;
 }

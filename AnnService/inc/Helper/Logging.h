@@ -19,6 +19,10 @@
 #pragma warning(disable : 4267) // 'var' : conversion from 'size_t' to 'DWORD', possible loss of data
 #pragma warning(disable : 4127) // conditional expression is constant
 
+#if defined (__GNUC__)
+#define GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+#endif
+
 namespace SPTAG
 {
     namespace Helper
@@ -43,7 +47,7 @@ namespace SPTAG
 
         class LoggerHolder
         {
-#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 	202002L) || __cplusplus >= 	202002L)
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 	202002L) || (__cplusplus >= 	202002L && GCC_VERSION >= 120000))
         private:
             std::atomic<std::shared_ptr<Logger>> m_logger;
         public:
