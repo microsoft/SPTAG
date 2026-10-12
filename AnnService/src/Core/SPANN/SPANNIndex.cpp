@@ -722,7 +722,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 {
     if (m_extraSearchers.size() == 0) return ErrorCode::EmptyIndex;
 
-    COMMON::QueryResultSet<T> *p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
+    COMMON::QueryResultSet<T>& localResults = *((COMMON::QueryResultSet<T> *)&p_query);
     std::unique_ptr<ExtraWorkSpace> workSpace;
     if (p_exWorkSpace == nullptr) {
         workSpace = m_workSpaceFactory->GetWorkSpace();
@@ -739,26 +739,17 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         p_exWorkSpace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     }
 
-    COMMON::OptHashPosVector resultDedup;
-    resultDedup.Init(m_options.m_maxCheck, m_options.m_hashExp);
-    COMMON::QueryResultSet<T> localResults((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-    std::vector<BasicResult> headCandidates;
-    headCandidates.reserve(m_options.m_searchInternalResultNum);
-    if (m_pQuantizer)
-    {
-        localResults.SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
-    }
-    for (int i = 0, j = 0; i < p_queryResults->GetResultNum(); ++i)
-    {
-        auto res = p_queryResults->GetResult(i);
-        if (res->VID == -1) break;
-
-        if (j < m_options.m_searchInternalResultNum) {
-            *(localResults.GetResult(j++)) = *res;
-            headCandidates.emplace_back(*res);
+    std::vector<BasicResult> remainResults;
+    bool needInternalSort = (localResults.GetResultNum() > m_options.m_searchInternalResultNum);
+    if (needInternalSort) {
+        remainResults.reserve(localResults.GetResultNum() - m_options.m_searchInternalResultNum);
+        for (int i = m_options.m_searchInternalResultNum; i < localResults.GetResultNum(); ++i)
+        {
+            auto res = localResults.GetResult(i);
+            if (res->VID == -1) break;
+            remainResults.push_back(*res);
         }
     }
-    p_queryResults->Reset();
 
     ErrorCode ret;
     for (int layer = m_extraSearchers.size() - 1; layer >= p_tolayer; layer--) {
@@ -772,6 +763,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         p_exWorkSpace->m_deduper.clear();
         p_exWorkSpace->m_postingIDs.clear();
 
+        if (layer < m_extraSearchers.size() - 1 && needInternalSort) localResults.SortResult();
         // Target-layer postings include their posting IDs, so direct candidates are returned through SearchIndex.
         for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
         {
@@ -799,19 +791,16 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         }
     }
 
-    for (const auto& head : headCandidates) {
-        localResults.AddPoint(head.VID, head.Dist, head.Vec);
+    if (needInternalSort) {
+        for (int i = 0; i < remainResults.size(); ++i)
+        {
+            auto res = &remainResults[i];
+            if (res->VID == -1) break;
+            if (p_exWorkSpace->m_deduper.CheckAndSet(res->VID)) continue;
+            localResults.AddPoint(res->VID, res->Dist, res->Vec);
+        }
     }
-
-    for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
-    {
-        auto res = localResults.GetResult(i);
-        if (res->VID == -1) continue;
-
-        if (resultDedup.CheckAndSet(res->VID)) continue;
-        p_queryResults->AddPoint(res->VID, res->Dist, res->Vec);
-    }
-    p_queryResults->SortResult();
+    localResults.SortResult();
     if (workSpace != nullptr) m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
     return ErrorCode::Success;
 }
