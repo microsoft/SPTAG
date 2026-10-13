@@ -73,7 +73,7 @@ namespace SPTAG
                     }
                 }
 
-                char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
+                char oldvalue = InterlockedExchange((char*)m_data[key], 1);
                 if (oldvalue == 1) return false;
                 m_inserted++;
                 return true;
@@ -94,7 +94,7 @@ namespace SPTAG
                     default: {}
                     }
                 }
-                char oldvalue = InterlockedExchange8((char *)m_data[key], -1);
+                char oldvalue = InterlockedExchange((char *)m_data[key], -1);
                 if (oldvalue == -1) return false;
                 m_inserted--;
                 return true;

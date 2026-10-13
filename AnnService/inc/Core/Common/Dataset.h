@@ -473,6 +473,146 @@ namespace SPTAG
             }
         };
 
+        template <typename V, typename VV>
+        class SizeTypeConcurrentMap {
+        private:
+            std::mutex m_mutex;
+            std::atomic<SizeType> m_deleted;
+        protected:
+            Dataset<V> m_data;
+            V m_default = (V)(0xffffffffffffffff);
+
+        public:
+            class Iterator {
+            private:
+                const SizeTypeConcurrentMap<V, VV>* map_ptr;
+                std::pair<SizeType, V> node_ptr;
+
+            public:
+                using iterator_category = std::forward_iterator_tag;
+                using difference_type = std::ptrdiff_t;
+                using value_type = std::pair<SizeType, V>;
+                using pointer = value_type*;
+                using reference = value_type&;
+
+                Iterator(const SizeTypeConcurrentMap<V, VV>* ptr, SizeType idx) : map_ptr(ptr), node_ptr(std::pair<SizeType, V>{idx, map_ptr->m_default}) 
+                {
+                    if (idx < map_ptr->m_data.R()) node_ptr.second = *(map_ptr->m_data.At(idx));
+                }
+                reference operator*() { return node_ptr; }
+                pointer operator->() { return &(node_ptr); }
+
+                Iterator& operator++() {
+                    if (node_ptr.first >= map_ptr->m_data.R()) return *this;
+
+                    SizeType next = node_ptr.first + 1;
+                    while (next < map_ptr->m_data.R() && *(map_ptr->m_data.At(next)) == map_ptr->m_default) next++;
+
+                    node_ptr.first = next;
+                    node_ptr.second = next < map_ptr->m_data.R()
+                        ? *(map_ptr->m_data.At(next))
+                        : map_ptr->m_default;
+                    return *this;
+                }
+
+                Iterator operator++(int) {
+                    Iterator tmp = *this;
+                    ++(*this);
+                    return tmp;
+                }
+
+                bool operator==(const Iterator& other) const {
+                    return node_ptr.first == other.node_ptr.first;
+                }
+
+                bool operator!=(const Iterator& other) const {
+                    return node_ptr.first != other.node_ptr.first;
+                }
+            };
+
+            SizeTypeConcurrentMap(V _defaultfill = (V)0xffffffffffffffff) {
+                m_data.SetName("SizeTypeConcurrentMap");
+                m_data.SetDefaultValue((uint8_t)_defaultfill);
+                m_data.Initialize(1024 * 1024, 1, 1024 * 1024, MaxSize);
+                m_deleted.store(m_data.R());
+                m_default = _defaultfill;
+            }
+
+            Iterator find(const SizeType& k) const
+            {
+                if (k >= 0 && k < m_data.R() && *(m_data[k]) != m_default)
+                    return Iterator(this, k);
+                return Iterator(this, m_data.R());
+            }
+
+            Iterator begin() const noexcept
+            {
+                if (m_deleted.load() < m_data.R()) {
+                    for (SizeType i = 0; i < m_data.R(); i++) {
+                        if (*(m_data[i]) != m_default) {
+                            return Iterator(this, i);
+                        }
+                    }
+                }
+                return Iterator(this, m_data.R());
+            }
+
+            Iterator end() const noexcept
+            {
+                return Iterator(this, m_data.R());
+            }
+
+            std::pair<Iterator, bool> insert_or_assign(SizeType&& k, V&& v) 
+            {
+                if (k < 0) return std::make_pair(Iterator(this, m_data.R()), false);
+                if (k >= m_data.R()) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (k >= m_data.R()) {
+                        SizeType oldR = m_data.R();
+                        if (m_data.AddBatch(k - oldR + 10000) != ErrorCode::Success) {
+                            return std::make_pair(Iterator(this, m_data.R()), false);
+                        }
+                        m_deleted.fetch_add(k - oldR + 10000);
+                    }
+                }
+                V oldvalue = (V)InterlockedExchange((VV*)(m_data[k]), (VV)v);
+                if (oldvalue == m_default && v != m_default) m_deleted.fetch_sub(1);
+                return std::make_pair(Iterator(this, k), true);
+            }
+
+            bool assign_if_equal(SizeType&& k, const V& expected, V&& desired)
+            {
+                if (k < 0 || k >= m_data.R()) return false;
+                V oldvalue = (V)InterlockedCompareExchange((VV*)(m_data[k]), (VV)desired, (VV)expected);
+                if (oldvalue != expected) return false;
+                return true;
+            }
+
+            size_t erase(const SizeType& k)
+            {
+                if (k < 0 || k >= m_data.R()) return 0;
+                V oldvalue = (V)InterlockedExchange((VV*)(m_data[k]), (VV)m_default);
+                if (oldvalue == m_default) return 0;
+                m_deleted.fetch_add(1);
+                return 1;
+            }
+
+            void clear()
+            {
+                for (SizeType i = 0; i < m_data.R(); i++) {
+                    *m_data[i] = m_default;
+                }
+                m_deleted.store(m_data.R());
+            }
+            
+            size_t size() const
+            {
+                return m_data.R() - m_deleted.load();
+            }
+
+            friend class Iterator;
+        };
+
         template <typename T>
         ErrorCode LoadOptDatasets(std::shared_ptr<Helper::DiskIO> pVectorsInput, std::shared_ptr<Helper::DiskIO> pGraphInput,
             Dataset<T>& pVectors, Dataset<SizeType>& pGraph, DimensionType pNeighborhoodSize,

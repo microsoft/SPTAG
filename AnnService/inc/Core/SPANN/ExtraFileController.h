@@ -965,7 +965,7 @@ namespace SPTAG::SPANN {
                 }
                 else
                 {
-                    InterlockedExchange8((char*)(&(visited->at(postingSize[i]))), 1);
+                    InterlockedExchange((char*)(&(visited->at(postingSize[i]))), 1);
                 }
             }
             return ErrorCode::Success;
@@ -1241,6 +1241,7 @@ namespace SPTAG::SPANN {
         int m_layer;
         SizeType m_blockLimit;
         Helper::Concurrent::ConcurrentHashMap<SizeType, uintptr_t> m_pBlockMapping;
+        //COMMON::SizeTypeConcurrentMap<uintptr_t, int64_t> m_pBlockMapping;
         bool m_checkSumMultiGet;
         COMMON::Checksum m_checkSum;
         SizeType m_bufferLimit;

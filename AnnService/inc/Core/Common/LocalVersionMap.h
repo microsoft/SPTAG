@@ -22,6 +22,7 @@ namespace SPTAG
         {
         private:
             Helper::Concurrent::ConcurrentHashMap<SizeType, uint8_t> m_label;
+            //COMMON::SizeTypeConcurrentMap<uint8_t, char> m_label{0xfe};
             uint8_t m_default = 0xff;
         public:
             LocalVersionMap() = default;
@@ -163,7 +164,7 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error vid in VersionLabel Delete operation: %d. Max Allowed: %d\n", key, m_data.R());
                     return true;
                 }
-                uint8_t oldvalue = (uint8_t)InterlockedExchange8((char*)(m_data[key]), (char)0xfe);
+                uint8_t oldvalue = (uint8_t)InterlockedExchange((char*)(m_data[key]), (char)0xfe);
                 if (oldvalue == 0xfe) return false;
                 m_deleted++;
                 return true;
@@ -203,7 +204,7 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error vid in VersionLabel SetVersion operation: %d. Max Allowed: %d\n", key, m_data.R());
                     return;
                 }
-                uint8_t oldvalue = (uint8_t)InterlockedExchange8((char*)(m_data[key]), (char)version);
+                uint8_t oldvalue = (uint8_t)InterlockedExchange((char*)(m_data[key]), (char)version);
                 if (oldvalue == 0xfe && version != 0xfe) m_deleted--;
             }
 

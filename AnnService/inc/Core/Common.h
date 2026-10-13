@@ -71,7 +71,7 @@ inline T max(T a, T b) {
 
 #define mkdir(a) mkdir(a, ACCESSPERMS)
 #define InterlockedCompareExchange(a,b,c) __sync_val_compare_and_swap(a, c, b)
-#define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
+#define InterlockedExchange(a,b) __sync_lock_test_and_set(a, b)
 #define Sleep(a) usleep(a * 1000)
 #define strtok_s(a, b, c) strtok_r(a, b, c)
 
@@ -138,6 +138,24 @@ InterlockedCompareExchange(
     return (int64_t)InterlockedCompareExchange64((LONGLONG volatile*)Destination, (LONGLONG)Exchange, (LONGLONG)Comperand);
 }
 
+FORCEINLINE
+char
+InterlockedExchange(
+    _Inout_ _Interlocked_operand_ char volatile* Destination,
+    _In_ char Exchange
+)
+{
+    return (char)InterlockedExchange8(Destination, Exchange);
+}
+FORCEINLINE
+int64_t
+InterlockedExchange(
+    _Inout_ int64_t volatile* Destination,
+    _In_ int64_t Exchange
+)
+{
+    return (int64_t)InterlockedExchange64((LONGLONG volatile*)Destination, (LONGLONG)Exchange);
+}
 #endif
 
 inline int64_t filesize(const char* path) {
