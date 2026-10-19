@@ -1,27 +1,28 @@
 # Documentation
 
-This index separates supported entry points, optional integrations, developer
-contracts, and historical experiments. Start with the baseline; do not use a
-paper's machine-specific setup as an installation guide.
+Embed vector search in your C++ or Python application. Start with the SDK
+workflow below; optional backends and research experiments have separate
+requirements and are not installation prerequisites.
 
 ## Start here
 
-1. [Platform and feature status](SupportMatrix.md).
-2. [Linux installation](LinuxInstallation.md) or
-   [Windows installation](WindowsInstallation.md).
-3. [Small end-to-end example](QuickStart.md).
-4. [Build options and dependencies](BuildOptions.md).
+1. [Install the developer baseline on Linux](LinuxInstallation.md)
+   (Ubuntu 24.04, including WSL2); [native Windows status](WindowsInstallation.md).
+2. [Python and C++ quick start, including your own vectors and business IDs](QuickStart.md).
+3. [SDK API, data, error, concurrency, and compatibility contracts](SDK.md).
+4. [Platform and feature status](SupportMatrix.md) and [build options](BuildOptions.md).
 
 ## User guides
 
-- [Command-line and SPANN examples](GettingStart.md).
+- [CLI quick start](CLIQuickStart.md).
+- [Advanced command-line and SPANN examples](GettingStart.md).
 - [Parameter reference](Parameters.md).
 - [TiKV posting storage](TiKV-Integration.md).
 - [RaBitQ training and search](RaBitQ_Global_Quantizer.md).
-- [Python tutorial](Tutorial.ipynb) and
-  [notebook examples](examples/QuickstartGuide.ipynb).
+- Additional [Python tutorial](Tutorial.ipynb) and
+  [notebook examples](examples/QuickstartGuide.ipynb), outside the SDK smoke-test contract.
 - [OPQ tools](../Tools/OPQ/README.md).
-- [NNI parameter tuning](../Tools/nni-auto-tune/README.md).
+- [Legacy NNI parameter-tuning experiment](../Tools/nni-auto-tune/README.md).
 
 ## Development
 

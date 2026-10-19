@@ -13,28 +13,36 @@ Install dependencies:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake ninja-build git swig python3-dev \
+sudo apt-get install -y build-essential cmake ninja-build git swig python3-dev python3-numpy \
   libboost-system-dev libboost-thread-dev libboost-serialization-dev \
   libboost-regex-dev libboost-filesystem-dev libboost-test-dev libtbb-dev libnuma-dev
 ```
 
-SWIG and Python development headers allow CMake to build the Python wrapper.
-NumPy is additionally needed to run the Python tutorials. The baseline CLI
-example does not depend on Python packages. Node.js 20+ is only required for
-the self-checking example and documentation checker.
+SWIG and Python development headers build the Python SDK; the example uses
+NumPy. The current validated Python runtime is Ubuntu's Python 3.12 with NumPy
+1.26. Check `python3 --version` and
+`python3 -c "import numpy; print(numpy.__version__)"`.
+Node.js is not required for either SDK example. Optional CLI smoke tests and
+documentation checks require Node.js 20+; use the
+[official installer](https://nodejs.org/en/download) and check `node --version`
+rather than assuming Ubuntu's package meets that requirement.
 
 ## Clone and configure
 
 ```bash
-git clone https://github.com/microsoft/SPTAG.git
+git clone --branch users/qiazh/doc https://github.com/microsoft/SPTAG.git
 cd SPTAG
 git submodule update --init ThirdParty/zstd
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
-cmake --build build --target indexbuilder indexsearcher SPTAGTest --parallel 2
+cmake --build build --target _SPTAG indexbuilder indexsearcher SPTAGTest --parallel 2
 ```
+
+These SDK instructions track `users/qiazh/doc` until merged into the default
+branch. Record `git rev-parse HEAD`; do not substitute the default branch or a
+package-index release and assume it contains this workflow.
 
 Run every command above from the repository root. `--parallel 2` is a
 conservative starting point for memory-heavy C++ template compilation.
@@ -49,13 +57,22 @@ integrations, initialize their dependencies explicitly or run
 ## Verify
 
 ```bash
-node Tools/quickstart.mjs Release
-Release/SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite
+export PYTHONPATH="$PWD/Release${PYTHONPATH:+:$PYTHONPATH}"
+python3 Examples/python/quickstart.py --index quickstart-output/python
+python3 Examples/python/quickstart.py --index quickstart-output/python \
+  --load --queries quickstart-output/python/queries.npy
+python3 -m unittest discover -s Test/python -v
+(cd Release && ./SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite)
 ```
 
-The quick start asserts search results after saving and reloading the index.
+The [SDK quick start](QuickStart.md) also covers a standalone C++ consumer and
+your own vectors/business IDs. The Python example keeps its output; choose a
+new directory to repeat a build. The optional [CLI smoke test](CLIQuickStart.md)
+uses a separate temporary dataset.
 The selected unit suites need no TiKV cluster or external dataset. They are
 not the full performance, storage, or integration test suite.
+Run them from the output directory as shown so their temporary INI and
+index fixtures stay inside the ignored build output.
 
 Linux output directories are relative to the **source root**:
 
@@ -64,7 +81,7 @@ Linux output directories are relative to the **source root**:
 | Release | `Release` |
 | Debug | `Debug` |
 
-For an optional wrapper session, set the module path using shell syntax:
+`PYTHONPATH` makes the locally built `SPTAG.py` and `_SPTAG.so` importable:
 
 ```bash
 export PYTHONPATH="$PWD/Release${PYTHONPATH:+:$PYTHONPATH}"
@@ -98,6 +115,9 @@ unvalidated research recipe, not the baseline image.
 - **Compiler errors with an older GCC:** use the C++20 baseline above; the
   historical GCC 5 configure-time check is not a support statement.
 - **Illegal instruction:** check CPU/VM AVX2 availability.
+- **`import SPTAG` fails:** build `_SPTAG`, set the source-root `Release` module
+  path, and use the Python interpreter matching the CMake-discovered headers.
+  Check `python3 -c "import SPTAG; print(SPTAG.__file__)"` for a stale installation.
 - **Out of memory while compiling:** lower `--parallel`; do not omit failed
   targets and call the build successful.
 

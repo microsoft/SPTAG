@@ -467,3 +467,4 @@ FodyWeavers.xsd
 # SPTAG benchmark generated artifacts
 *perftest_*
 /benchmark-output/
+/quickstart-output/

@@ -9,12 +9,14 @@ Check the actual workflow result for the commit you use.
 
 | Feature / configuration | Linux x86-64 | Native Windows | Validation boundary |
 | --- | --- | --- | --- |
-| BKT/KDT, CLI, save/load | Baseline | Compatibility path | CI builds the CLI; the small example checks BKT save/load/search |
+| C++ BKT/KDT and persistence | Developer baseline | Manual validation required | Selected core tests; standalone CMake consumer checks BKT and independent-process reload |
+| Python BKT/KDT and persistence | Developer baseline: Python 3.12, NumPy 1.26 | Manual validation required | Public binding tests cover results, metadata, buffers, and save/load; example uses independent processes |
+| CLI, save/load | Baseline | Compatibility path | The file-based example checks BKT save/load/search |
 | Core helpers and non-Folly map tests | Baseline | Manual validation required | Selected Boost.Test suites, not all tests |
 | SPANN / SPFresh FILEIO | Available | Manual validation required | Built in the baseline; large update experiments are not covered by the smoke test |
 | TBB queues / non-Folly map | Enabled in Linux baseline | Manual validation required | Map operations are locked; returned read iterators own snapshots |
 | Linux without TBB | Known build limitations | Not applicable | Existing queue adapter lacks operations used by FILEIO; not a supported baseline |
-| Python / Java / .NET wrappers | Optional | Optional | Build discovery exists; tutorial/runtime compatibility is not certified by CLI checks |
+| Java / .NET wrappers | Optional | Optional | Build discovery exists; runtime compatibility is not certified by SDK checks |
 | TiKV RawKV | Experimental | Not validated | Requires gRPC/Protobuf and a separately versioned TiKV/PD deployment |
 | RaBitQ | Experimental, opt-in | Not validated | Requires official submodule, AVX2/FMA or AVX512, and separate accuracy/compatibility tests |
 | RocksDB | Optional integration | Not validated | External matching development library required |
@@ -40,6 +42,10 @@ Check the actual workflow result for the commit you use.
 
 ## Known validation limits
 
+- The SDK developer baseline covers static in-memory indexes. It does not
+  establish a versioned binary distribution, installed CMake package, stable
+  ABI, cross-version index compatibility, or concurrent mutation guarantees.
+  See the [SDK contracts](SDK.md).
 - `DedupCandidateTest/SearchPathsMatchDeleteFirstAcrossVisibilityInterleavings`
   currently fails. The existing search loops mark candidates in the deduper
   before checking local deletion, so a deleted occurrence can suppress a later
@@ -47,6 +53,9 @@ Check the actual workflow result for the commit you use.
   This is outside the documentation/concurrent-map build repair; CI reports
   it separately as non-blocking and retains its log. A passing baseline must
   not be presented as a clean full test suite.
+  This correctness issue blocks promotion of affected dynamic update/delete
+  search paths into the stable SDK surface; a non-blocking diagnostic is not
+  a release approval for those capabilities.
 - The legacy Azure pipeline includes old hosted-agent/toolset assumptions and
   organization-specific tasks. YAML parsing is not remote execution validation.
 - Docker, native Windows, TiKV cluster behavior, RaBitQ accuracy, SPDK, and GPU

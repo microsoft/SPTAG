@@ -5,6 +5,8 @@
 Native Windows is a compatibility path, not the Linux CI baseline. TiKV, SPDK,
 Folly, io_uring, and distributed experiment recipes are not validated on native
 Windows. For the complete Linux workflow, use Ubuntu 24.04 under WSL2.
+The C++/Python [SDK quick start](QuickStart.md) is currently validated through
+that Linux path, not native MSVC or Windows Python.
 
 ## Toolchain
 
@@ -26,7 +28,7 @@ does not discover it automatically.
 ## Clone only the required dependency
 
 ```powershell
-git clone https://github.com/microsoft/SPTAG.git
+git clone --branch users/qiazh/doc https://github.com/microsoft/SPTAG.git
 Set-Location SPTAG
 git submodule update --init ThirdParty/zstd
 
@@ -35,6 +37,7 @@ cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release `
 cmake --build build --config Release --target indexbuilder indexsearcher SPTAGTest --parallel 2
 ```
 
+The development-branch selection keeps this guide matched to its source.
 The baseline needs no SPDK submodules. Avoid a blanket recursive clone on
 Windows: the pinned nested xNVMe dependency contains directories called `aux`,
 a reserved Windows device name. If an existing recursive checkout fails

@@ -28,6 +28,10 @@ override defaults deliberately; existing developer build behavior is unchanged.
 
 Wrapper targets are discovered from installed Python, SWIG, JNI, and .NET
 tools. They are not the same as enabling `GPU` or `LIBRARYONLY`.
+Build `_SPTAG` explicitly for the Python SDK. The current developer baseline
+uses Python 3.12 and NumPy 1.26; see the [SDK quick start](QuickStart.md).
+For a C++ source consumer, link `SPTAG::SPTAG` after adding the repository as
+a subdirectory. This target is not yet an installed `find_package` export.
 
 ## Dependency checkout
 

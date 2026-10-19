@@ -16,7 +16,7 @@ Replace dataset paths and resource settings for your own environment.
  Options:
   -d, --dimension <value>       Dimension of vector, required.
   -v, --vectortype <value>      Input vector data type (e.g. Float, Int8, Int16), required.
-  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
+  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is TXT; specify it explicitly.
   -i, --input <value>           Input raw data, required.
   -o, --outputfolder <value>    Output folder, required.
   -a, --algo <value>            Index Algorithm type (e.g. BKT, KDT), required.
@@ -38,7 +38,7 @@ Replace dataset paths and resource settings for your own environment.
   -d, --dimension <value>       Dimension of vector.
   -v, --vectortype <value>      Input vector data type. Default is float.
   -i, --input <value>           Input query data.
-  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
+  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is TXT; specify it explicitly.
   -x, --index <value>           Index folder.
 
   -t, --thread <value>          Thread Number.

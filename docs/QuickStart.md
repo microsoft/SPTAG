@@ -1,64 +1,132 @@
-# Quick start: build, save, reload, and search
+# SDK quick start
 
-[Documentation index](README.md)
+[Documentation index](README.md) | [API contracts](SDK.md) | [Support matrix](SupportMatrix.md)
 
-First build `indexbuilder` and `indexsearcher` using the
-[Linux](LinuxInstallation.md) or [Windows](WindowsInstallation.md) guide.
-This example uses BKT, Float vectors, and L2 distance. It needs no dataset
-download, storage daemon, Python package, or special SSD.
+Use SPTAG inside your own application. The examples build an in-memory BKT
+index, find Top-K neighbors, map vector rows to business IDs, save the index,
+and reload it in a separate process. Both keep the output for inspection.
+They do not need an embedding service, downloaded dataset, or Node.js.
 
-## Run the self-checking example
+First follow [Linux installation](LinuxInstallation.md). This guide targets
+the documented Ubuntu 24.04 x86-64/AVX2 baseline, Python 3.12, and NumPy 1.26.
+The checkout must include the SDK examples on `users/qiazh/doc`; the default
+branch does not yet provide this development workflow.
 
-Install Node.js 20+ if it is not already available. Node is only the portable
-example driver, not a dependency of the C++ library.
+## Python
 
-From the repository root on Linux:
+Build the binding with the **same Python development installation** that will
+run it, then add its output directory to the module path:
 
 ```bash
-node Tools/quickstart.mjs Release
+cmake --build build --target _SPTAG --parallel 2
+export PYTHONPATH="$PWD/Release${PYTHONPATH:+:$PYTHONPATH}"
+python3 -c "import SPTAG, numpy; print(SPTAG.__file__, numpy.__version__)"
+python3 Examples/python/quickstart.py --index quickstart-output/python
 ```
 
-On native Windows:
-
-```powershell
-node Tools\quickstart.mjs build\Release
-```
-
-The [driver](../Tools/quickstart.mjs):
-
-1. Creates 1,024 deterministic, eight-dimensional Float vectors and three queries.
-2. Writes SPTAG DEFAULT-format input: little-endian 32-bit count and dimension,
-   followed by row-major Float32 coordinates.
-3. Runs the real `indexbuilder` CLI and saves a BKT index.
-4. Runs `indexsearcher` in a new process, loading that saved index.
-5. Checks all three returned IDs and zero self-match distances.
-6. Reloads and queries again, checks the same results, and removes its own
-   temporary directory.
-
-The final line must be:
+The [executable example](../Examples/python/quickstart.py) creates 128
+eight-dimensional Float32 vectors. It checks the first neighbor and zero
+distance for rows 0, 31, and 63 after saving and reloading. Its final line is:
 
 ```text
-Quick start passed: 3/3 nearest neighbors matched after save/load and repeat search.
+Python SDK example passed: 3 queries; artifacts retained at <absolute-output-directory>
 ```
 
-Any missing binary, nonzero process exit, missing output, wrong result count,
-wrong ID, or incorrect distance fails the command. Intermediate library logs
-may vary. This is a correctness smoke test, **not** a recall or speed benchmark.
+The output contains:
 
-## Equivalent command-line operations
+| Artifact | Purpose |
+| --- | --- |
+| `index/` | The SPTAG index, including its loader configuration and data files |
+| `ids.json` | Business IDs in original vector row order |
+| `vectors.npy` | Input vectors retained by this example |
+| `queries.npy` | Queries retained for another process |
 
-The driver invokes these operations using its generated absolute file paths:
+Run another process without rebuilding:
 
-```text
-indexbuilder -d 8 -v Float -f DEFAULT -i vectors.bin -o index -a BKT -t 1 Index.DistCalcMethod=L2 Index.NumberOfThreads=1
-indexsearcher -d 8 -v Float -f DEFAULT -i queries.bin -x index -o results.txt -k 1 -t 1
+```bash
+python3 Examples/python/quickstart.py --index quickstart-output/python \
+  --load --queries quickstart-output/python/queries.npy --k 3
 ```
 
-Result rows have the form `queryID:distance@vectorID|`. Expected vector IDs
-are `0`, `127`, and `511`, respectively, each with distance zero. Library IDs
-are zero-based row IDs in this example.
+Each query prints a JSON object with `query` and `neighbors`. Each neighbor
+contains `id` (business ID), `row_id` (SPTAG row), and `distance` (squared L2).
+For the first demonstration query, rank zero is `document-0`, row 0, distance 0.
+Library diagnostic logs also appear; the example is not a JSON-only service.
 
-For your own data, keep the index directory and query it in a later process
-with `indexsearcher -x`. Use a fresh output directory for a new index.
-See the [command-line reference](GettingStart.md) and
-[parameters](Parameters.md) for larger configurations and SPANN.
+### Use your own vectors and IDs
+
+Prepare:
+
+- `vectors.npy`: finite `float32` array with shape `(count, dimension)`.
+- `queries.npy`: finite `float32` array with shape `(query_count, dimension)`.
+- `ids.json`: JSON list of unique, nonempty strings, one per vector row.
+
+For example, these four vectors might represent embeddings of four documents:
+
+```python
+import json
+from pathlib import Path
+import numpy as np
+
+vectors = np.array([[0, 0], [1, 0], [0, 2], [3, 3]], dtype=np.float32)
+np.save("vectors.npy", vectors)
+np.save("queries.npy", vectors[:1])
+Path("ids.json").write_text(
+    json.dumps(["doc-A", "doc-B", "doc-C", "doc-D"]), encoding="utf-8"
+)
+```
+
+Then:
+
+```bash
+python3 Examples/python/quickstart.py --index quickstart-output/my-data \
+  --vectors vectors.npy --ids ids.json --queries queries.npy --k 3
+python3 Examples/python/quickstart.py --index quickstart-output/my-data \
+  --load --queries queries.npy --k 3
+```
+
+Use a fresh artifact directory when building. The first query's nearest
+neighbor should be `doc-A` at distance zero. The example rejects invalid shapes,
+dtypes, nonfinite values, mismatched dimensions, invalid IDs, and invalid K.
+It does not silently replace a missing or invalid input with demonstration data.
+The two-dimensional example is for learning, not recall or performance evaluation.
+
+## C++
+
+The [consumer project](../Examples/cpp/CMakeLists.txt) is a standalone CMake
+application that adds SPTAG as a source subdirectory and links
+`SPTAG::SPTAG`. That target supplies the include directories, C++20 requirement,
+OpenMP linkage, and build definitions needed by the public headers.
+
+```bash
+cmake -S Examples/cpp -B build-sdk-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
+cmake --build build-sdk-consumer --target sptag_sdk_example --parallel 2
+build-sdk-consumer/sptag_sdk_example quickstart-output/cpp
+build-sdk-consumer/sptag_sdk_example quickstart-output/cpp --load
+```
+
+Both runs must finish with `C++ SDK example passed: 3/3 self-matches; ...`.
+They retain `index/` and the row-to-business-ID mapping in `ids.txt`.
+The [source](../Examples/cpp/main.cpp) checks each operation's `ErrorCode` and
+does not rely on assertions disabled in Release builds.
+
+In your application, replace the example's vector initialization with your own
+contiguous `std::vector<float>` containing `count * dimension` values in row
+order. Replace the generated `document-N` strings with your business IDs and
+replace the demonstration queries/self-match checks with your own query logic.
+The raw-pointer API does not check the size of a C++ allocation for you.
+
+Use the same feature flags for the library and consumer. The source-based
+consumer is tested; an installed `find_package(SPTAG)` package, binary ABI
+compatibility, and native Windows SDK integration are not established by it.
+Separate Release build trees currently share the source-root `Release`
+directory; do not build incompatible configurations there concurrently.
+
+## Next steps
+
+- Read [API, data, errors, concurrency, and compatibility contracts](SDK.md).
+- Adjust [parameters](Parameters.md), measuring recall and latency on your data.
+- Use the [CLI example](CLIQuickStart.md) for file-based indexing.
+- Read the [support matrix](SupportMatrix.md) before enabling disk storage,
+  updates, quantization, or distributed integrations.

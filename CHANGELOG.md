@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Developer SDK
+
+- Make C++/Python integration the primary onboarding path, with source-version
+  selection, explicit NumPy installation, persistent examples, business-ID
+  mapping, own-data input, and API/error/compatibility contracts.
+- Add the source-consumer CMake alias `SPTAG::SPTAG` and propagate public
+  header requirements, feature definitions, and OpenMP linkage.
+- Repair Python search result metadata: searches without metadata return
+  `None` entries instead of uninitialized list slots. Return owned Python
+  boolean references in local query results.
+- Add real Python BKT/KDT SDK regression tests and blocking CI checks for
+  Python and standalone C++ consumers, including separate-process loading.
+- Correct in-memory parameter defaults and CLI file-type defaults; retire
+  the obsolete inline NNI invocation from the current parameter guide.
+- Scope the developer baseline to static indexes; affected dynamic
+  update/delete visibility remains a release blocker, not a supported promise.
+
 ### Documentation and maintenance
 
 - Introduce a unified documentation index, platform/feature status, explicit

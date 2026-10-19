@@ -24,7 +24,15 @@ Follow the [Linux](docs/LinuxInstallation.md) or
 node --test Tools/check-docs.test.mjs
 node Tools/check-docs.mjs
 node Tools/quickstart.mjs Release
+PYTHONPATH="$PWD/Release" python3 -m unittest discover -s Test/python -v
 ```
+
+The Python suite exercises the real built `_SPTAG` extension, not a mock.
+Changes to the public SDK also need the
+[C++ consumer and independent-process Python examples](docs/QuickStart.md).
+Their output is retained, so use fresh directories when repeating a build.
+The Linux CI configures that standalone consumer and treats SDK checks as
+blocking. Native Windows SDK usage requires its own validation.
 
 Run self-contained Boost.Test suites from the output directory:
 

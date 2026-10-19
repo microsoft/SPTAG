@@ -1,112 +1,127 @@
-# SPTAG: vector search with trees and graphs
+# SPTAG: vector search SDK for C++ and Python
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-SPTAG (Space Partition Tree And Graph) is a C++ library for approximate nearest
-neighbor search, originally released by Microsoft Research and Microsoft Bing.
-It supports L2 and cosine distance, with BKT (balanced k-means tree) and KDT
-(kd-tree) indexes.
+SPTAG (Space Partition Tree And Graph) provides approximate nearest-neighbor
+search inside your application. Build an index from your vectors, retrieve
+Top-K neighbors, and save and reload the index using C++ or Python. The core
+combines partition trees with neighborhood graphs and was originally released
+by Microsoft Research and Microsoft Bing.
 
-This development line also contains SPANN disk-based indexing, SPFresh
-incremental updates, and experimental TiKV, RaBitQ, and distributed-build
-integrations. Their presence does **not** imply that every feature combination
-is production-ready or supported on every platform. See the
-[support matrix](docs/SupportMatrix.md) before choosing a configuration.
+**Start with:** [SDK quick start](docs/QuickStart.md) |
+[API and data contracts](docs/SDK.md) |
+[platform and feature status](docs/SupportMatrix.md).
 
-The repository also hosts research associated with **SPIRE**,
-[Scalable Distributed Vector Search via Accuracy Preserving Index Construction](https://arxiv.org/abs/2512.17264).
-SPIRE studies scalable distributed vector search through partition-granularity
-selection and accuracy-preserving recursive, multi-level index construction.
-See the [distributed research workflow](evaluation/distributed/Readme.md).
+SPTAG indexes vectors you supply; it does not generate embeddings or provide a
+managed vector database. Start with in-memory BKT or KDT. Disk-based, dynamic,
+and distributed capabilities have separate integration and validation requirements.
 
 <p align="center">
   <img src="docs/img/sptag.png" alt="SPTAG tree and graph search architecture" width="500"/>
 </p>
 
-## Capabilities
+## Choose your entry point
 
-| Area | Description | Documentation |
+| You want to | Entry point | Documentation |
 | --- | --- | --- |
-| In-memory search | BKT/KDT graph construction, search, and index persistence | [Quick start](docs/QuickStart.md) |
-| Disk-based search | SPANN head index and posting storage | [Usage reference](docs/GettingStart.md) |
-| Incremental updates | SPFresh insertion, deletion, split, and reassign workflows | [Architecture](docs/Architecture.md) |
-| Distributed posting storage | Experimental TiKV RawKV backend | [TiKV integration](docs/TiKV-Integration.md) |
-| Quantization | Optional RaBitQ model training and encoded-vector search | [RaBitQ guide](docs/RaBitQ_Global_Quantizer.md) |
-| Distributed construction research (SPIRE) | MPI-based partitioning and distributed build workflows | [Distributed research workflow](evaluation/distributed/Readme.md) |
+| Use NumPy vectors in your application | Python `SPTAG.AnnIndex` | [Python quick start](docs/QuickStart.md#python) |
+| Embed search in a C++ application | `SPTAG::VectorIndex`, CMake target `SPTAG::SPTAG` | [C++ quick start](docs/QuickStart.md#c) |
+| Build or query an index from files | `indexbuilder`, `indexsearcher` | [CLI quick start](docs/CLIQuickStart.md) |
 
-## Build the baseline
+## Install from source
 
-The baseline uses TBB and disables Folly, SPDK, RocksDB, TiKV, GPU, and RaBitQ.
-It needs no running service, special SSD, or downloaded dataset.
+This SDK workflow currently tracks the **`users/qiazh/doc` development branch**,
+not a versioned SDK release. The checkout below selects that branch explicitly.
+Do not assume a package named `sptag` on a package index contains these changes.
+Record `git rev-parse HEAD` when integrating a snapshot.
 
-On Ubuntu 24.04 with GCC 13:
+The validated starting environment is Ubuntu 24.04 x86-64 with GCC 13,
+Python 3.12, NumPy 1.26, and an **AVX2-capable CPU**; WSL2 can run this Linux
+workflow. Native Windows has a separate [compatibility guide](docs/WindowsInstallation.md).
+No external dataset, running service, or special SSD is needed.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake ninja-build git swig python3-dev \
+sudo apt-get install -y build-essential cmake ninja-build git swig python3-dev python3-numpy \
   libboost-system-dev libboost-thread-dev libboost-serialization-dev \
   libboost-regex-dev libboost-filesystem-dev libboost-test-dev libtbb-dev libnuma-dev
 
-git clone https://github.com/microsoft/SPTAG.git
+git clone --branch users/qiazh/doc https://github.com/microsoft/SPTAG.git
 cd SPTAG
 git submodule update --init ThirdParty/zstd
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
-cmake --build build --target indexbuilder indexsearcher SPTAGTest --parallel 2
+cmake --build build --target _SPTAG --parallel 2
+export PYTHONPATH="$PWD/Release${PYTHONPATH:+:$PYTHONPATH}"
+python3 Examples/python/quickstart.py --index quickstart-output/python
 ```
 
-Run the [small, self-checking example](docs/QuickStart.md), which builds, saves,
-reloads, and queries an index without external data. Node.js 20 or later is
-needed only for the example driver and documentation checks:
+The example checks three exact self-matches and **keeps** its index, input
+vectors, queries, and business-ID mapping. Reload it in another process:
 
 ```bash
-node Tools/quickstart.mjs Release
+python3 Examples/python/quickstart.py --index quickstart-output/python \
+  --load --queries quickstart-output/python/queries.npy
 ```
 
-Full instructions: [Linux](docs/LinuxInstallation.md),
-[Windows](docs/WindowsInstallation.md), and
-[build options and dependencies](docs/BuildOptions.md).
-On Linux, executables are written to the repository's `Release` directory,
-not `build/Release`. Windows CMake builds use `build/Release`.
+Use a new output directory for another build. Next, follow the
+[SDK quick start](docs/QuickStart.md) to use your own vectors and IDs or embed
+the C++ library. Node.js is not required for either SDK example.
+
+## Python API at a glance
+
+After building and setting `PYTHONPATH` above:
+
+```python
+import numpy as np
+import SPTAG
+
+vectors = np.arange(1024, dtype=np.float32).reshape(128, 8)
+index = SPTAG.AnnIndex("BKT", "Float", 8)
+index.SetBuildParam("DistCalcMethod", "L2", "Index")
+index.SetBuildParam("NumberOfThreads", "1", "Index")
+if not index.Build(vectors, len(vectors), False):
+    raise RuntimeError("Index build failed")
+row_ids, squared_distances, metadata, relaxed = index.Search(vectors[0], 3)
+print(row_ids, squared_distances)
+```
+
+Returned IDs are vector row numbers, not automatically your application IDs.
+See [data, result, error, and persistence contracts](docs/SDK.md) before
+integrating. ANN results are approximate; evaluate recall on your own data.
+
+## Capabilities and support
+
+The developer baseline covers in-memory BKT/KDT build, search, and persistence.
+The [CI workflow](.github/workflows/ci.yml) checks the public SDK paths as well
+as selected core tests. See [recorded validation](docs/Validation.md) and the
+[support matrix](docs/SupportMatrix.md) for exact environments and limits;
+this development snapshot is not a blanket production-readiness guarantee.
+
+| Additional capability | Entry point and status |
+| --- | --- |
+| SPANN disk-based search | [Advanced configuration](docs/GettingStart.md); separately validate storage and scale |
+| SPFresh incremental updates | [Architecture](docs/Architecture.md); dynamic visibility has a [known correctness blocker](docs/SupportMatrix.md#known-validation-limits) |
+| TiKV distributed postings | [Experimental integration](docs/TiKV-Integration.md) |
+| RaBitQ quantization | [Opt-in integration](docs/RaBitQ_Global_Quantizer.md) |
+| SPIRE distributed construction | [Multi-host workflow](evaluation/distributed/Readme.md), outside the SDK baseline |
 
 ## Documentation
 
-Start with the [documentation index](docs/README.md).
-See [the changelog](CHANGELOG.md) for unreleased maintenance changes.
-
-- **Users:** [quick start](docs/QuickStart.md), [parameters](docs/Parameters.md),
-  [command-line and SPANN examples](docs/GettingStart.md).
-- **Developers:** [architecture](docs/Architecture.md),
-  [contribution and test instructions](CONTRIBUTING.md).
-- **Experiments:** [benchmark methodology](BENCHMARK_GUIDE.md),
-  [evaluation index](evaluation/README.md),
-  [historical paper artifacts](Script_AE/README.md).
-- **Compatibility:** [platform and feature status](docs/SupportMatrix.md),
-  [RaBitQ implementation and compatibility](docs/development/RaBitQ.md).
-
-The [Python tutorial](docs/Tutorial.ipynb) is an additional wrapper example,
-not a prerequisite for the baseline C++ workflow.
-
-## Validation
-
-```bash
-node --test Tools/check-docs.test.mjs
-node Tools/check-docs.mjs
-node Tools/quickstart.mjs Release
-Release/SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite
-```
-
-The [GitHub Actions workflow](.github/workflows/ci.yml) defines the baseline
-Linux build and documentation checks. A workflow definition is not a claim
-that a remote run has passed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-scope of these checks and optional-backend testing.
-
-The existing `DedupCandidateTest` currently fails on deleted-then-live visibility
-sequences. It is reported separately as a known, non-blocking CI diagnostic,
-not counted as a passing baseline test. See [known limitations](docs/SupportMatrix.md).
+- [Install and troubleshoot on Linux](docs/LinuxInstallation.md).
+- [SDK quick start and your own data](docs/QuickStart.md).
+- [SDK API and compatibility contracts](docs/SDK.md).
+- [Parameters](docs/Parameters.md) and [build options](docs/BuildOptions.md).
+- [Documentation index](docs/README.md), [changelog](CHANGELOG.md), and
+  [contributing and tests](CONTRIBUTING.md).
+- [Benchmark methodology](BENCHMARK_GUIDE.md) and [evaluation index](evaluation/README.md).
 
 ## Research and citation
+
+SPTAG also hosts research associated with SPANN, SPFresh, and **SPIRE**.
+These papers explain the underlying techniques; their experimental results
+are not SDK release guarantees.
 
 - [SPIRE: Scalable Distributed Vector Search via Accuracy Preserving Index Construction (arXiv, 2025)](https://arxiv.org/abs/2512.17264).
 - [SPFresh: Incremental In-Place Update for Billion-Scale Vector Search (SOSP 2023)](https://dl.acm.org/doi/10.1145/3600006.3613166).

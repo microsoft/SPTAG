@@ -25,6 +25,9 @@ jobs:
 
   linux-baseline:
     runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: ${{ github.workspace }}/Release
+      OMP_NUM_THREADS: '2'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,17 +36,28 @@ jobs:
       - name: Install baseline dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build swig python3-dev \
+          sudo apt-get install -y build-essential cmake ninja-build swig python3-dev python3-numpy \
             libboost-system-dev libboost-thread-dev libboost-serialization-dev \
             libboost-regex-dev libboost-filesystem-dev libboost-test-dev libtbb-dev libnuma-dev
       - name: Initialize baseline dependency
         run: git submodule update --init ThirdParty/zstd
       - name: Configure
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          cmake -S Examples/cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
       - name: Build baseline targets
-        run: cmake --build build --target indexbuilder indexsearcher SPTAGTest --parallel 2
+        run: cmake --build build --target sptag_sdk_example _SPTAG indexbuilder indexsearcher SPTAGTest --parallel 2
+      - name: Check standalone C++ SDK and independent-process reload
+        run: |
+          build/sptag_sdk_example quickstart-output/cpp
+          build/sptag_sdk_example quickstart-output/cpp --load
+      - name: Test public Python SDK
+        run: python3 -m unittest discover -s Test/python -v
+      - name: Check Python SDK and independent-process reload
+        run: |
+          python3 Examples/python/quickstart.py --index quickstart-output/python
+          python3 Examples/python/quickstart.py --index quickstart-output/python \
+            --load --queries quickstart-output/python/queries.npy
       - name: Check real CLI save, load, and search
         run: node Tools/quickstart.mjs Release
       - name: Run self-contained unit tests
