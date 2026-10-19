@@ -1,5 +1,26 @@
 # SPTAG/SPFresh + TiKV Benchmark Results (1M Scale)
 
+> Historical observations, not current-branch acceptance thresholds.
+> See the [evaluation index](evaluation/README.md) and
+> [reporting requirements](BENCHMARK_GUIDE.md).
+
+## Provenance and limitations
+
+| Field | Recorded status |
+| --- | --- |
+| SPTAG / TiKV commits and dirty state | Not recorded |
+| PD/TiKV immutable image digests | Not recorded |
+| Exact toolchain / hardware / replication factor | Not fully recorded |
+| Input / truth / configuration checksums | Not recorded |
+| Raw per-run logs / JSON | No artifact location recorded here |
+| Topology | Three PD and three TiKV processes on one machine, not three independent hosts |
+
+Do not guess these values retroactively. Preserve the observations below as
+historical data; rerun a pinned configuration before making a current performance
+claim. The scale summary below is ambiguous: `InsertVectorCount` in the current
+harness is a total across all batches, so a configuration file is needed to
+resolve whether "10K per batch" or "10K total" was intended.
+
 ## Configuration
 
 - **Scale**: 1M vectors (base: 990K, insert: 10K per batch x 10)

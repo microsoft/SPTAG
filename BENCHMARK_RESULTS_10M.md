@@ -1,5 +1,26 @@
 # SPTAG/SPFresh + TiKV Benchmark Results (10M Scale)
 
+> Historical observations, not current-branch acceptance thresholds.
+> See the [evaluation index](evaluation/README.md) and
+> [reporting requirements](BENCHMARK_GUIDE.md).
+
+## Provenance and comparison limits
+
+| Field | Recorded status |
+| --- | --- |
+| SPTAG / TiKV commits and dirty state | Not recorded |
+| PD/TiKV immutable image digests | Not recorded; `nightly` is not an immutable identity |
+| Complete hardware / toolchain / replication factor | Not recorded |
+| Input / truth / configuration checksums | Not recorded |
+| Raw logs / JSON | No artifact location recorded here |
+| Repetitions | Not recorded for this report |
+
+The cross-scale table is retained as originally reported, not as a controlled
+comparison. Its 1M build time and pre-insert latency differ from the separate
+1M report; the available provenance does not establish that they represent the
+same run or binary. Do not combine them into a speedup or scalability claim
+without recovering the underlying run records.
+
 ## Configuration
 
 - **Scale**: 10M vectors (base: 9.9M, insert: 100K = 10K per batch x 10)

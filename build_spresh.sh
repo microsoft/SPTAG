@@ -1,44 +1,26 @@
-#!/bin/bash -x
+#!/usr/bin/env bash
+set -e -o pipefail
 
-if [ "$1" == "init_env" ]; then
-sudo apt install -y cmake gcc-9 g++-9 libjemalloc-dev libsnappy-dev libgflags-dev pkg-config swig libboost-all-dev libtbb-dev libisal-dev gnuplot
-git clone https://github.com/SPFresh/SPFresh
-cd SPFresh
-git submodule update --init --recursive
-cd ThirdParty/spdk
-sudo bash ./scripts/pkgdep.sh
-CC=gcc-9 ./configure
-CC=gcc-9 make -j
-cd ../isal-l_crypto
-./autogen.sh
-./configure
-make -j
-cd ..
-git clone https://github.com/PtilopsisL/rocksdb
-cd rocksdb
-mkdir build && cd build
-cmake -DUSE_RTTI=1 -DWITH_JEMALLOC=1 -DWITH_SNAPPY=1 -DCMAKE_C_COMPILER=gcc-9 -DCMAKE_CXX_COMPILER=g++-9 -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fPIC" ..
-make -j
-sudo make install
-cd ../../..
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DGPU=OFF ..
-# add #include <mutex> in SPFresh/AnnService/inc/Helper/ConcurrentSet.h and SPFresh/AnnService/inc/Helper/Logging.h
-make -j
-cd ..
-
-cp Script_AE/bdev.json .
-sudo nvme format /dev/nvme0n1
-sudo ./ThirdParty/spdk/scripts/setup.sh
-# it will print out:
-#1462:00:00.0 (1414 b111): nvme -> uio_pci_generic
-#01ca:00:00.0 (1414 b111): nvme -> uio_pci_generic
-# fill the 1462:00:00.0 into bdev.json and use the traddr in the PCI_ALLOWED=1462.00.00.0 in the run_update commend
-else
-echo "go to SPFresh Directory"
-#cd SPFresh
+if [[ $# -ne 1 ]]; then
+    echo "Expected exactly one legacy mode; use --help for the safety requirements." >&2
+    exit 2
+fi
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "Historical experiment driver. See Script_AE/README.md and Script_AE/StoragePreparation.md."
+    echo "The old init_env mode is retired; ordinary installation never formats a disk."
+    echo "Other modes require SPTAG_ENABLE_LEGACY_EXPERIMENTS=1 and explicit output paths."
+    exit 0
+fi
+if [[ "$1" == "init_env" ]]; then
+    echo "init_env is retired. Follow docs/LinuxInstallation.md; prepare dedicated storage separately." >&2
+    exit 2
+fi
+if [[ "${SPTAG_ENABLE_LEGACY_EXPERIMENTS:-}" != "1" ]]; then
+    echo "Refusing historical experiment execution. Review Script_AE/README.md before opting in." >&2
+    exit 2
 fi
 
+cd "$(dirname "${BASH_SOURCE[0]}")"
 cd Release
 dataset="sift"
 datatype='UInt8'
@@ -46,9 +28,13 @@ dim=128
 basefile="base.1B.u8bin"
 queryfile="query.public.10K.u8bin"
 
-storage=FILEIO
-ssdpath=/mnt_ssd/data2/cheqi/tmp/
-checkpointpath=/mnt_ssd/data1/cheqi/tmp/
+storage=${SPTAG_EXPERIMENT_STORAGE:-FILEIO}
+if [[ "$storage" != "FILEIO" && "$storage" != "SPDKIO" ]]; then
+    echo "SPTAG_EXPERIMENT_STORAGE must be FILEIO or SPDKIO." >&2
+    exit 2
+fi
+ssdpath=${SPTAG_EXPERIMENT_SSD_PATH:?Set an explicit dedicated SSD output directory}
+checkpointpath=${SPTAG_EXPERIMENT_CHECKPOINT_PATH:?Set an explicit dedicated checkpoint directory}
 testscale="1m"
 updateto="2m"
 testscale_number=1000000
@@ -190,7 +176,14 @@ cd ..
 fi
 
 if [ "$1" == "build_index" ]; then
-sudo rm -rf $ssdpath/*
+if [[ "$ssdpath" != /* || "$ssdpath" == "/" || ! -d "$ssdpath" ]]; then
+    echo "SSD output must be an existing, dedicated absolute directory, not the filesystem root." >&2
+    exit 2
+fi
+if [[ -n "$(find "$ssdpath" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo "SSD output is not empty. Choose a fresh run directory; this script no longer deletes old data." >&2
+    exit 2
+fi
 
 echo "[Base]
 ValueType=$datatype
@@ -431,14 +424,23 @@ EndVectorNum=2000000" > store_${dataset}${testscale}/indexloader.ini
 fi
 
 if [ "$1" == "run_update" ]; then
-rm -rf ${dataset}1b/result_spfresh_balance*
+if compgen -G "${dataset}1b/result_spfresh_balance*" > /dev/null; then
+    echo "Previous result files exist. Select a fresh experiment directory rather than deleting them." >&2
+    exit 2
+fi
 #SPDK version
 if [ "$storage" == "SPDKIO" ]; then
     echo "Run SPDKIO..."
-    PCI_ALLOWED="1462:00:00.0" SPFRESH_SPDK_USE_SSD_IMPL=1 SPFRESH_SPDK_CONF=../bdev.json SPFRESH_SPDK_BDEV=Nvme0n1 sudo -E ./spfresh store_${dataset}${testscale} |tee log_spfresh.log
+    sudo env PCI_ALLOWED="${PCI_ALLOWED:?Set the authorized PCI device allowlist}" \
+        SPFRESH_SPDK_USE_SSD_IMPL=1 \
+        SPFRESH_SPDK_CONF="${SPFRESH_SPDK_CONF:?Set the reviewed bdev configuration path}" \
+        SPFRESH_SPDK_BDEV="${SPFRESH_SPDK_BDEV:?Set the authorized bdev name}" \
+        ./spfresh "store_${dataset}${testscale}" | tee log_spfresh.log
 else
    echo "RUN FILEIO..."
-   PCI_ALLOWED="1462:00:00.0" SPFRESH_SPDK_USE_SSD_IMPL=1 SPFRESH_SPDK_CONF=../bdev.json SPFRESH_SPDK_BDEV=Nvme0n1 SPFRESH_FILE_IO_USE_CACHE=False SPFRESH_FILE_IO_THREAD_NUM=16 SPFRESH_FILE_IO_USE_LOCK=False SPFRESH_FILE_IO_LOCK_SIZE=262144 sudo -E ./spfresh store_${dataset}${testscale} |tee log_spfresh.log
+   SPFRESH_FILE_IO_USE_CACHE=False SPFRESH_FILE_IO_THREAD_NUM=16 \
+       SPFRESH_FILE_IO_USE_LOCK=False SPFRESH_FILE_IO_LOCK_SIZE=262144 \
+       ./spfresh "store_${dataset}${testscale}" | tee log_spfresh.log
 fi
 fi
 

@@ -4,6 +4,14 @@
 #ifndef _SPTAG_HELPER_CONCURRENTSET_H_
 #define _SPTAG_HELPER_CONCURRENTSET_H_
 
+#include <iterator>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #ifndef _MSC_VER
 #ifdef TBB
 #include <tbb/concurrent_unordered_map.h>
@@ -228,36 +236,66 @@ namespace SPTAG
 #else
             template <typename K, typename V>
             class ConcurrentHashMap {
-                using iterator = typename ConcurrentMap<K, V>::iterator;
+                using Map = std::unordered_map<K, V>;
+                using Entry = typename Map::value_type;
+                using Snapshot = std::vector<Entry>;
 
             public:
+                // Snapshot iterators remain valid after the operation releases its lock.
+                class iterator {
+                public:
+                    using iterator_category = std::forward_iterator_tag;
+                    using value_type = Entry;
+                    using difference_type = std::ptrdiff_t;
+                    using pointer = const Entry*;
+                    using reference = const Entry&;
+
+                    iterator() = default;
+                    explicit iterator(std::shared_ptr<Snapshot> entries) : m_entries(std::move(entries)) {}
+                    reference operator*() const { return (*m_entries)[m_position]; }
+                    pointer operator->() const { return &**this; }
+                    iterator& operator++() { ++m_position; return *this; }
+                    iterator operator++(int) { auto previous = *this; ++*this; return previous; }
+                    bool operator==(const iterator& other) const {
+                        if (AtEnd() || other.AtEnd()) return AtEnd() && other.AtEnd();
+                        return m_entries == other.m_entries && m_position == other.m_position;
+                    }
+                    bool operator!=(const iterator& other) const { return !(*this == other); }
+
+                private:
+                    bool AtEnd() const { return !m_entries || m_position == m_entries->size(); }
+                    std::shared_ptr<Snapshot> m_entries;
+                    size_t m_position = 0;
+                };
+
                 iterator find(const K& k) const
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.find(k);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
+                    auto found = m_data.find(k);
+                    return found == m_data.end() ? end() : CopyEntry(found);
                 }
 
-                iterator begin() const noexcept
+                iterator begin() const
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.begin();
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
+                    return iterator(std::make_shared<Snapshot>(m_data.begin(), m_data.end()));
                 }
 
                 iterator end() const noexcept
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.end();
+                    return iterator();
                 }
 
                 std::pair<iterator, bool> insert_or_assign(K&& k, V&& v) 
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.insert_or_assign(k, v);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
+                    auto result = m_data.insert_or_assign(std::move(k), std::move(v));
+                    return {CopyEntry(result.first), result.second};
                 }
 
                 bool assign_if_equal(K&& k, const V& expected, V&& desired)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
                     auto iter = m_data.find(k);
                     if (iter != m_data.end() && iter->second == expected) {
                         iter->second = desired;
@@ -269,7 +307,7 @@ namespace SPTAG
                 template <typename Predicate>
                 bool assign_if(K&& k, V&& desired, Predicate&& predicate)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
                     auto iter = m_data.find(k);
                     if (iter != m_data.end() && predicate(iter->second)) {
                         iter->second = desired;
@@ -280,31 +318,38 @@ namespace SPTAG
 
                 size_t erase(const K& k)
                 {
-                    std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.unsafe_erase(k);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
+                    return m_data.erase(k);
                 }
 
                 template<class P>
                 std::pair<iterator, bool> insert(P&& v)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.insert(v);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
+                    auto result = m_data.insert(std::forward<P>(v));
+                    return {CopyEntry(result.first), result.second};
                 }
 
                 void clear()
                 {
-                    std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
                     m_data.clear();
                 }
                 
                 size_t size() const
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.size();
                 }
             private:
-                std::shared_timed_mutex* m_lock;
-                ConcurrentMap<K, V> m_data;
+                static iterator CopyEntry(typename Map::const_iterator entry) {
+                    auto snapshot = std::make_shared<Snapshot>();
+                    snapshot->push_back(*entry);
+                    return iterator(std::move(snapshot));
+                }
+
+                mutable std::shared_timed_mutex m_lock;
+                Map m_data;
             };
 #endif
         }

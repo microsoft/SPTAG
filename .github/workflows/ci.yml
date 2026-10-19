@@ -1,0 +1,68 @@
+name: Baseline validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  documentation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test documentation checker
+        run: node --test Tools/check-docs.test.mjs
+      - name: Check local documentation links and fences
+        run: node Tools/check-docs.mjs
+      - name: Check legacy driver syntax
+        run: bash -n build_spresh.sh
+
+  linux-baseline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install baseline dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build swig python3-dev \
+            libboost-system-dev libboost-thread-dev libboost-serialization-dev \
+            libboost-regex-dev libboost-filesystem-dev libboost-test-dev libtbb-dev libnuma-dev
+      - name: Initialize baseline dependency
+        run: git submodule update --init ThirdParty/zstd
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
+      - name: Build baseline targets
+        run: cmake --build build --target indexbuilder indexsearcher SPTAGTest --parallel 2
+      - name: Check real CLI save, load, and search
+        run: node Tools/quickstart.mjs Release
+      - name: Run self-contained unit tests
+        working-directory: Release
+        run: ./SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite
+      - name: Known visibility regression diagnostic (non-blocking)
+        id: dedup
+        continue-on-error: true
+        working-directory: Release
+        run: ./SPTAGTest --run_test=DedupCandidateTest --log_level=nothing --report_level=short > dedup-diagnostic.log 2>&1
+      - name: Surface known diagnostic failure
+        if: steps.dedup.outcome == 'failure'
+        run: |
+          echo "::warning::DedupCandidateTest failed; see the diagnostic artifact and docs/SupportMatrix.md. This is not a passing test."
+          echo "Known DedupCandidateTest failure; baseline success does not mean the full suite passes." >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve visibility diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visibility-diagnostic
+          path: Release/dedup-diagnostic.log
+          if-no-files-found: warn

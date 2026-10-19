@@ -1,251 +1,76 @@
-# SPTAG + TiKV Vector Search Benchmark Reproduction Guide
+# Benchmark methodology and reproduction
 
-## 1. Repositories
+[Documentation index](docs/README.md) | [Evaluation index](evaluation/README.md) |
+[Report template](evaluation/ReportTemplate.md)
 
-| Project | Repository | Branch | Description |
-|---------|-----------|--------|-------------|
-| SPTAG | https://github.com/microsoft/SPTAG | `users/qiazh/merge-spfresh-tikv` | TiKV storage backend + Region routing cache |
-| TiKV | https://github.com/zqxjjz/tikv | `<compatible-tikv-branch>` | TiKV storage backend benchmark support |
+This guide defines how to run and report the current SPFresh benchmark harness.
+It is not a promise to reproduce historical numbers. The historical reports
+have incomplete revision/image provenance and must be interpreted accordingly.
+Start with the [baseline quick start](docs/QuickStart.md) before attempting a
+large or distributed experiment.
 
-```bash
-git clone https://github.com/microsoft/SPTAG.git && cd SPTAG && git checkout users/qiazh/merge-spfresh-tikv
-git clone https://github.com/zqxjjz/tikv.git && cd tikv && git checkout <compatible-tikv-branch>
-```
+The original machine-specific guide and its reference tables remain available
+in [the pre-cleanup revision](https://github.com/microsoft/SPTAG/blob/328e5337/BENCHMARK_GUIDE.md).
+Use that historical source for provenance, not as a current installation recipe.
 
-## 2. Prerequisites
+## 1. Pin the complete environment
 
-- **OS**: Ubuntu 24.04 (tested)
-- **CPU**: 48 cores
-- **Memory**: 377GB (3 TiKV instances x 80GB + system)
-- **Disk**: NVMe SSD, 11TB
-- **Software**:
-  - Docker (for PD)
-  - cmake >= 3.12, gcc >= 5.0, protoc >= 3.21
-  - libboost-all-dev (>= 1.67), libtbb-dev, libgrpc++-dev, libprotobuf-dev
-  - Rust nightly (rustc 1.95.0-nightly, auto-installed via TiKV's rust-toolchain.toml)
+Record before running:
 
-```bash
-sudo apt install -y build-essential cmake protobuf-compiler libprotobuf-dev \
-    libgrpc++-dev libgrpc-dev protobuf-compiler-grpc \
-    libboost-all-dev libtbb-dev docker.io
+- SPTAG commit, dirty diff, and `git submodule status --recursive`.
+- Compiler, CMake, Boost, optional libraries, ID width, and configure command.
+- TiKV source commit or immutable image digest, PD image digest, and all
+  cluster configuration files when using TiKV.
+- Hardware, resource limits, affinity, network topology, replication factor,
+  cache sizes, and storage type.
+- Dataset, query set, truth definition, and checksums.
 
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+Do not use a personal branch name, `<compatible-tikv-branch>`, or a moving
+`nightly` tag as the only build identity in a reproducibility claim. A custom
+TiKV fork must be identified by a commit; this repository does not certify an
+arbitrary TiKV/PD release pair.
 
-## 3. Building
+Three processes on one host are **not** a three-host distributed evaluation.
+A single-replica performance run is **not** equivalent to three-way replicated
+storage. Disclose both topology and replication settings.
 
-### 3.1 Build SPTAG
+## 2. Build the selected backend
 
-```bash
-cd SPTAG
+Use the [Linux baseline](docs/LinuxInstallation.md) and
+[build-option reference](docs/BuildOptions.md). The baseline builds FILEIO,
+not TiKV. For TiKV, follow [the integration guide](docs/TiKV-Integration.md)
+and build with `TIKV=ON` in a separate build directory.
 
-# Generate kvproto gRPC stubs
-cd ThirdParty/kvproto && ./generate_cpp.sh && cd ../..
+On Linux, the test binary is `Release/SPTAGTest` relative to the source root,
+not `build/Release/SPTAGTest`. Build outputs of the same type share that source
+directory, even when multiple CMake build directories exist: rebuild the desired
+configuration and record the binary checksum before running.
 
-# Build
-mkdir build && cd build
-cmake .. -DTIKV=ON -DTBB=ON -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+## 3. Prepare explicit inputs and an isolated work directory
 
-# Output: build/Release/SPTAGTest
-```
+Use absolute paths in the benchmark configuration. Vector/query inputs consumed
+by the current generator use SPTAG DEFAULT files: count and dimension headers
+followed by vector values, **not** headerless raw coordinates. Check value type,
+dimension, row count, ID width, and endianness against the reader.
 
-### 3.2 Build TiKV
+The harness creates derived `perftest_*` files and can reuse existing generated
+files. Use a new work directory for each independent run; otherwise old data or
+truth can contaminate the result.
 
-```bash
-cd tikv
-make release
-# Output: target/release/tikv-server
-# First build takes ~30-60 minutes
-```
+Before running, verify the configured input files really exist. Do not infer
+that a successful process used the intended dataset. The generator's fallback
+behavior is not an acceptable substitute for a named benchmark corpus.
 
-## 4. Deploy TiKV Cluster
+## 4. Configure the current harness
 
-### 4.1 Start PD (3 nodes, Docker)
-
-Create `docker-compose.yml`:
-
-```yaml
-services:
-  pd1:
-    image: pingcap/pd:nightly
-    container_name: tikv-pd1
-    network_mode: host
-    volumes:
-      - ./pd1-data:/data
-      - ./pd1-logs:/logs
-    command:
-      - --name=pd1
-      - --client-urls=http://0.0.0.0:23791
-      - --peer-urls=http://0.0.0.0:23801
-      - --advertise-client-urls=http://127.0.0.1:23791
-      - --advertise-peer-urls=http://127.0.0.1:23801
-      - --initial-cluster=pd1=http://127.0.0.1:23801,pd2=http://127.0.0.1:23802,pd3=http://127.0.0.1:23803
-      - --data-dir=/data/pd1
-      - --log-file=/logs/pd.log
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:23791/pd/api/v1/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 40s
-
-  pd2:
-    image: pingcap/pd:nightly
-    container_name: tikv-pd2
-    network_mode: host
-    volumes:
-      - ./pd2-data:/data
-      - ./pd2-logs:/logs
-    command:
-      - --name=pd2
-      - --client-urls=http://0.0.0.0:23792
-      - --peer-urls=http://0.0.0.0:23802
-      - --advertise-client-urls=http://127.0.0.1:23792
-      - --advertise-peer-urls=http://127.0.0.1:23802
-      - --initial-cluster=pd1=http://127.0.0.1:23801,pd2=http://127.0.0.1:23802,pd3=http://127.0.0.1:23803
-      - --data-dir=/data/pd2
-      - --log-file=/logs/pd.log
-
-  pd3:
-    image: pingcap/pd:nightly
-    container_name: tikv-pd3
-    network_mode: host
-    volumes:
-      - ./pd3-data:/data
-      - ./pd3-logs:/logs
-    command:
-      - --name=pd3
-      - --client-urls=http://0.0.0.0:23793
-      - --peer-urls=http://0.0.0.0:23803
-      - --advertise-client-urls=http://127.0.0.1:23793
-      - --advertise-peer-urls=http://127.0.0.1:23803
-      - --initial-cluster=pd1=http://127.0.0.1:23801,pd2=http://127.0.0.1:23802,pd3=http://127.0.0.1:23803
-      - --data-dir=/data/pd3
-      - --log-file=/logs/pd.log
-```
-
-```bash
-docker compose up -d
-# Verify
-curl http://127.0.0.1:23791/pd/api/v1/health
-```
-
-### 4.2 TiKV Configuration (`tikv.toml`)
-
-```toml
-memory-usage-limit = "80GB"
-
-[server]
-grpc-concurrency = 8
-grpc-memory-pool-quota = "4GB"
-
-[raftstore]
-region-max-size = "512MB"
-region-split-size = "384MB"
-region-max-keys = 5120000
-region-split-keys = 3840000
-
-[rocksdb]
-max-background-jobs = 8
-max-sub-compactions = 3
-rate-bytes-per-sec = "0"
-
-[rocksdb.defaultcf]
-write-buffer-size = "256MB"
-max-write-buffer-number = 5
-min-write-buffer-number-to-merge = 2
-level0-file-num-compaction-trigger = 8
-level0-slowdown-writes-trigger = 20
-level0-stop-writes-trigger = 36
-max-bytes-for-level-base = "1GB"
-compression-per-level = ["no", "no", "lz4", "lz4", "lz4", "zstd", "zstd"]
-target-file-size-base = "64MB"
-
-[rocksdb.writecf]
-write-buffer-size = "128MB"
-max-write-buffer-number = 5
-
-[storage]
-reserve-space = "1GB"
-
-[storage.block-cache]
-capacity = "40GB"
-
-[coprocessor]
-region-max-size = "512MB"
-region-split-size = "384MB"
-region-max-keys = 5120000
-region-split-keys = 3840000
-```
-
-> **Memory tuning**: Adjust based on your machine's total memory and number of instances:
-> - `memory-usage-limit` ≈ total_memory / num_instances × 0.7
-> - `block-cache.capacity` ≈ memory-usage-limit × 0.5
-
-### 4.3 Start TiKV (3 nodes)
-
-```bash
-TIKV_BIN=/path/to/tikv/target/release/tikv-server
-DATA_DIR=/path/to/tikv-data
-TIKV_CONF=${DATA_DIR}/tikv.toml
-
-# Stop Docker TiKV if previously running
-docker stop tikv-tikv1 tikv-tikv2 tikv-tikv3 2>/dev/null || true
-
-# TiKV 1
-$TIKV_BIN --config=$TIKV_CONF \
-    --pd-endpoints=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793 \
-    --addr=0.0.0.0:20161 --advertise-addr=127.0.0.1:20161 \
-    --status-addr=0.0.0.0:20181 \
-    --data-dir=${DATA_DIR}/tikv1-data/tikv1 \
-    --log-file=${DATA_DIR}/tikv1-logs/tikv.log &
-
-# TiKV 2
-$TIKV_BIN --config=$TIKV_CONF \
-    --pd-endpoints=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793 \
-    --addr=0.0.0.0:20162 --advertise-addr=127.0.0.1:20162 \
-    --status-addr=0.0.0.0:20182 \
-    --data-dir=${DATA_DIR}/tikv2-data/tikv2 \
-    --log-file=${DATA_DIR}/tikv2-logs/tikv.log &
-
-# TiKV 3
-$TIKV_BIN --config=$TIKV_CONF \
-    --pd-endpoints=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793 \
-    --addr=0.0.0.0:20163 --advertise-addr=127.0.0.1:20163 \
-    --status-addr=0.0.0.0:20183 \
-    --data-dir=${DATA_DIR}/tikv3-data/tikv3 \
-    --log-file=${DATA_DIR}/tikv3-logs/tikv.log &
-
-# Wait and verify
-sleep 10
-curl http://127.0.0.1:23791/pd/api/v1/stores | python3 -m json.tool
-# All 3 stores should show state "Up"
-```
-
-## 5. Test Data
-
-Data files use SPTAG standard binary format:
-
-| File | Description | Used in |
-|------|-------------|---------|
-| `perftest_vector.bin.UInt8_1000000_128` | 1M UInt8 vectors, dim=128 | 1M test |
-| `perftest_vector.bin.UInt8_10000000_128` | 10M UInt8 vectors, dim=128 | 10M test |
-| `perftest_vector.bin.UInt8_100000000_128` | 100M UInt8 vectors, dim=128 | 100M test |
-| `perftest_query.bin.UInt8_200_128` | 200 query vectors | All tests |
-
-File format: raw binary, each vector is 128 consecutive bytes (UInt8). Place all data files in the benchmark working directory.
-
-## 6. Benchmark Configuration Files
-
-### 6.1 1M dataset (`benchmark_1m_l2_batchget.ini`)
+Example FILEIO configuration, saved as `benchmark.ini` in your run directory:
 
 ```ini
 [Benchmark]
-VectorPath=perftest_vector.bin.UInt8_1000000_128
-QueryPath=perftest_query.bin.UInt8_200_128
-TruthPath=truth_1m_l2_batchget
-IndexPath=/path/to/bench/proidx_1m_l2_batchget/spann_index
+VectorPath=/absolute/path/to/base-and-insert-vectors.bin
+QueryPath=/absolute/path/to/queries.bin
+TruthPath=none
+IndexPath=index
 ValueType=UInt8
 Dimension=128
 BaseVectorCount=990000
@@ -253,201 +78,121 @@ InsertVectorCount=10000
 DeleteVectorCount=0
 BatchNum=10
 TopK=5
-NumThreads=16
+NumSearchThreads=4
+NumInsertThreads=4
+NumSearchDuringInsertThreads=0
 NumQueries=200
 DistMethod=L2
 Rebuild=true
 Resume=-1
-Layers=2
+Layers=1
 
-Storage=TIKVIO
-TiKVPDAddresses=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793
-TiKVKeyPrefix=batchget_1m_l2
+[SelectHead]
+NumberOfThreads=4
+
+[BuildHead]
+NumberOfThreads=4
 
 [BuildSSDIndex]
+Storage=FILEIO
+NumberOfThreads=4
 PostingPageLimit=12
 BufferLength=8
 ```
 
-### 6.2 10M dataset (`benchmark_10m_l2_batchget.ini`)
+Replace the input paths with existing files. The base/insert file must contain
+at least `BaseVectorCount + InsertVectorCount` vectors. `InsertVectorCount` is
+the **total**, divided across `BatchNum`; choose a divisible total to avoid
+integer-truncated batch counts.
+
+Important section and key distinctions:
+
+| Setting | Correct location / meaning |
+| --- | --- |
+| `NumSearchThreads` | `[Benchmark]`; `NumThreads` is not the current harness key |
+| `NumInsertThreads` | `[Benchmark]`; insertion-driver thread count |
+| `NumSearchDuringInsertThreads` | `[Benchmark]`; concurrent search during insertion |
+| `Storage`, `TiKVPDAddresses`, `TiKVKeyPrefix` | `[BuildSSDIndex]`, not `[Benchmark]` |
+| `NumberOfThreads` | Individual build sections; not the same as query-driver concurrency |
+| `TruthPath=none` | Disables ground-truth evaluation; resulting recall values are not valid accuracy evidence |
+| `QuantizerFilePath` in `[Benchmark]` | Current harness PQ path; not the RaBitQ CLI training workflow |
+
+For TiKV, replace/add the backend section:
 
 ```ini
-[Benchmark]
-VectorPath=perftest_vector.bin.UInt8_10000000_128
-QueryPath=perftest_query.bin.UInt8_200_128
-TruthPath=truth_10m_l2_batchget
-IndexPath=/path/to/bench/proidx_10m_l2_batchget/spann_index
-ValueType=UInt8
-Dimension=128
-BaseVectorCount=9900000
-InsertVectorCount=100000
-DeleteVectorCount=0
-BatchNum=10
-TopK=5
-NumThreads=16
-NumQueries=200
-DistMethod=L2
-Rebuild=true
-Resume=-1
-Layers=2
-
-Storage=TIKVIO
-TiKVPDAddresses=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793
-TiKVKeyPrefix=batchget_10m_l2
-
 [BuildSSDIndex]
+Storage=TIKVIO
+TiKVPDAddresses=127.0.0.1:2379
+TiKVKeyPrefix=unique_run_identifier
+NumberOfThreads=4
 PostingPageLimit=12
 BufferLength=8
 ```
 
-### 6.3 100M dataset (`benchmark_100m_l2_batchget.ini`)
+Use a fresh key prefix **and** a fresh local index/run directory for an
+independent run. Do not assume a new local directory clears old TiKV keys.
 
-```ini
-[Benchmark]
-VectorPath=perftest_vector.bin.UInt8_100000000_128
-QueryPath=perftest_query.bin.UInt8_200_128
-TruthPath=truth_100m_l2_batchget
-IndexPath=/path/to/bench/proidx_100m_l2_batchget/spann_index
-ValueType=UInt8
-Dimension=128
-BaseVectorCount=99000000
-InsertVectorCount=1000000
-DeleteVectorCount=0
-BatchNum=10
-TopK=5
-NumThreads=16
-NumQueries=200
-DistMethod=L2
-Rebuild=true
-Resume=-1
-Layers=2
+## 5. Run and confirm it actually ran
 
-Storage=TIKVIO
-TiKVPDAddresses=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793
-TiKVKeyPrefix=batchget_100m_l2
-
-[BuildSSDIndex]
-PostingPageLimit=12
-BufferLength=8
-```
-
-## 7. Running Benchmarks
+Run from a dedicated working directory, with `SPTAG_ROOT` set to your absolute
+source checkout path:
 
 ```bash
-cd /path/to/bench   # directory containing data files
-
-# Run (BENCHMARK_CONFIG = config file, BENCHMARK_OUTPUT = JSON result file)
-BENCHMARK_CONFIG=benchmark_1m_l2_batchget.ini \
-BENCHMARK_OUTPUT=output_1m.json \
-./SPTAGTest --run_test=BenchmarkFromConfig --log_level=message
-
-# Background run (recommended for large datasets)
-nohup bash -c 'BENCHMARK_CONFIG=benchmark_10m_l2_batchget.ini \
-BENCHMARK_OUTPUT=output_10m.json \
-./SPTAGTest --run_test=BenchmarkFromConfig --log_level=message' \
-> test_10m.log 2>&1 &
-
-# Monitor progress
-tail -f test_10m.log
+mkdir -p benchmark-output/run-001
+cd benchmark-output/run-001
+test -f benchmark.ini
+BENCHMARK_CONFIG="$PWD/benchmark.ini" \
+BENCHMARK_OUTPUT="$PWD/output.json" \
+  "$SPTAG_ROOT/Release/SPTAGTest" \
+  --run_test=SPFreshTest/BenchmarkFromConfig --log_level=message > run.log 2>&1
 ```
 
-### Estimated Build Times
+Create/copy the configuration before the `test -f` command. Preserve the exit
+code and inspect `run.log` plus the JSON output. The test reports a skip and
+returns if `BENCHMARK_CONFIG` is unset; zero exit status alone is not evidence
+of a completed benchmark. Verify the logged backend, paths, counts, and phase
+outputs. Do not hide failed operations or missing output files.
 
-| Dataset | Build Time | TiKV Disk Usage |
-|---------|-----------|-----------------|
-| 1M | ~16 min | ~a few GB |
-| 10M | ~3 hours | ~tens of GB |
-| 100M | ~27 hours | ~hundreds of GB |
+`Rebuild=false` does not automatically mean query-only: configured insert/delete
+work may still execute. Set operation counts deliberately. Resume behavior
+depends on available checkpoint state; validate it with the specific revision
+before relying on it after an interrupted experiment.
 
-### Query-only (skip build)
+## 6. Measure and report
 
-After the index is built, set `Rebuild=false` to run queries only:
+Use the [report template](evaluation/ReportTemplate.md). At minimum:
 
-```ini
-Rebuild=false
-```
+- Keep cold and warmed query rounds separate; define what "cold" means.
+- Report all independent runs, repetition count, and variation.
+- Report recall with latency/QPS, the exact active corpus per update phase,
+  query count, TopK, and search parameters.
+- Define latency units, timed region, percentiles, throughput formula, and
+  concurrent client count. Do not derive throughput from a mean latency alone
+  without accounting for concurrency.
+- Record retries, timeouts, failed operations, memory, disk use, build time,
+  and update throughput.
+- Ground truth must match the same vectors, metric, IDs, and update phase.
+  Changing storage backend does not by itself justify changing ground truth.
+- If the current harness cannot fix a random seed, say so and preserve the
+  generated inputs/checksums.
 
-### Resume from interruption
+Do not use unverified projected latency ranges as expected acceptance results.
+The [1M](BENCHMARK_RESULTS_1M.md) and [10M](BENCHMARK_RESULTS_10M.md) historical
+reports are observations under their original conditions, not thresholds.
 
-If a build is interrupted, resume from the last completed batch:
+## 7. Troubleshooting without destroying data
 
-```ini
-Rebuild=true
-Resume=3          # resume from batch 4 (0-based index)
-```
+- **Wrong backend:** put backend parameters in `[BuildSSDIndex]`, confirm the
+  binary was built with the integration enabled, and inspect startup logs.
+- **Unexpected data:** use a clean run directory and verify input headers and
+  checksums; the generator caches derived files.
+- **Recall missing or zero:** check whether truth was disabled and whether IDs,
+  dimensions, corpus phase, and metric match. Do not relabel zero as valid recall.
+- **TiKV unavailable:** inspect PD stores/Region routing and service logs;
+  successful PD health alone does not prove posting reads/updates work.
+- **Memory pressure:** record per-process resource limits and lower concurrency
+  or cache sizes; do not silently remove failed runs from a comparison.
 
-## 8. Configuration Parameters
-
-### Benchmark Parameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `Storage` | `TIKVIO` | Use TiKV as posting list storage backend |
-| `Layers` | `2` | Two-layer SPANN index |
-| `TopK` | `5` | Return top 5 nearest vectors |
-| `NumThreads` | `16` | Number of search threads |
-| `NumQueries` | `200` | Number of queries per benchmark round |
-| `BatchNum` | `10` | Number of insert batches |
-| `TiKVKeyPrefix` | varies | TiKV key prefix; use different prefixes for different tests to avoid conflicts |
-| `PostingPageLimit` | `12` | Max pages per posting list |
-| `BufferLength` | `8` | Write buffer size |
-
-### Internal Search Parameters (hardcoded, no configuration needed)
-
-These are set in source code and written to `indexloader.ini` during index build:
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `SearchInternalResultNum` | `64` | Number of candidates returned by head graph search |
-| `SearchPostingPageLimit` | `12` | Max posting pages during search (overridden by ini PostingPageLimit) |
-| `MaxCheck` | `4096` | Max BKT search check count |
-| `LatencyLimit` | `50.0` | Latency limit (ms) |
-| `AllowZeroReplica` | `false` | Do not allow zero replicas |
-| `InternalResultNum` | `64` | Internal result count |
-
-## 9. Reference Results
-
-### Initial Query Latency (benchmark0_query_before_insert)
-
-| Test | Date | Mean (ms) | P50 (ms) | P99 (ms) | QPS | Recall@5 |
-|------|------|----------|---------|---------|-----|----------|
-| 100K FileIO (local disk) | Mar 24 | 3.49 | 3.40 | 5.24 | 4335 | 0.916 |
-| 100K TiKV RawGet (per-key) | Mar 24 | 56.20 | 56.63 | 62.70 | 278 | 0.918 |
-| 100K TiKV RawBatchGet | Mar 25 | 7.58 | 7.51 | 10.59 | 2054 | 0.924 |
-| 1M TiKV (old binary) | Mar 27 | 63.23 | 63.67 | 73.74 | 248 | 0.783 |
-| **1M TiKV (new binary)** | **Mar 27** | **14.98** | **13.98** | **27.11** | **1049** | **0.783** |
-| 1M TiKV fresh build (warm cache) | Mar 30 | 9.99 | 10.16 | 14.37 | 1563 | 0.792 |
-| 10M TiKV (old binary) | Mar 25 | 51.97 | 52.10 | 64.96 | 302 | 0.692 |
-| 100M TiKV (old binary) | Mar 25 | 48.09 | 48.36 | 59.66 | 326 | N/A |
-
-> **"old binary" vs "new binary"**: The new binary includes RawBatchGet region-grouped dispatch + Region routing cache optimization. 10M/100M have not been re-tested with the new binary yet.
-
-### Key Factors Affecting Latency
-
-1. **Block Cache warm/cold**: TiKV block cache (`capacity = 40GB`) — if it can hold all posting data, queries approach in-memory speed. 1M posting data is ~a few hundred MB (fits entirely in cache); 10M+ may exceed cache capacity.
-2. **Binary version**: The new binary has Region routing cache, avoiding PD lookups on every query, significantly reducing latency.
-3. **Dataset size**: Larger datasets have more scattered postings, leading to higher cache miss rates.
-
-### Expected Results When Reproducing
-
-| Dataset | Cold Cache (first query) | Warm Cache (after warmup) |
-|---------|------------------------|--------------------------|
-| 1M | ~50-65ms | ~10-15ms |
-| 10M | ~50ms | ~20-30ms |
-| 100M | ~50ms | ~40-50ms |
-
-**Recommendation**: After the index build completes, run one warmup query round first, then use the second round as the official result.
-
-## 10. Troubleshooting
-
-### TiKV OOM
-If TiKV instances get OOM-killed, check `memory-usage-limit` and `block-cache.capacity`. Total memory across all instances should not exceed 80% of physical memory.
-
-### Build interrupted by TiKV crash
-Use the `Resume` parameter to continue from the last completed batch — no need to rebuild from scratch.
-
-### Recall is 0
-In the 100M test, Recall=0 occurs because the truth file is mismatched (truth was generated with FileIO, not matching TiKV-stored postings). Use `TruthPath=none` or regenerate the truth file.
-
-### Will different key prefixes conflict?
-No. `TiKVKeyPrefix` determines the key prefix in TiKV. Different tests use different prefixes (`batchget_1m_l2`, `batchget_10m_l2`, etc.) and do not interfere with each other.
+The [dated experiments](evaluation/README.md) preserve prior cluster recipes.
+Any format/wipe/rebind operation belongs to a dedicated-machine procedure,
+never to the baseline installation or an ordinary benchmark retry.

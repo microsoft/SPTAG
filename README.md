@@ -1,227 +1,131 @@
-# SPTAG: A library for fast approximate nearest neighbor search
+# SPTAG: vector search with trees and graphs
 
-[![MIT licensed](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/Microsoft/SPTAG/blob/master/LICENSE)
-[![Build status](https://sysdnn.visualstudio.com/SPTAG/_apis/build/status/SPTAG-GITHUB)](https://sysdnn.visualstudio.com/SPTAG/_build/latest?definitionId=2)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-## **SPTAG**
- SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by [Microsoft Research (MSR)](https://www.msra.cn/) and [Microsoft Bing](http://bing.com). 
+SPTAG (Space Partition Tree And Graph) is a C++ library for approximate nearest
+neighbor search, originally released by Microsoft Research and Microsoft Bing.
+It supports L2 and cosine distance, with BKT (balanced k-means tree) and KDT
+(kd-tree) indexes.
 
- <p align="center">
- <img src="docs/img/sptag.png" alt="architecture" width="500"/>
- </p>
+This development line also contains SPANN disk-based indexing, SPFresh
+incremental updates, and experimental TiKV, RaBitQ, and distributed-build
+integrations. Their presence does **not** imply that every feature combination
+is production-ready or supported on every platform. See the
+[support matrix](docs/SupportMatrix.md) before choosing a configuration.
 
-## What's NEW
-* Result Iterator with Relaxed Monotonicity Signal Support
-* New Research Paper [SPFresh: Incremental In-Place Update for Billion-Scale Vector Search](https://dl.acm.org/doi/10.1145/3600006.3613166) - _published in SOSP 2023_
-* New Research Paper [VBASE: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity](https://www.usenix.org/system/files/osdi23-zhang-qianxi_1.pdf) - _published in OSDI 2023_
+The repository also hosts research associated with **SPIRE**,
+[Scalable Distributed Vector Search via Accuracy Preserving Index Construction](https://arxiv.org/abs/2512.17264).
+SPIRE studies scalable distributed vector search through partition-granularity
+selection and accuracy-preserving recursive, multi-level index construction.
+See the [distributed research workflow](evaluation/distributed/Readme.md).
 
-## **Introduction**
- 
-This library assumes that the samples are represented as vectors and that the vectors can be compared by L2 distances or cosine distances. 
-Vectors returned for a query vector are the vectors that have smallest L2 distance or cosine distances with the query vector. 
+<p align="center">
+  <img src="docs/img/sptag.png" alt="SPTAG tree and graph search architecture" width="500"/>
+</p>
 
-SPTAG provides two methods: kd-tree and relative neighborhood graph (SPTAG-KDT) 
-and balanced k-means tree and relative neighborhood graph (SPTAG-BKT).
-SPTAG-KDT is advantageous in index building cost, and SPTAG-BKT is advantageous in search accuracy in very high-dimensional data.
+## Capabilities
 
+| Area | Description | Documentation |
+| --- | --- | --- |
+| In-memory search | BKT/KDT graph construction, search, and index persistence | [Quick start](docs/QuickStart.md) |
+| Disk-based search | SPANN head index and posting storage | [Usage reference](docs/GettingStart.md) |
+| Incremental updates | SPFresh insertion, deletion, split, and reassign workflows | [Architecture](docs/Architecture.md) |
+| Distributed posting storage | Experimental TiKV RawKV backend | [TiKV integration](docs/TiKV-Integration.md) |
+| Quantization | Optional RaBitQ model training and encoded-vector search | [RaBitQ guide](docs/RaBitQ_Global_Quantizer.md) |
+| Distributed construction research (SPIRE) | MPI-based partitioning and distributed build workflows | [Distributed research workflow](evaluation/distributed/Readme.md) |
 
+## Build the baseline
 
-## **How it works**
+The baseline uses TBB and disables Folly, SPDK, RocksDB, TiKV, GPU, and RaBitQ.
+It needs no running service, special SSD, or downloaded dataset.
 
-SPTAG is inspired by the NGS approach [[WangL12](#References)]. It contains two basic modules: index builder and searcher. 
-The RNG is built on the k-nearest neighborhood graph [[WangWZTG12](#References), [WangWJLZZH14](#References)] 
-for boosting the connectivity. Balanced k-means trees are used to replace kd-trees to avoid the inaccurate distance bound estimation in kd-trees for very high-dimensional vectors.
-The search begins with the search in the space partition trees for 
-finding several seeds to start the search in the RNG. 
-The searches in the trees and the graph are iteratively conducted. 
-
- ## **Highlights**
-  * Fresh update: Support online vector deletion and insertion
-  * Distributed serving: Search over multiple machines
-
- ## **Build**
-
-### **Requirements**
-
-* swig >= 4.0.2
-* cmake >= 3.12.0
-* boost >= 1.67.0
-
-### **Fast clone**
-
-```
-set GIT_LFS_SKIP_SMUDGE=1
-git clone --recurse-submodules https://github.com/microsoft/SPTAG
-
-OR
-
-git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
-git config --global filter.lfs.process "git-lfs filter-process --skip"
-```
-
-If the repository was cloned without `--recurse-submodules`, initialize every
-dependency before configuring CMake:
+On Ubuntu 24.04 with GCC 13:
 
 ```bash
-git submodule update --init --recursive
+sudo apt-get update
+sudo apt-get install -y build-essential cmake ninja-build git swig python3-dev \
+  libboost-system-dev libboost-thread-dev libboost-serialization-dev \
+  libboost-regex-dev libboost-filesystem-dev libboost-test-dev libtbb-dev libnuma-dev
+
+git clone https://github.com/microsoft/SPTAG.git
+cd SPTAG
+git submodule update --init ThirdParty/zstd
+
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
+cmake --build build --target indexbuilder indexsearcher SPTAGTest --parallel 2
 ```
 
-`ThirdParty/RaBitQOfficial` is pinned to the official RaBitQ source as a
-submodule. SPTAG-specific portability overlays live in
-`ThirdParty/RaBitQOfficialPatches`; do not edit the submodule checkout to apply
-those patches manually.
+Run the [small, self-checking example](docs/QuickStart.md), which builds, saves,
+reloads, and queries an index without external data. Node.js 20 or later is
+needed only for the example driver and documentation checks:
 
-### **Install**
-
-> For Linux:
-> Compile SPDK
 ```bash
-cd ThirdParty/spdk
-./scripts/pkgdep.sh
-CC=gcc-9 ./configure
-CC=gcc-9 make -j
+node Tools/quickstart.mjs Release
 ```
 
-> Compile isal-l_crypto
+Full instructions: [Linux](docs/LinuxInstallation.md),
+[Windows](docs/WindowsInstallation.md), and
+[build options and dependencies](docs/BuildOptions.md).
+On Linux, executables are written to the repository's `Release` directory,
+not `build/Release`. Windows CMake builds use `build/Release`.
+
+## Documentation
+
+Start with the [documentation index](docs/README.md).
+See [the changelog](CHANGELOG.md) for unreleased maintenance changes.
+
+- **Users:** [quick start](docs/QuickStart.md), [parameters](docs/Parameters.md),
+  [command-line and SPANN examples](docs/GettingStart.md).
+- **Developers:** [architecture](docs/Architecture.md),
+  [contribution and test instructions](CONTRIBUTING.md).
+- **Experiments:** [benchmark methodology](BENCHMARK_GUIDE.md),
+  [evaluation index](evaluation/README.md),
+  [historical paper artifacts](Script_AE/README.md).
+- **Compatibility:** [platform and feature status](docs/SupportMatrix.md),
+  [RaBitQ implementation and compatibility](docs/development/RaBitQ.md).
+
+The [Python tutorial](docs/Tutorial.ipynb) is an additional wrapper example,
+not a prerequisite for the baseline C++ workflow.
+
+## Validation
+
 ```bash
-cd ThirdParty/isal-l_crypto
-./autogen.sh
-./configure
-make -j
+node --test Tools/check-docs.test.mjs
+node Tools/check-docs.mjs
+node Tools/quickstart.mjs Release
+Release/SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite
 ```
 
-> Build RocksDB
-```bash
-mkdir build && cd build
-cmake -DUSE_RTTI=1 -DWITH_JEMALLOC=1 -DWITH_SNAPPY=1 -DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7 -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fPIC" ..
-make -j
-sudo make install
-```
+The [GitHub Actions workflow](.github/workflows/ci.yml) defines the baseline
+Linux build and documentation checks. A workflow definition is not a claim
+that a remote run has passed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+scope of these checks and optional-backend testing.
 
-> Build SPTAG
-```bash
-mkdir build
-cd build && cmake -DSPDK=OFF -DROCKSDB=OFF .. && make
-```
-It will generate a Release folder in the code directory which contains all the build targets.
+The existing `DedupCandidateTest` currently fails on deleted-then-live visibility
+sequences. It is reported separately as a known, non-blocking CI diagnostic,
+not counted as a passing baseline test. See [known limitations](docs/SupportMatrix.md).
 
-> For Windows:
-```bash
-mkdir build
-cd build && cmake -A x64 -DSPDK=OFF -DROCKSDB=OFF ..
-```
-It will generate a SPTAGLib.sln in the build directory. 
-Compiling the ALL_BUILD project in the Visual Studio (at least 2019) will generate a Release directory which contains all the build targets.
+## Research and citation
 
-For detailed instructions on installing Windows binaries, please see [here](docs/WindowsInstallation.md)
+- [SPIRE: Scalable Distributed Vector Search via Accuracy Preserving Index Construction (arXiv, 2025)](https://arxiv.org/abs/2512.17264).
+- [SPFresh: Incremental In-Place Update for Billion-Scale Vector Search (SOSP 2023)](https://dl.acm.org/doi/10.1145/3600006.3613166).
+- [VBASE: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity (OSDI 2023)](https://www.usenix.org/system/files/osdi23-zhang-qianxi_1.pdf).
+- [SPANN: Highly-efficient Billion-scale Approximate Nearest Neighbor Search (NeurIPS 2021)](https://proceedings.neurips.cc/paper_files/paper/2021/file/299dc35e747eb77177d9cea10a802da2-Paper.pdf).
 
-> Using Docker:
-```bash
-docker build -t sptag .
-```
-Will build a docker container with binaries in `/app/Release/`.
+Citation entries and earlier references are in [References](docs/References.md).
+Experimental reports describe particular runs; they are not performance
+guarantees for the current branch.
 
-### **Verify** 
+## Contributing and reporting issues
 
-Run the SPTAGTest (or Test.exe) in the Release folder to verify all the tests have passed.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Report
+reproducible bugs and feature requests through
+[GitHub issues](https://github.com/microsoft/SPTAG/issues).
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
+not through public issues.
 
-### **Usage**
+## License
 
-The detailed usage can be found in [Get started](docs/GettingStart.md). There is also an end-to-end tutorial for building vector search online service using Python Wrapper in [Python Tutorial](docs/Tutorial.ipynb).
-The detailed parameters tunning can be found in [Parameters](docs/Parameters.md).
-
-## **References**
-Please cite SPTAG in your publications if it helps your research:
-```
-@inproceedings{xu2023spfresh,
-  title={SPFresh: Incremental In-Place Update for Billion-Scale Vector Search},
-  author={Xu, Yuming and Liang, Hengyu and Li, Jin and Xu, Shuotao and Chen, Qi and Zhang, Qianxi and Li, Cheng and Yang, Ziyue and Yang, Fan and Yang, Yuqing and others},
-  booktitle={Proceedings of the 29th Symposium on Operating Systems Principles},
-  pages={545--561},
-  year={2023}
-}
-
-@inproceedings{zhang2023vbase,
-  title={$\{$VBASE$\}$: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity},
-  author={Zhang, Qianxi and Xu, Shuotao and Chen, Qi and Sui, Guoxin and Xie, Jiadong and Cai, Zhizhen and Chen, Yaoqi and He, Yinxuan and Yang, Yuqing and Yang, Fan and others},
-  booktitle={17th USENIX Symposium on Operating Systems Design and Implementation (OSDI 23)},
-  year={2023}
-}
-
-@inproceedings{ChenW21,
-  author = {Qi Chen and 
-            Bing Zhao and 
-            Haidong Wang and 
-            Mingqin Li and 
-            Chuanjie Liu and 
-            Zengzhong Li and 
-            Mao Yang and 
-            Jingdong Wang},
-  title = {SPANN: Highly-efficient Billion-scale Approximate Nearest Neighbor Search},
-  booktitle = {35th Conference on Neural Information Processing Systems (NeurIPS 2021)},
-  year = {2021}
-}
-
-@manual{ChenW18,
-  author    = {Qi Chen and
-               Haidong Wang and
-               Mingqin Li and 
-               Gang Ren and
-               Scarlett Li and
-               Jeffery Zhu and
-               Jason Li and
-               Chuanjie Liu and
-               Lintao Zhang and
-               Jingdong Wang},
-  title     = {SPTAG: A library for fast approximate nearest neighbor search},
-  url       = {https://github.com/Microsoft/SPTAG},
-  year      = {2018}
-}
-
-@inproceedings{WangL12,
-  author    = {Jingdong Wang and
-               Shipeng Li},
-  title     = {Query-driven iterated neighborhood graph search for large scale indexing},
-  booktitle = {ACM Multimedia 2012},
-  pages     = {179--188},
-  year      = {2012}
-}
-
-@inproceedings{WangWZTGL12,
-  author    = {Jing Wang and
-               Jingdong Wang and
-               Gang Zeng and
-               Zhuowen Tu and
-               Rui Gan and
-               Shipeng Li},
-  title     = {Scalable k-NN graph construction for visual descriptors},
-  booktitle = {CVPR 2012},
-  pages     = {1106--1113},
-  year      = {2012}
-}
-
-@article{WangWJLZZH14,
-  author    = {Jingdong Wang and
-               Naiyan Wang and
-               You Jia and
-               Jian Li and
-               Gang Zeng and
-               Hongbin Zha and
-               Xian{-}Sheng Hua},
-  title     = {Trinary-Projection Trees for Approximate Nearest Neighbor Search},
-  journal   = {{IEEE} Trans. Pattern Anal. Mach. Intell.},
-  volume    = {36},
-  number    = {2},
-  pages     = {388--403},
-  year      = {2014
-}
-```
-
-## **Contribute**
-
-This project welcomes contributions and suggestions from all the users.
-
-We use [GitHub issues](https://github.com/Microsoft/SPTAG/issues) for tracking suggestions and bugs.
-
-## **License**
-The entire codebase is under [MIT license](https://github.com/Microsoft/SPTAG/blob/master/LICENSE)
+SPTAG is available under the [MIT license](LICENSE). Third-party dependencies
+and datasets retain their own licenses; see [dependency notes](docs/BuildOptions.md).

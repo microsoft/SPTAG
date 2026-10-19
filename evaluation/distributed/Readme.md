@@ -1,3 +1,27 @@
+# SPIRE distributed construction research workflow
+
+[Evaluation index](../README.md) | [Support matrix](../../docs/SupportMatrix.md)
+
+This workflow is associated with the repository's **SPIRE** research:
+[Scalable Distributed Vector Search via Accuracy Preserving Index Construction](https://arxiv.org/abs/2512.17264)
+(arXiv:2512.17264, 2025). For the paper's authors and BibTeX, see
+[the research references](../../docs/References.md#spire).
+
+The paper studies scalable distributed search with accuracy-preserving
+multi-level index construction. The partitioning and distributed construction
+steps below are an experimental entry point, not a complete, version-pinned
+reproduction package for all paper results.
+
+This is a machine-specific research record, not a portable deployment guide.
+Host addresses, interface names, dataset paths, and resource settings below are
+historical examples and must be replaced explicitly. Use matching commit IDs,
+`LARGEVID`, formats, and toolchains on every host. Do not treat the historical
+command as a certified multi-host Ubuntu 24.04 configuration.
+
+**Warning:** the workflow contains multi-host recursive cleanup. Do not execute
+it on shared data or copy its paths blindly. Review the host list and every
+resolved output directory, and preserve required inputs/checkpoints first.
+
 ## 0. each machine compile code with LARGEVID
 ```bash
 python3 -m venv ~/.local

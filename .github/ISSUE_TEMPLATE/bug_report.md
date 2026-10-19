@@ -1,35 +1,35 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-
+about: Report a reproducible build, indexing, search, or storage problem
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Problem and expected behavior
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+Describe what happened and what you expected.
+Do not post vulnerabilities here; follow SECURITY.md for private reporting.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+## Revision and environment
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+- SPTAG branch and commit:
+- OS / architecture:
+- CPU features (AVX2 / AVX512 if relevant):
+- Compiler, CMake, Boost, TBB, SWIG versions:
+- Index algorithm, vector type/dimension, and distance:
+- Storage backend and optional integrations:
+- TiKV/PD or other dependency versions, if applicable:
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+## Reproduction
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+Provide the exact configure/build/run commands, a minimal configuration and
+small shareable input, and all relevant environment variable names/values
+(redact credentials, private hostnames, and sensitive data).
 
-**Additional context**
-Add any other context about the problem here.
+## Actual output
+
+Include relevant error logs and exit codes as text. If it is a crash, include
+a stack trace and whether it reproduces in a baseline configuration.
+
+## Impact and additional context
+
+State whether this is a regression, affects persisted data, or occurs only
+with a particular concurrency level or optional backend.

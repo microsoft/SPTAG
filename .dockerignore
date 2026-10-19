@@ -1,0 +1,13 @@
+.git
+**/.git
+.vscode
+build
+build-*
+Release
+Debug
+**/_build
+**/*.log
+**/__pycache__
+benchmark-output
+datasets
+evaluation
