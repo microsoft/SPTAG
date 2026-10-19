@@ -1,8 +1,9 @@
 # Documentation
 
-Embed vector search in your C++ or Python application. Start with the SDK
-workflow below; optional backends and research experiments have separate
-requirements and are not installation prerequisites.
+Use SPTAG as a vector search engine through C++, Python, or command-line tools.
+The tutorials start small; they are an entry point to disk indexing, dynamic
+maintenance, quantization, and scalable construction, not a restriction to
+in-memory ANN.
 
 ## Start here
 
@@ -12,13 +13,24 @@ requirements and are not installation prerequisites.
 3. [SDK API, data, error, concurrency, and compatibility contracts](SDK.md).
 4. [Platform and feature status](SupportMatrix.md) and [build options](BuildOptions.md).
 
+## Choose a workflow
+
+| Goal | Guide | Current boundary |
+| --- | --- | --- |
+| Learn the API and use your own vectors/IDs | [SDK quick start](QuickStart.md) | Basic C++/Python in-memory path tested |
+| Build and reload a disk index | [Small SPANN workflow](QuickStart.md#spann-disk-backed-search), then [SPANN configuration](GettingStart.md) | Single-layer STATIC example tested; large workloads require evaluation |
+| Keep an index fresh as data changes | [Dynamic maintenance](Architecture.md#dynamic-index-maintenance), [workload harness](../BENCHMARK_GUIDE.md) | Affected visibility paths have a known correctness blocker |
+| Compress vectors and select a bit width | [RaBitQ and native auto-tuning](RaBitQ_Global_Quantizer.md) | Opt-in pipeline; accuracy must be measured separately |
+| Store postings in a cluster | [TiKV integration](TiKV-Integration.md) | Requires a separately validated PD/TiKV deployment |
+| Partition and build on multiple hosts | [Construction architecture](Architecture.md#construction-and-multi-layer-indexes), [SPIRE workflow](../evaluation/distributed/Readme.md) | Multi-host validation required |
+
 ## User guides
 
 - [CLI quick start](CLIQuickStart.md).
 - [Advanced command-line and SPANN examples](GettingStart.md).
 - [Parameter reference](Parameters.md).
 - [TiKV posting storage](TiKV-Integration.md).
-- [RaBitQ training and search](RaBitQ_Global_Quantizer.md).
+- [RaBitQ training, automatic bit selection, and search](RaBitQ_Global_Quantizer.md).
 - Additional [Python tutorial](Tutorial.ipynb) and
   [notebook examples](examples/QuickstartGuide.ipynb), outside the SDK smoke-test contract.
 - [OPQ tools](../Tools/OPQ/README.md).

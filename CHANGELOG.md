@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Engine-oriented documentation
+
+- Describe the engine by workload: memory/disk search, dynamic maintenance,
+  compression, clustered posting storage, and scalable construction. Keep
+  capability importance separate from validation maturity.
+- Extend the Python example and blocking tests with a small single-layer
+  SPANN STATIC workflow, checking on-disk postings and independent-process reload.
+- Explain how SPANN, SPFresh, storage backends, quantizers, multi-layer
+  construction, and SDK/iterator interfaces fit together.
+- Document the current native RaBitQ auto-tuning configuration, output files,
+  calibration limits, and its distinction from final SPANN recall evaluation.
+- Retain all existing dynamic correctness warnings; broader product positioning
+  does not certify untested backends or remove release blockers.
+
 ### Developer SDK
 
 - Make C++/Python integration the primary onboarding path, with source-version

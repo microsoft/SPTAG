@@ -1,3 +1,4 @@
+import configparser
 import gc
 import json
 from pathlib import Path
@@ -110,6 +111,32 @@ class ExampleTest(unittest.TestCase):
             self.assertNotEqual(repeated.returncode, 0)
             self.assertIn("Output exists", repeated.stderr)
 
+    def test_spann_disk_build_and_independent_process_reload(self):
+        with tempfile.TemporaryDirectory(prefix="sptag-spann-example-") as directory:
+            index = Path(directory) / "output"
+            build = self.run_example("--algorithm", "SPANN", "--index", index)
+            self.assertEqual(build.returncode, 0, build.stderr + build.stdout)
+            postings = list((index / "index").glob("SPTAGFullList.bin*"))
+            self.assertTrue(postings, "SPANN must create on-disk postings")
+            self.assertTrue(all(path.stat().st_size > 0 for path in postings))
+            config = configparser.ConfigParser()
+            with (index / "index" / "indexloader.ini").open(encoding="utf-8") as loader:
+                config.read_file(loader)
+            self.assertEqual(config["Index"]["IndexAlgoType"], "SPANN")
+            self.assertEqual(config["BuildSSDIndex"]["Storage"], "STATIC")
+            self.assertEqual(config["BuildSSDIndex"]["Layers"], "1")
+            load = self.run_example("--index", index, "--load", "--queries", index / "queries.npy")
+            for operation, result in (("build", build), ("load", load)):
+                with self.subTest(operation=operation):
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    rows = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+                    self.assertEqual(len(rows), 3)
+                    for expected, row in zip((0, 31, 63), rows):
+                        self.assertEqual(row["neighbors"][0], {
+                            "id": "document-{}".format(expected), "row_id": expected, "distance": 0.0,
+                        })
+                        self.assertEqual(len(row["neighbors"]), 3)
+
     def test_invalid_inputs_fail_before_creating_output(self):
         with tempfile.TemporaryDirectory(prefix="sptag-invalid-data-") as directory:
             root = Path(directory)
@@ -137,13 +164,14 @@ class ExampleTest(unittest.TestCase):
                 (["--load", "--vectors", root / "valid.npy"], "cannot be combined"),
                 (["--ids", root / "short-ids.json"], "requires --vectors"),
             ]
-            for number, (args, message) in enumerate(cases):
-                with self.subTest(args=args):
-                    output = root / "output-{}".format(number)
-                    result = self.run_example("--index", output, *args)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn(message, result.stderr)
-                    self.assertFalse(output.exists())
+            for algorithm in ("BKT", "SPANN"):
+                for number, (args, message) in enumerate(cases):
+                    with self.subTest(algorithm=algorithm, args=args):
+                        output = root / "output-{}-{}".format(algorithm, number)
+                        result = self.run_example("--algorithm", algorithm, "--index", output, *args)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(message, result.stderr)
+                        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

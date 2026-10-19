@@ -2,9 +2,12 @@
 
 [Quick start](QuickStart.md) | [Parameters](Parameters.md) | [Support matrix](SupportMatrix.md)
 
-The developer baseline is **in-memory BKT/KDT, Float vectors, static build,
-search, save, and load** on the documented Linux configuration. It is an
-embedded library, not an embedding generator or a hosted database.
+The SDK exposes the vector search engine to applications; it is not limited
+to the first in-memory tutorial. The developer checks cover BKT/KDT and a small,
+single-layer STATIC SPANN build/search/save/load workflow on the documented
+Linux configuration. The engine is embedded, not an embedding generator or a
+hosted database. Broader capability and readiness are tracked separately in the
+[support matrix](SupportMatrix.md).
 
 ## Choose an index
 
@@ -12,9 +15,11 @@ Start with BKT to follow the executable examples. KDT uses the same SDK
 build/search/persistence API: use `"KDT"` in Python or `IndexAlgoType::KDT`
 in C++. Compare recall, latency, build time, and memory on representative
 data before choosing; neither is universally best.
-If the dataset does not fit memory, evaluate SPANN through its separate
-[configuration guide](GettingStart.md) rather than assuming the in-memory
-example provides disk-backed storage.
+For disk-backed postings, continue to the
+[small SPANN example](QuickStart.md#spann-disk-backed-search) and then its
+[configuration guide](GettingStart.md). SPFresh dynamic maintenance, storage
+backends, quantizers, and multi-layer construction are engine components,
+not mutually exclusive alternatives to the SDK.
 
 ## Python API
 
@@ -86,7 +91,7 @@ Check a non-null factory result and compare each operation's return value to
 `SPTAG::ErrorCode::Success`. Read neighbors through `result.GetResult(rank)`:
 `VID` is the internal row ID; `Dist` is the distance.
 
-For this overload, `BuildIndex` defaults to copying input storage
+For the raw-buffer overload, `BuildIndex` defaults to copying input storage
 (`p_shareOwnership=false`). The input must contain `count * dimension` values.
 Keep query storage alive through the search call and while using a query result
 that refers to it. The example uses one query result per query. Do not turn on
@@ -95,6 +100,32 @@ shared ownership without reviewing the concrete index's lifetime requirements.
 This source-based CMake target is not an installed package/export or a stable
 binary ABI. Keep compiler, feature definitions, and linked dependencies matched;
 in particular, `LARGEVID` changes ID types.
+
+## SPANN, quantizers, and iterative search
+
+For SPANN, use `"SPANN"` in `AnnIndex` or `IndexAlgoType::SPANN` in C++.
+Configure the `Base`, `SelectHead`, `BuildHead`, and `BuildSSDIndex` sections
+before building, as the executable example does. The BKT/KDT `"Index"` section
+alone is not an equivalent configuration.
+
+The Python API has two build entry points: `Build(vectors, count, normalized)`
+for an in-memory input buffer, and `BuildSPANN(normalized)` for configured
+file-based input. The latter needs valid `Base.VectorPath`, format, value type,
+dimension, and build sections. It is not a deployment operation.
+
+Advanced public entry points include:
+
+| Task | Entry point | Contract / validation |
+| --- | --- | --- |
+| Attach a quantizer | Python `LoadQuantizer`; C++ `LoadQuantizer` / `SetQuantizer` | Check load status; model, encoded vectors, value type, and dimension must match |
+| Select ADC query scoring | `SetQuantizerADC(true)` in C++; `SetQuantizerADC(True)` in Python | Persist the SPANN mode with the index; see [quantizer compatibility](development/RaBitQ.md) |
+| Request iterative results | `GetIterator(query)` and `ResultIterator::Next(batch)` | Retain valid query/index lifetimes and close the iterator; the [iterator interface](../AnnService/inc/Core/ResultIterator.h) exposes error and relaxed-monotonicity state |
+| Maintain changing data | Build/update/delete APIs and SPFresh workflows | Requires backend-specific consistency and persistence tests; known visibility failures remain blocking for affected stable-use claims |
+
+Top-K, iterator exhaustion, relaxed-monotonicity signals, and concurrent-update
+visibility are distinct behaviors. The small SPANN Top-K test does not establish
+multi-layer iterator correctness. See the [engine architecture](Architecture.md)
+and [SPANN reference](GettingStart.md) before composing these features.
 
 ## IDs, distances, and approximation
 

@@ -26,6 +26,27 @@ def load_ids(path, count):
     return ids
 
 
+def configure_spann(index, output):
+    settings = {
+        "Base": {
+            "IndexAlgoType": "BKT", "DistCalcMethod": "L2",
+            "IndexDirectory": str(output / "index"),
+        },
+        "SelectHead": {"isExecute": "true", "NumberOfThreads": "1", "Ratio": "0.25"},
+        "BuildHead": {"isExecute": "true", "NumberOfThreads": "1", "NeighborhoodSize": "16"},
+        "BuildSSDIndex": {
+            "isExecute": "true", "BuildSsdIndex": "true", "Storage": "STATIC",
+            "NumberOfThreads": "1", "SearchThreadNum": "1", "IOThreadsPerHandler": "1",
+            "InternalResultNum": "32", "SearchInternalResultNum": "32",
+            "PostingPageLimit": "4", "SearchPostingPageLimit": "4",
+            "ReplicaCount": "2", "ExcludeHead": "false", "Layers": "1", "TmpDir": str(output),
+        },
+    }
+    for section, parameters in settings.items():
+        for name, value in parameters.items():
+            index.SetBuildParam(name, value, section)
+
+
 def run(args):
     output = args.index.resolve()
     if args.k <= 0:
@@ -53,9 +74,10 @@ def run(args):
         ids = load_ids(args.ids, len(vectors)) if args.ids else [
             "document-{}".format(row) for row in range(len(vectors))
         ]
-        index = SPTAG.AnnIndex("BKT", "Float", vectors.shape[1])
-        index.SetBuildParam("DistCalcMethod", "L2", "Index")
-        index.SetBuildParam("NumberOfThreads", "1", "Index")
+        index = SPTAG.AnnIndex(args.algorithm, "Float", vectors.shape[1])
+        if args.algorithm == "BKT":
+            index.SetBuildParam("DistCalcMethod", "L2", "Index")
+            index.SetBuildParam("NumberOfThreads", "1", "Index")
     if args.k > len(vectors):
         raise ValueError("--k must not exceed the number of indexed vectors")
     if args.queries:
@@ -65,9 +87,13 @@ def run(args):
     if queries.shape[1] != vectors.shape[1]:
         raise ValueError("Query and index dimensions must match")
     if not args.load:
+        if args.algorithm == "SPANN":
+            output.mkdir(parents=True)
+            configure_spann(index, output)
         if not index.Build(vectors, len(vectors), False):
             raise RuntimeError("Building the index failed")
-        output.mkdir(parents=True)
+        if args.algorithm == "BKT":
+            output.mkdir(parents=True)
         if not index.Save(str(output / "index")):
             raise RuntimeError("Saving the index failed")
         np.save(output / "vectors.npy", vectors, allow_pickle=False)
@@ -100,6 +126,8 @@ def main():
     parser.add_argument("--ids", type=Path, help="JSON list of business IDs, in vector row order")
     parser.add_argument("--queries", type=Path, help="Your float32 (query_count, dimension) .npy array")
     parser.add_argument("--k", type=int, default=3)
+    parser.add_argument("--algorithm", choices=("BKT", "SPANN"), default="BKT",
+                        help="Build an in-memory BKT or disk-backed STATIC SPANN index; --load uses saved settings")
     parser.add_argument("--load", action="store_true", help="Load without rebuilding; requires --queries")
     args = parser.parse_args()
     run(args)

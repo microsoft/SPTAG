@@ -65,8 +65,9 @@ python3 -m unittest discover -s Test/python -v
 (cd Release && ./SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite)
 ```
 
-The [SDK quick start](QuickStart.md) also covers a standalone C++ consumer and
-your own vectors/business IDs. The Python example keeps its output; choose a
+The [SDK quick start](QuickStart.md) also covers a standalone C++ consumer,
+a small SPANN disk index, and your own vectors/business IDs. The Python example
+keeps its output; choose a
 new directory to repeat a build. The optional [CLI smoke test](CLIQuickStart.md)
 uses a separate temporary dataset.
 The selected unit suites need no TiKV cluster or external dataset. They are

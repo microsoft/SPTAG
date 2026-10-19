@@ -60,6 +60,11 @@ jobs:
             --load --queries quickstart-output/python/queries.npy
       - name: Check real CLI save, load, and search
         run: node Tools/quickstart.mjs Release
+      - name: Check SPANN disk postings and independent-process reload
+        run: |
+          python3 Examples/python/quickstart.py --algorithm SPANN --index quickstart-output/spann
+          python3 Examples/python/quickstart.py --index quickstart-output/spann \
+            --load --queries quickstart-output/spann/queries.npy
       - name: Run self-contained unit tests
         working-directory: Release
         run: ./SPTAGTest --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest:AlgoTest/BKTTest:AlgoTest/KDTTest --log_level=test_suite

@@ -2,9 +2,10 @@
 
 [Documentation index](README.md) | [API contracts](SDK.md) | [Support matrix](SupportMatrix.md)
 
-Use SPTAG inside your own application. The examples build an in-memory BKT
-index, find Top-K neighbors, map vector rows to business IDs, save the index,
-and reload it in a separate process. Both keep the output for inspection.
+Use SPTAG inside your own application. Start with in-memory BKT to learn the
+interface, then try single-layer SPANN disk postings below. The examples find
+Top-K neighbors, map vector rows to business IDs, save the index, and reload
+it in a separate process. Both paths keep the output for inspection.
 They do not need an embedding service, downloaded dataset, or Node.js.
 
 First follow [Linux installation](LinuxInstallation.md). This guide targets
@@ -91,6 +92,49 @@ dtypes, nonfinite values, mismatched dimensions, invalid IDs, and invalid K.
 It does not silently replace a missing or invalid input with demonstration data.
 The two-dimensional example is for learning, not recall or performance evaluation.
 
+## SPANN disk-backed search
+
+Use the same built Python binding and driver; no TiKV, SPDK, or additional
+dataset is needed:
+
+```bash
+python3 Examples/python/quickstart.py --algorithm SPANN --index quickstart-output/spann
+python3 Examples/python/quickstart.py --index quickstart-output/spann \
+  --load --queries quickstart-output/spann/queries.npy --k 3
+```
+
+The first process builds a SPANN index with a BKT head index and writes STATIC
+postings to `index/SPTAGFullList.bin_0`. It saves and reloads the index before
+searching. The second process loads the existing artifacts without building.
+Both return rows 0, 31, and 63 as the three demonstration queries' first
+neighbors, with distance zero. The final success line has the same shape as
+the BKT example; the saved loader configuration identifies the SPANN algorithm.
+
+The [driver's configuration](../Examples/python/quickstart.py) separates:
+
+| Section | Demonstration settings |
+| --- | --- |
+| `Base` | BKT head index, L2, isolated index directory |
+| `SelectHead` | Execute head selection, ratio 0.25 |
+| `BuildHead` | Execute head construction, one worker |
+| `BuildSSDIndex` | `Storage=STATIC`, one layer, two replicas, four-page posting limits |
+| Search settings in `BuildSSDIndex` | 32 head candidates, one search thread |
+
+`STATIC` is the read-only posting-file path, **not** the dynamic `FILEIO`
+backend. This example does not enable insertion, deletion, TiKV, or quantization.
+The test checks nonempty on-disk posting files as well as the returned results;
+an in-memory fallback is not accepted as success.
+
+The teaching driver reads the full input into NumPy for construction and again
+on load for shape/ID checks. This is a driver convenience, not a requirement
+that a serving application retain the raw input corpus alongside a loaded
+SPANN index. It demonstrates disk search/persistence, not an out-of-core build
+or a large-scale memory/recall guarantee. Candidate and head settings are chosen
+for this 128-vector corpus, not as production defaults.
+For your own corpus, use the driver's `--vectors`, `--ids`, and `--queries`
+inputs and evaluate appropriate settings. For file-based construction, continue
+to the [SPANN configuration reference](GettingStart.md).
+
 ## C++
 
 The [consumer project](../Examples/cpp/CMakeLists.txt) is a standalone CMake
@@ -128,5 +172,9 @@ directory; do not build incompatible configurations there concurrently.
 - Read [API, data, errors, concurrency, and compatibility contracts](SDK.md).
 - Adjust [parameters](Parameters.md), measuring recall and latency on your data.
 - Use the [CLI example](CLIQuickStart.md) for file-based indexing.
-- Read the [support matrix](SupportMatrix.md) before enabling disk storage,
-  updates, quantization, or distributed integrations.
+- Follow [dynamic index maintenance](Architecture.md#dynamic-index-maintenance)
+  for changing data and its current correctness limits.
+- Explore [quantization and native bit-width tuning](RaBitQ_Global_Quantizer.md).
+- Distinguish [distributed posting storage](TiKV-Integration.md) from
+  [multi-host index construction](Architecture.md#construction-and-multi-layer-indexes).
+- Check the [support matrix](SupportMatrix.md) before promoting any new profile.

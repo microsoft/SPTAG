@@ -1,12 +1,27 @@
-# Experimental TiKV posting backend
+# TiKV distributed posting storage
 
 [Documentation index](README.md) | [Architecture](Architecture.md) |
 [Benchmark methodology](../BENCHMARK_GUIDE.md)
 
-This backend stores SPANN dynamic postings in TiKV through the RawKV API.
-It does not move the complete head index and local metadata into TiKV.
-Treat it as an experimental integration, not a complete highly available
-vector-serving system.
+Use this backend when SPANN dynamic postings should reside in a TiKV storage
+cluster rather than a local posting store. Applications continue to use the
+SPTAG index interfaces; this is a storage integration, not a separate search SDK.
+It is implemented but remains an experimental deployment profile until a
+specific cluster/version/workload combination is validated.
+
+## What changes with TiKV
+
+| Component | Location / responsibility |
+| --- | --- |
+| Dynamic postings and configured backend/version state | TiKV RawKV, with SPTAG-specific operations where required |
+| Head index, ID mappings, and local index metadata | Still local to the index instance; coordinate their lifecycle and backups |
+| PD/TiKV availability, replicas, topology, and upgrades | Operated as a separate storage cluster |
+| Distributed partitioning and index construction | A different workflow; see [construction architecture](Architecture.md#construction-and-multi-layer-indexes) |
+
+TiKV storage does not by itself distribute all search computation, move the
+complete index into the cluster, or establish a highly available vector-serving
+system. Learn the [small STATIC SPANN path](QuickStart.md#spann-disk-backed-search)
+first, then validate the dynamic backend and update semantics separately.
 
 ## Requirements and scope
 

@@ -1,24 +1,42 @@
-# SPTAG: vector search SDK for C++ and Python
+# SPTAG: Scalable Vector Search with Dynamic Indexing
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-SPTAG (Space Partition Tree And Graph) provides approximate nearest-neighbor
-search inside your application. Build an index from your vectors, retrieve
-Top-K neighbors, and save and reload the index using C++ or Python. The core
-combines partition trees with neighborhood graphs and was originally released
-by Microsoft Research and Microsoft Bing.
+SPTAG (Space Partition Tree And Graph) is a C++ vector search engine with Python
+bindings and command-line tools. It combines partition trees and neighborhood
+graphs for approximate nearest-neighbor search, with in-memory and disk-backed
+indexes, incremental index maintenance, vector compression, and scalable index
+construction. It was originally released by Microsoft Research and Microsoft Bing.
 
-**Start with:** [SDK quick start](docs/QuickStart.md) |
+**Start with:** [choose a capability](#choose-a-capability) |
+[quick start](docs/QuickStart.md) |
 [API and data contracts](docs/SDK.md) |
 [platform and feature status](docs/SupportMatrix.md).
 
 SPTAG indexes vectors you supply; it does not generate embeddings or provide a
-managed vector database. Start with in-memory BKT or KDT. Disk-based, dynamic,
-and distributed capabilities have separate integration and validation requirements.
+managed vector database. The development line brings together SPANN disk
+indexing, SPFresh updates, TiKV posting storage, RaBitQ quantization, and
+distributed construction associated with SPIRE. These are different layers of
+the engine, not interchangeable index types or equally validated configurations.
 
 <p align="center">
   <img src="docs/img/sptag.png" alt="SPTAG tree and graph search architecture" width="500"/>
 </p>
+
+## Choose a capability
+
+| Your workload | Engine capability | Start here | Validation status |
+| --- | --- | --- | --- |
+| Search vectors in your application's memory | BKT/KDT | [C++ and Python examples](docs/QuickStart.md) | Basic SDK paths tested |
+| Search disk-backed postings | SPANN | [Small disk-index example](docs/QuickStart.md#spann-disk-backed-search) | Single-layer STATIC build/search/reload tested |
+| Maintain a changing corpus | SPFresh incremental insert/delete and split/reassign | [Dynamic indexing](docs/Architecture.md#dynamic-index-maintenance) | Implemented; affected visibility paths have a known correctness blocker |
+| Reduce vector storage cost | PQ/OPQ and RaBitQ; native RaBitQ bit-width tuning | [Quantization and tuning](docs/RaBitQ_Global_Quantizer.md) | Opt-in; accuracy and compatibility require separate validation |
+| Put dynamic postings in a storage cluster | TiKV RawKV backend | [TiKV integration](docs/TiKV-Integration.md) | Implemented integration; cluster behavior not certified by baseline tests |
+| Scale index construction across machines | Distributed partition/build workflows; SPIRE research lineage | [Construction architecture](docs/Architecture.md#construction-and-multi-layer-indexes) | Multi-host workflow requires dedicated validation |
+
+Capability importance and readiness are separate: core development directions
+can still require integration testing or correctness fixes. See the
+[support matrix](docs/SupportMatrix.md) for the complete scope.
 
 ## Choose your entry point
 
@@ -57,8 +75,9 @@ export PYTHONPATH="$PWD/Release${PYTHONPATH:+:$PYTHONPATH}"
 python3 Examples/python/quickstart.py --index quickstart-output/python
 ```
 
-The example checks three exact self-matches and **keeps** its index, input
-vectors, queries, and business-ID mapping. Reload it in another process:
+The first example uses BKT to introduce the API with minimal setup. It checks
+three exact self-matches and **keeps** its index, input vectors, queries, and
+business-ID mapping. Reload it in another process:
 
 ```bash
 python3 Examples/python/quickstart.py --index quickstart-output/python \
@@ -67,7 +86,16 @@ python3 Examples/python/quickstart.py --index quickstart-output/python \
 
 Use a new output directory for another build. Next, follow the
 [SDK quick start](docs/QuickStart.md) to use your own vectors and IDs or embed
-the C++ library. Node.js is not required for either SDK example.
+the C++ library. To exercise disk-backed search with the same binding:
+
+```bash
+python3 Examples/python/quickstart.py --algorithm SPANN --index quickstart-output/spann
+python3 Examples/python/quickstart.py --index quickstart-output/spann \
+  --load --queries quickstart-output/spann/queries.npy
+```
+
+This small SPANN example needs no external storage service and does not enable
+dynamic updates. Node.js is not required for either SDK path.
 
 ## Python API at a glance
 
@@ -91,21 +119,19 @@ Returned IDs are vector row numbers, not automatically your application IDs.
 See [data, result, error, and persistence contracts](docs/SDK.md) before
 integrating. ANN results are approximate; evaluate recall on your own data.
 
-## Capabilities and support
+## Validation and compatibility
 
-The developer baseline covers in-memory BKT/KDT build, search, and persistence.
+The developer baseline checks in-memory BKT/KDT and a small disk-backed SPANN
+path. It is a starting validation profile, not the boundary of the engine.
 The [CI workflow](.github/workflows/ci.yml) checks the public SDK paths as well
 as selected core tests. See [recorded validation](docs/Validation.md) and the
 [support matrix](docs/SupportMatrix.md) for exact environments and limits;
 this development snapshot is not a blanket production-readiness guarantee.
 
-| Additional capability | Entry point and status |
-| --- | --- |
-| SPANN disk-based search | [Advanced configuration](docs/GettingStart.md); separately validate storage and scale |
-| SPFresh incremental updates | [Architecture](docs/Architecture.md); dynamic visibility has a [known correctness blocker](docs/SupportMatrix.md#known-validation-limits) |
-| TiKV distributed postings | [Experimental integration](docs/TiKV-Integration.md) |
-| RaBitQ quantization | [Opt-in integration](docs/RaBitQ_Global_Quantizer.md) |
-| SPIRE distributed construction | [Multi-host workflow](evaluation/distributed/Readme.md), outside the SDK baseline |
+Updates, quantization, iterators, and distributed integrations need their own
+correctness, compatibility, and workload tests. In particular, the
+[known dynamic-visibility regression](docs/SupportMatrix.md#known-validation-limits)
+is not waived by a passing static SDK test.
 
 ## Documentation
 

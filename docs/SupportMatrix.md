@@ -7,10 +7,16 @@ The baseline workflow is Ubuntu 24.04 x86-64, GCC 13, CMake 3.28, Boost 1.83,
 oneTBB, AVX2, and the optional storage/quantization integrations disabled.
 Check the actual workflow result for the commit you use.
 
+The baseline is a reproducible validation profile, not the product's capability
+boundary. Disk indexing, incremental maintenance, compression, and distributed
+construction are important engine directions; implementation maturity and
+test coverage must be stated independently.
+
 | Feature / configuration | Linux x86-64 | Native Windows | Validation boundary |
 | --- | --- | --- | --- |
 | C++ BKT/KDT and persistence | Developer baseline | Manual validation required | Selected core tests; standalone CMake consumer checks BKT and independent-process reload |
 | Python BKT/KDT and persistence | Developer baseline: Python 3.12, NumPy 1.26 | Manual validation required | Public binding tests cover results, metadata, buffers, and save/load; example uses independent processes |
+| Python SPANN STATIC and persistence | Small developer example | Manual validation required | Single layer; nonempty disk postings and independent-process Top-K queries checked |
 | CLI, save/load | Baseline | Compatibility path | The file-based example checks BKT save/load/search |
 | Core helpers and non-Folly map tests | Baseline | Manual validation required | Selected Boost.Test suites, not all tests |
 | SPANN / SPFresh FILEIO | Available | Manual validation required | Built in the baseline; large update experiments are not covered by the smoke test |
@@ -18,7 +24,7 @@ Check the actual workflow result for the commit you use.
 | Linux without TBB | Known build limitations | Not applicable | Existing queue adapter lacks operations used by FILEIO; not a supported baseline |
 | Java / .NET wrappers | Optional | Optional | Build discovery exists; runtime compatibility is not certified by SDK checks |
 | TiKV RawKV | Experimental | Not validated | Requires gRPC/Protobuf and a separately versioned TiKV/PD deployment |
-| RaBitQ | Experimental, opt-in | Not validated | Requires official submodule, AVX2/FMA or AVX512, and separate accuracy/compatibility tests |
+| RaBitQ and native auto-tuning | Implemented, opt-in | Not validated | Requires official submodule, AVX2/FMA or AVX512; tuning calibration is not end-to-end SPANN recall certification |
 | RocksDB | Optional integration | Not validated | External matching development library required |
 | SPDK / io_uring | Linux-specific integration | Not supported by these recipes | Dedicated storage setup; never required for the quick start |
 | Folly | Optional developer configuration | Not validated | CMake currently enables it by default; baseline explicitly disables it |
@@ -42,7 +48,8 @@ Check the actual workflow result for the commit you use.
 
 ## Known validation limits
 
-- The SDK developer baseline covers static in-memory indexes. It does not
+- The SDK developer baseline covers static in-memory indexes and a small
+  single-layer STATIC SPANN disk index. It does not
   establish a versioned binary distribution, installed CMake package, stable
   ABI, cross-version index compatibility, or concurrent mutation guarantees.
   See the [SDK contracts](SDK.md).

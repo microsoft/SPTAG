@@ -33,6 +33,9 @@ Changes to the public SDK also need the
 Their output is retained, so use fresh directories when repeating a build.
 The Linux CI configures that standalone consumer and treats SDK checks as
 blocking. Native Windows SDK usage requires its own validation.
+The SPANN example check additionally requires nonempty STATIC posting files
+and correct results in an independent load process; an in-memory example is
+not a substitute for disk-index validation.
 
 Run self-contained Boost.Test suites from the output directory:
 
