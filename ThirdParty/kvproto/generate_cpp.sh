@@ -47,8 +47,8 @@ for proto in metapb errorpb kvrpcpb tikvpb pdpb; do
         "$PROTO_DIR/${proto}.proto"
 done
 
-# Generate gRPC service stubs (only for service protos)
-for proto in tikvpb pdpb; do
+# Regenerate even empty stubs to avoid mixing gRPC generator versions.
+for proto in metapb errorpb kvrpcpb tikvpb pdpb; do
     echo "Generating ${proto}.grpc.pb.cc/h ..."
     protoc \
         --proto_path="$PROTO_DIR" \

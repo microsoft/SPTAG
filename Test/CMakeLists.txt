@@ -31,6 +31,10 @@ if (NOT LIBRARYONLY)
 
     add_executable(SPTAGTest ${TEST_SRC_FILES} ${TEST_HDR_FILES})
     target_link_libraries(SPTAGTest SPTAGLibStatic ssdservingLib ${Boost_LIBRARIES})
+    if (TIKV)
+        find_package(absl CONFIG REQUIRED)
+        target_link_libraries(SPTAGTest absl::synchronization)
+    endif()
 
     install(TARGETS SPTAGTest
       RUNTIME DESTINATION bin  
