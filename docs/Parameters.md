@@ -51,7 +51,7 @@ Increase `MaxCheck` to explore the recall/latency tradeoff. Construction
 parameters such as `TPTNumber`, `NeighborhoodSize`, `CEF`, and refinement
 budget also affect index quality, build cost, and memory. Change one group at
 a time and record the source revision, data, hardware, and configuration.
-See [benchmark methodology](../BENCHMARK_GUIDE.md).
+See [benchmark methodology](Benchmarking.md).
 
 The old inline NNI/CLI tutorial used an obsolete search invocation and is no
 longer a runnable SDK guide. It remains in

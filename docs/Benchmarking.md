@@ -1,17 +1,19 @@
 # Benchmark methodology and reproduction
 
-[Documentation index](docs/README.md) | [Evaluation index](evaluation/README.md) |
-[Report template](evaluation/ReportTemplate.md)
+[Documentation index](README.md) | [Evaluation index](../evaluation/README.md) |
+[Latest SIFT1M validation](../evaluation/2026-10-23-sift1m/README.md)
 
 This guide defines how to run and report the current SPFresh benchmark harness.
 It is not a promise to reproduce historical numbers. The historical reports
 have incomplete revision/image provenance and must be interpreted accordingly.
-Start with the [baseline quick start](docs/QuickStart.md) before attempting a
+Start with the [baseline quick start](QuickStart.md) before attempting a
 large or distributed experiment.
 
-The original machine-specific guide and its reference tables remain available
-in [the pre-cleanup revision](https://github.com/microsoft/SPTAG/blob/328e5337/BENCHMARK_GUIDE.md).
-Use that historical source for provenance, not as a current installation recipe.
+The [latest report](../evaluation/2026-10-23-sift1m/README.md) separates partial
+update benchmarks from a same-index, query-only correctness check. It verifies
+the TiKV recall fix, not a completed ten-batch or multi-host benchmark.
+Older [1M](../evaluation/historical/TiKV-1M.md) and
+[10M](../evaluation/historical/TiKV-10M.md) observations are archived separately.
 
 ## 1. Pin the complete environment
 
@@ -36,9 +38,9 @@ storage. Disclose both topology and replication settings.
 
 ## 2. Build the selected backend
 
-Use the [Linux baseline](docs/LinuxInstallation.md) and
-[build-option reference](docs/BuildOptions.md). The baseline builds FILEIO,
-not TiKV. For TiKV, follow [the integration guide](docs/TiKV-Integration.md)
+Use the [Linux baseline](LinuxInstallation.md) and
+[build-option reference](BuildOptions.md). The baseline builds FILEIO,
+not TiKV. For TiKV, follow [the integration guide](TiKV-Integration.md)
 and build with `TIKV=ON` in a separate build directory.
 
 On Linux, the test binary is `Release/SPTAGTest` relative to the source root,
@@ -61,6 +63,41 @@ Before running, verify the configured input files really exist. Do not infer
 that a successful process used the intended dataset. The generator's fallback
 behavior is not an acceptable substitute for a named benchmark corpus.
 
+### Extract a SIFT1B prefix safely
+
+For `bigann_base.u8bin`, a DEFAULT UInt8 file with two little-endian 32-bit
+header fields, extract the first 1M rows and **rewrite the row-count header**.
+Do not truncate the file while retaining its original billion-row header.
+This recipe is for `LARGEVID=OFF`, dimension 128:
+
+```bash
+export SIFT_BASE=/absolute/path/to/bigann_base.u8bin
+export SIFT_1M=/absolute/path/to/sift-first-1m.u8bin
+python3 - <<'PY'
+import os
+import struct
+
+count = 1_000_000
+with open(os.environ["SIFT_BASE"], "rb") as source:
+    rows, dimension = struct.unpack("<II", source.read(8))
+    if rows < count or dimension != 128:
+        raise ValueError("Expected at least 1M UInt8 vectors of dimension 128")
+    with open(os.environ["SIFT_1M"], "xb") as target:
+        target.write(struct.pack("<II", count, dimension))
+        remaining = count * dimension
+        while remaining:
+            block = source.read(min(8 * 1024 * 1024, remaining))
+            if not block:
+                raise EOFError("Vector data ended before the requested prefix")
+            target.write(block)
+            remaining -= len(block)
+PY
+sha256sum "$SIFT_1M"
+```
+
+The output must be 128,000,008 bytes. Keep the original input unchanged.
+Use the first 200 rows of the query file consistently, and preserve its checksum.
+
 ## 4. Configure the current harness
 
 Example FILEIO configuration, saved as `benchmark.ini` in your run directory:
@@ -69,7 +106,7 @@ Example FILEIO configuration, saved as `benchmark.ini` in your run directory:
 [Benchmark]
 VectorPath=/absolute/path/to/base-and-insert-vectors.bin
 QueryPath=/absolute/path/to/queries.bin
-TruthPath=none
+TruthPath=perftest_batchtruth.L2.UInt8_990000_128_200_5_1000_0_10
 IndexPath=index
 ValueType=UInt8
 Dimension=128
@@ -78,32 +115,42 @@ InsertVectorCount=10000
 DeleteVectorCount=0
 BatchNum=10
 TopK=5
-NumSearchThreads=4
+NumSearchThreads=16
 NumInsertThreads=4
 NumSearchDuringInsertThreads=0
 NumQueries=200
 DistMethod=L2
 Rebuild=true
 Resume=-1
-Layers=1
+Layers=2
 
 [SelectHead]
-NumberOfThreads=4
+NumberOfThreads=8
 
 [BuildHead]
-NumberOfThreads=4
+NumberOfThreads=8
 
 [BuildSSDIndex]
 Storage=FILEIO
-NumberOfThreads=4
+NumberOfThreads=8
 PostingPageLimit=12
+SearchPostingPageLimit=12
 BufferLength=8
+SearchInternalResultNum=64
+LatencyLimit=50
 ```
 
 Replace the input paths with existing files. The base/insert file must contain
 at least `BaseVectorCount + InsertVectorCount` vectors. `InsertVectorCount` is
 the **total**, divided across `BatchNum`; choose a divisible total to avoid
 integer-truncated batch counts.
+
+With the nonempty `TruthPath` above, the generator computes exact batch truth
+if its automatically named file is absent. For this insertion-only example,
+phase `p` contains IDs `[0, 990000 + p * 1000)`, for `p=0..10`.
+An existing configured truth file overrides the generated filename when loading;
+check that its phase layout matches the workload. `TruthPath=none` is appropriate
+only for throughput-only runs, never recall validation.
 
 Important section and key distinctions:
 
@@ -124,9 +171,12 @@ For TiKV, replace/add the backend section:
 Storage=TIKVIO
 TiKVPDAddresses=127.0.0.1:2379
 TiKVKeyPrefix=unique_run_identifier
-NumberOfThreads=4
+NumberOfThreads=8
 PostingPageLimit=12
+SearchPostingPageLimit=12
 BufferLength=8
+SearchInternalResultNum=64
+LatencyLimit=50
 ```
 
 Use a fresh key prefix **and** a fresh local index/run directory for an
@@ -158,9 +208,17 @@ work may still execute. Set operation counts deliberately. Resume behavior
 depends on available checkpoint state; validate it with the specific revision
 before relying on it after an interrupted experiment.
 
+For an interrupted TiKV run, local checkpoint directories can share a mutable
+key prefix. An older local snapshot does not imply older postings in TiKV.
+Use the actual saved corpus size and matching truth phase, and do not assume
+the checkpoint marker includes the last successfully saved index.
+For read-only before/after validation, see the
+[dedicated query probe](../evaluation/2026-10-23-sift1m/README.md#read-only-replay).
+The full harness is not a substitute for that controlled comparison.
+
 ## 6. Measure and report
 
-Use the [report template](evaluation/ReportTemplate.md). At minimum:
+Use the [report template](../evaluation/ReportTemplate.md). At minimum:
 
 - Keep cold and warmed query rounds separate; define what "cold" means.
 - Report all independent runs, repetition count, and variation.
@@ -173,11 +231,16 @@ Use the [report template](evaluation/ReportTemplate.md). At minimum:
   and update throughput.
 - Ground truth must match the same vectors, metric, IDs, and update phase.
   Changing storage backend does not by itself justify changing ground truth.
+- Distinguish ID-only recall from the harness's distance-tolerant tie matching.
+  Report the denominator; 200 queries at TopK=5 have 1,000 truth neighbors.
+- Mark partial runs and log-extracted rows explicitly. Preserve incomplete raw
+  JSON unchanged instead of silently presenting it as a successful full run.
 - If the current harness cannot fix a random seed, say so and preserve the
   generated inputs/checksums.
 
 Do not use unverified projected latency ranges as expected acceptance results.
-The [1M](BENCHMARK_RESULTS_1M.md) and [10M](BENCHMARK_RESULTS_10M.md) historical
+The [1M](../evaluation/historical/TiKV-1M.md) and
+[10M](../evaluation/historical/TiKV-10M.md) historical
 reports are observations under their original conditions, not thresholds.
 
 ## 7. Troubleshooting without destroying data
@@ -193,6 +256,6 @@ reports are observations under their original conditions, not thresholds.
 - **Memory pressure:** record per-process resource limits and lower concurrency
   or cache sizes; do not silently remove failed runs from a comparison.
 
-The [dated experiments](evaluation/README.md) preserve prior cluster recipes.
+The [dated experiments](../evaluation/README.md) preserve prior cluster recipes.
 Any format/wipe/rebind operation belongs to a dedicated-machine procedure,
 never to the baseline installation or an ordinary benchmark retry.

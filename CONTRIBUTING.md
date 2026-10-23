@@ -93,7 +93,7 @@ An ASAN-linked binary loads its matching sanitizer runtime; do not commit an
 - Include exact validation commands and their results, including skipped or
   unavailable checks.
 - Update directly affected guides and examples.
-- For performance claims, follow [benchmark methodology](BENCHMARK_GUIDE.md).
+- For performance claims, follow [benchmark methodology](docs/Benchmarking.md).
 - Keep local data and outputs untracked; `git diff --check` should pass.
 
 The [GitHub workflow](.github/workflows/ci.yml) covers documentation and a

@@ -1,8 +1,15 @@
-# SPTAG/SPFresh + TiKV Benchmark Results (1M Scale)
+# Historical TiKV observations: 1M scale
 
 > Historical observations, not current-branch acceptance thresholds.
-> See the [evaluation index](evaluation/README.md) and
-> [reporting requirements](BENCHMARK_GUIDE.md).
+> For current evidence, read the [2026-10-23 SIFT1M validation](../2026-10-23-sift1m/README.md).
+> See the [evaluation index](../README.md) and
+> [reporting requirements](../../docs/Benchmarking.md).
+
+The latest validation identified and fixed a TiKV result-heap ordering bug.
+The revisions used below are unknown, so its impact on these historical runs
+cannot be established. These recall numbers are not evidence of an inherent
+TiKV accuracy limit, and have not been replaced with measurements from a
+different index or workload.
 
 ## Provenance and limitations
 
@@ -112,7 +119,7 @@ At 100K scale: **7-10x improvement** (56ms -> 7.6ms mean latency)
 - **Recall@5**: 0.754-0.787 (degrades slightly with inserts)
 - **Build time**: ~985-991s (~16.5 min)
 
-### Key Observations
+### Original interpretations (not revalidated)
 
 1. Each search query requires 2 serial gRPC round trips (Layer 1 head-of-heads + Layer 0 main postings)
 2. Each round trip fetches up to 64 keys via RawBatchGet grouped by region

@@ -76,7 +76,7 @@ just performance caches.
 
 Start with a working static SPANN index, then select a dynamic backend and
 validate the intended update/search workload with the
-[benchmark harness](../BENCHMARK_GUIDE.md). Check recall during ingestion,
+[benchmark harness](Benchmarking.md). Check recall during ingestion,
 stale/deleted visibility, save/reload, and restart behavior; compilation alone
 does not establish these contracts.
 The [known visibility regression](SupportMatrix.md#known-validation-limits)
@@ -125,7 +125,7 @@ without checking that algorithm's contract. See the
 SPANN configurations use `Base`, `SelectHead`, `BuildHead`, and `BuildSSDIndex`
 sections. The benchmark's `Benchmark` section configures the harness, not a
 general pass-through for posting-backend parameters. See
-[the benchmark guide](../BENCHMARK_GUIDE.md) for the distinction.
+[the benchmark guide](Benchmarking.md) for the distinction.
 
 Use matching ID widths (`LARGEVID`), value types, dimensions, distance
 settings, quantizer models, and encoded data. Copying one configuration file

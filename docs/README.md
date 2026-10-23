@@ -19,7 +19,7 @@ in-memory ANN.
 | --- | --- | --- |
 | Learn the API and use your own vectors/IDs | [SDK quick start](QuickStart.md) | Basic C++/Python in-memory path tested |
 | Build and reload a disk index | [Small SPANN workflow](QuickStart.md#spann-disk-backed-search), then [SPANN configuration](GettingStart.md) | Single-layer STATIC example tested; large workloads require evaluation |
-| Keep an index fresh as data changes | [Dynamic maintenance](Architecture.md#dynamic-index-maintenance), [workload harness](../BENCHMARK_GUIDE.md) | Affected visibility paths have a known correctness blocker |
+| Keep an index fresh as data changes | [Dynamic maintenance](Architecture.md#dynamic-index-maintenance), [workload harness](Benchmarking.md) | Affected visibility paths have a known correctness blocker |
 | Compress vectors and select a bit width | [RaBitQ and native auto-tuning](RaBitQ_Global_Quantizer.md) | Opt-in pipeline; accuracy must be measured separately |
 | Store postings in a cluster | [TiKV integration](TiKV-Integration.md) | Requires a separately validated PD/TiKV deployment |
 | Partition and build on multiple hosts | [Construction architecture](Architecture.md#construction-and-multi-layer-indexes), [SPIRE workflow](../evaluation/distributed/Readme.md) | Multi-host validation required |
@@ -50,10 +50,11 @@ in-memory ANN.
 ## Research, benchmarks, and historical artifacts
 
 - [SPIRE paper and citation](References.md#spire).
-- [Benchmark methodology and reproduction](../BENCHMARK_GUIDE.md).
+- [Benchmark methodology and reproduction](Benchmarking.md).
+- [Latest SIFT1M validation: TiKV recall fix and partial update runs](../evaluation/2026-10-23-sift1m/README.md).
 - [Evaluation and report index](../evaluation/README.md).
-- [Historical 1M results](../BENCHMARK_RESULTS_1M.md).
-- [Historical 10M results](../BENCHMARK_RESULTS_10M.md).
+- [Historical 1M observations](../evaluation/historical/TiKV-1M.md).
+- [Historical 10M observations](../evaluation/historical/TiKV-10M.md).
 - [SPIRE distributed construction research workflow](../evaluation/distributed/Readme.md).
 - [SPFresh paper artifact evaluation](../Script_AE/README.md).
 

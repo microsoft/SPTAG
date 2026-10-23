@@ -8,7 +8,9 @@ evidence before calling the run reproducible; do not invent historical values.
 | Field | Value |
 | --- | --- |
 | Run date and timezone | Not recorded |
+| Run status: complete, partial, or query-only validation | Not recorded |
 | SPTAG commit and dirty-state diff | Not recorded |
+| Executable and compared static-library checksums | Not recorded |
 | Submodule commit IDs | Not recorded |
 | TiKV commit / build identity | Not recorded |
 | PD/TiKV image tags and immutable digests | Not recorded |
@@ -17,6 +19,7 @@ evidence before calling the run reproducible; do not invent historical values.
 | Config file and checksum | Not recorded |
 | Input and ground-truth checksums | Not recorded |
 | Raw log / JSON artifact location | Not recorded |
+| Artifact availability: committed, publicly downloadable, or local-only | Not recorded |
 
 ## Environment and topology
 
@@ -51,3 +54,9 @@ Include per-run results, variation, raw outputs, and relevant recall together
 with speed. Identify missing data and confounders. Do not compare across
 different binary revisions, replication settings, query sets, or cache states
 without explicitly controlling or disclosing the difference.
+
+Separate planned work from completed work. Mark log-extracted rows and
+incomplete raw outputs, and do not count query repetitions on one saved index
+as independent builds. A query-only fix validation does not replace a complete
+update run or results at another scale. Keep historical measurements unchanged
+and link to a new dated report when a correction changes their interpretation.

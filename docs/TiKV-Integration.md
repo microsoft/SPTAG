@@ -1,7 +1,7 @@
 # TiKV distributed posting storage
 
 [Documentation index](README.md) | [Architecture](Architecture.md) |
-[Benchmark methodology](../BENCHMARK_GUIDE.md)
+[Benchmark methodology](Benchmarking.md)
 
 Use this backend when SPANN dynamic postings should reside in a TiKV storage
 cluster rather than a local posting store. Applications continue to use the
@@ -78,7 +78,10 @@ contains historical recipes, clearly separated from this integration guide.
 
 ## Configure and run
 
-Use the full harness configuration in [the benchmark guide](../BENCHMARK_GUIDE.md).
+Use the full harness configuration in [the benchmark guide](Benchmarking.md).
+The [latest SIFT1M validation](../evaluation/2026-10-23-sift1m/README.md)
+records a same-index recall fix and partial update runs, not a completed
+ten-batch or three-host benchmark.
 Storage settings belong in `[BuildSSDIndex]`:
 
 ```ini
