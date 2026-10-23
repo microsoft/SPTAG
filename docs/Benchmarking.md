@@ -6,19 +6,19 @@
 This guide defines how to run and report the current SPFresh benchmark harness.
 It is not a promise to reproduce historical numbers. The historical reports
 have incomplete revision/image provenance and must be interpreted accordingly.
-Start with the [baseline quick start](QuickStart.md) before attempting a
-large or distributed experiment.
+
+**To set up and run the FILEIO/TiKV experiment, start directly with the
+[SIFT1M setup and run guide](../evaluation/2026-10-23-sift1m/Reproduce.md).**
+It includes its own dependencies, data download/preparation, build and cluster
+instructions; the SDK quick start is not a prerequisite. This page is a
+reference for methodology and parameter semantics, not an additional setup
+sequence to execute first.
 
 The [SIFT1M report](../evaluation/2026-10-23-sift1m/README.md) describes the
 recorded FILEIO update workload and TiKV query measurements, including their
 completion status. It is not a completed ten-batch or multi-host benchmark.
 Older [1M](../evaluation/historical/TiKV-1M.md) and
 [10M](../evaluation/historical/TiKV-10M.md) observations are archived separately.
-
-For copyable commands covering data preparation, the configuration template,
-an isolated TiKV cluster, execution and output validation,
-use the [SIFT1M step-by-step recipe](../evaluation/2026-10-23-sift1m/Reproduce.md).
-This page explains the common methodology and parameter semantics.
 
 ## 1. Pin the complete environment
 

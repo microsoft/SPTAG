@@ -9,6 +9,12 @@ SPTAG index interfaces; this is a storage integration, not a separate search SDK
 It is implemented but remains an experimental deployment profile until a
 specific cluster/version/workload combination is validated.
 
+**To reproduce the FILEIO/TiKV benchmark**, go directly to the
+[SIFT1M setup and run guide](../evaluation/2026-10-23-sift1m/Reproduce.md).
+It includes dependencies, the build, a pinned single-host cluster and workload
+commands; you do not need to execute this page's build steps first.
+The sections below explain the integration for other deployments.
+
 ## What changes with TiKV
 
 | Component | Location / responsibility |
@@ -73,8 +79,10 @@ settings compatible with the client's RawKV requests and test the exact
 deployment; a reachable PD endpoint is not sufficient validation.
 
 Deployment topology, resource limits, Raft replication, and data lifecycle are
-the cluster operator's responsibility. The [dated evaluation](../evaluation/README.md)
-contains historical recipes, clearly separated from this integration guide.
+the cluster operator's responsibility. For the benchmark's isolated local
+cluster, use the [current setup recipe](../evaluation/2026-10-23-sift1m/Reproduce.md#6-create-an-isolated-local-tikv-cluster).
+Other [evaluation records](../evaluation/README.md) include historical,
+machine-specific deployments.
 
 ## Configure and run
 

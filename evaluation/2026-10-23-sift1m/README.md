@@ -8,6 +8,9 @@ the first 1M SIFT1B vectors. The
 [step-by-step instructions](Reproduce.md) cover building SPTAG, preparing data,
 running FILEIO, deploying an isolated TiKV cluster, running TiKV and checking
 the output. No saved index or executable from the original machine is required.
+Start there directly; no SDK quick-start build is needed. The guide includes
+public data downloads and a FILEIO-only path. It runs a fresh build/update
+workload, not a replay of the saved-index TiKV queries reported below.
 
 ## Recorded results
 

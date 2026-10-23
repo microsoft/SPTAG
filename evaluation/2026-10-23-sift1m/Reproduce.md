@@ -1,6 +1,7 @@
 # Reproduce the SIFT1M experiments
 
-[Results and limitations](README.md) | [General methodology](../../docs/Benchmarking.md)
+[Project home](../../README.md) | [Results and limitations](README.md) |
+[Parameter and methodology reference](../../docs/Benchmarking.md)
 
 Build and evaluate your own FILEIO and TiKV indexes from the first 1M SIFT1B
 vectors. This procedure covers installation, inputs, configuration, cluster
@@ -9,6 +10,38 @@ archived binaries or data from the original experiment.
 
 These are Linux, single-host instructions. The recorded measurements are
 partial runs, not guaranteed timings or a completed ten-batch benchmark.
+The procedure runs a new 990K build followed by ten 1K insertion batches.
+It reproduces the workload and measures new results; it does not replay the
+saved index used for the report's TiKV queries. TiKV updates have an unresolved
+checkpoint-statistics wait and throughput anomaly, so a full run may time out.
+Do not interpret the recipe as evidence that those issues are fixed.
+
+## Before you start
+
+**Start here, even if you have not installed SPTAG.** The SDK quick start,
+general benchmark reference and TiKV integration guide are not prerequisites.
+
+| Requirement | What to prepare |
+| --- | --- |
+| Host | Linux on AVX2-capable x86-64; Bash and sudo access for installation |
+| Storage | SSD space for generated data, indexes and checkpoints; the recorded TiKV data alone occupied roughly 235 GiB, excluding build and FILEIO artifacts |
+| Memory | Three TiKV processes each have an 8 GB configured limit, plus PD, build and client memory; this is not a measured minimum host-memory requirement |
+| Dataset | Existing SIFT1B UInt8 files **or** the public downloads in step 3; only about 128 MB of base vectors and 1.28 MB of queries need downloading |
+| TiKV only | Docker Engine, permission to use it, and twelve free local ports; the recipe creates 3 PD + 3 TiKV containers on one host |
+| Time | Exact truth generation, index construction and updates are substantial work; the two-hour per-backend timeout is a configurable cap, not an estimate |
+
+Choose a path:
+
+- **FILEIO only:** steps 1-5, then validate FILEIO in step 8. Skip steps 6, 7
+  and 9; Docker and cluster resources are not required.
+- **FILEIO and TiKV:** follow all nine steps in order. Both use the same
+  TiKV-enabled executable, so both paths need the build libraries in step 1.
+
+On completion, each backend has `run.log`, `exit-code.txt`, `output.json`,
+its rendered config and index checkpoints under a new run directory. Step 8
+checks whether all ten batches actually completed. See the
+[recorded results](README.md) for interpretation, not an exact pass/fail target
+for recall or latency.
 
 Run the steps in one Bash session and stop on any failed command. Do not paste
 the whole page as an unattended script: service-readiness checks may need to be
@@ -20,11 +53,19 @@ reuse a cluster or data directory from an existing experiment.
 The recorded experiment used Ubuntu 22.04-era dependencies, GCC 11.4,
 Protobuf 3.12.4 and gRPC 1.30.2. The SDK baseline also documents Ubuntu 24.04;
 using its newer packages is a different environment and must be recorded.
-An AVX2-capable x86-64 host, Python 3, curl, Docker Engine and sufficient SSD
-space are required. The recorded experiment's TiKV data occupied roughly
-235 GiB: do not size storage from the 128 MB vector prefix alone.
-Three TiKV processes each use an 8 GB configured memory limit, in addition
-to PD, the build and the client.
+Python 3 and curl are installed below. For the TiKV path, install
+[Docker Engine for Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+if it is not already available. Before building or running experiments,
+confirm the daemon and your access:
+
+```bash
+sudo -v
+sudo -n docker info
+```
+
+Skip that Docker check for FILEIO-only runs. If your account already has
+Docker access without sudo, use `docker info` and omit `sudo -n` from later
+Docker commands. Do not continue with TiKV setup if the check fails.
 
 On Ubuntu, install the build dependencies if they are missing:
 
@@ -103,21 +144,82 @@ continue after a collision.
 
 ## 3. Prepare the actual SIFT inputs
 
-Replace the source paths below if the dataset is mounted elsewhere:
+Choose **one** input source below, then run the extraction and checks on this
+page. The expected format is two little-endian uint32 header fields followed
+by UInt8 vectors, not `.bvecs` or `.fvecs`.
+
+### Option A: use existing local data
+
+Replace the source paths if your dataset is mounted elsewhere:
 
 ```bash
 export SIFT_BASE=/mnt_ssd/data/sift1b/bigann_base.u8bin
 export QUERY_SOURCE=/mnt_ssd/data/sift1b/query.10K.u8bin
-export SIFT_1M="$RUN_ROOT/input/sift-first-1m.u8bin"
 test -r "$SIFT_BASE"
 test -r "$QUERY_SOURCE"
 ```
 
-Run the Python extraction block in
-[Extract a SIFT1B prefix safely](../../docs/Benchmarking.md#extract-a-sift1b-prefix-safely)
-with these `SIFT_BASE` and `SIFT_1M` variables. It writes a new 32-bit header
-`(1000000, 128)`, copies only those vectors, and refuses to overwrite output.
-Do not use `head -c` on the original file without rewriting its header.
+### Option B: download the required public data
+
+The [Big ANN Benchmarks dataset definitions](https://github.com/harsha-simhadri/big-ann-benchmarks/blob/main/benchmark/datasets.py)
+identify the SIFT/BigANN files `base.1B.u8bin` and
+`query.public.10K.u8bin`. Their public filenames differ from the local names
+in option A. Check the dataset provider's terms before use.
+
+Fetch only the first 1M base rows with an HTTP range request, not the full
+128 GB base file. The downloaded prefix still has the original 1B-row header,
+so it is **not** a runnable input until the extraction below rewrites it.
+The size cap makes a server that ignores the range fail rather than download
+the whole corpus. Use a fresh run directory; do not overwrite existing inputs.
+
+```bash
+export SIFT_BASE="$RUN_ROOT/input/base-first-1m.download"
+export QUERY_SOURCE="$RUN_ROOT/input/query.public.10K.u8bin"
+test ! -e "$SIFT_BASE"
+test ! -e "$QUERY_SOURCE"
+curl --fail --location --show-error --max-time 1800 \
+  --range 0-128000007 --max-filesize 128000008 \
+  --output "$SIFT_BASE" --write-out '%{http_code}\n' \
+  https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/bigann/base.1B.u8bin \
+  > "$RUN_ROOT/input/base-http-status.txt"
+test "$(cat "$RUN_ROOT/input/base-http-status.txt")" = 206
+test "$(stat -c %s "$SIFT_BASE")" = 128000008
+curl --fail --location --show-error --max-time 300 \
+  --max-filesize 1280008 --output "$QUERY_SOURCE" \
+  https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/bigann/query.public.10K.u8bin
+```
+
+If a download fails or the server does not return HTTP 206 for the base,
+stop and investigate; do not feed a partial/error response to the harness.
+
+### Extract and verify the 1M input (both options)
+
+This writes a new header `(1000000, 128)`, copies only those vectors, and
+refuses to overwrite output. It works with either the complete local base
+or the downloaded prefix. Keep the source unchanged.
+
+```bash
+export SIFT_1M="$RUN_ROOT/input/sift-first-1m.u8bin"
+python3 - <<'PY'
+import os
+import struct
+
+count = 1_000_000
+with open(os.environ["SIFT_BASE"], "rb") as source:
+    rows, dimension = struct.unpack("<II", source.read(8))
+    if rows < count or dimension != 128:
+        raise ValueError("Expected at least 1M UInt8 vectors of dimension 128")
+    with open(os.environ["SIFT_1M"], "xb") as target:
+        target.write(struct.pack("<II", count, dimension))
+        remaining = count * dimension
+        while remaining:
+            block = source.read(min(8 * 1024 * 1024, remaining))
+            if not block:
+                raise EOFError("Vector data ended before the requested prefix")
+            target.write(block)
+            remaining -= len(block)
+PY
+```
 
 Then verify the inputs:
 
@@ -427,7 +529,8 @@ observed recall value from a different index.
 Any failed assertion or JSON parse means the run has **not** passed this check.
 The checkpoint stores zero-based batch indices: `9` means ten completed batches.
 
-Compare the hashes of these generated files between the two run directories:
+For a two-backend run, compare the hashes of these generated files between
+the two run directories. **Skip this comparison for FILEIO-only evaluation.**
 
 ```bash
 for directory in "$FILEIO_RUN" "$TIKV_RUN"; do

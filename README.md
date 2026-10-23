@@ -10,6 +10,7 @@ construction. It was originally released by Microsoft Research and Microsoft Bin
 
 **Start with:** [choose a capability](#choose-a-capability) |
 [quick start](docs/QuickStart.md) |
+[reproduce FILEIO/TiKV benchmarks](evaluation/2026-10-23-sift1m/Reproduce.md) |
 [API and data contracts](docs/SDK.md) |
 [platform and feature status](docs/SupportMatrix.md).
 
@@ -45,8 +46,25 @@ can still require integration testing or correctness fixes. See the
 | Use NumPy vectors in your application | Python `SPTAG.AnnIndex` | [Python quick start](docs/QuickStart.md#python) |
 | Embed search in a C++ application | `SPTAG::VectorIndex`, CMake target `SPTAG::SPTAG` | [C++ quick start](docs/QuickStart.md#c) |
 | Build or query an index from files | `indexbuilder`, `indexsearcher` | [CLI quick start](docs/CLIQuickStart.md) |
+| Set up and run the SIFT1M FILEIO/TiKV benchmark | `SPTAGTest` workload harness | [Benchmark setup and run instructions](evaluation/2026-10-23-sift1m/Reproduce.md) |
+
+## Reproduce the FILEIO/TiKV benchmark
+
+Follow the [SIFT1M setup and run guide](evaluation/2026-10-23-sift1m/Reproduce.md)
+directly; **you do not need to complete the SDK installation below first**.
+It covers dependencies, public dataset downloads, configuration, a local TiKV
+cluster, execution, output checks and shutdown. You can run FILEIO alone or
+compare both backends using the same executable.
+
+This is a substantial Linux/SSD experiment, not the small SDK example.
+Read the guide's resource requirements and known limits before starting.
+The [recorded results](evaluation/2026-10-23-sift1m/README.md) are partial
+measurements; the guide reproduces the workload, not guaranteed timings or a
+previously completed ten-batch comparison.
 
 ## Install from source
+
+The following installation is for the **SDK quick start**, not the benchmark.
 
 This SDK workflow currently tracks the **`users/qiazh/doc` development branch**,
 not a versioned SDK release. The checkout below selects that branch explicitly.
@@ -64,7 +82,7 @@ sudo apt-get install -y build-essential cmake ninja-build git swig python3-dev p
   libboost-system-dev libboost-thread-dev libboost-serialization-dev \
   libboost-regex-dev libboost-filesystem-dev libboost-test-dev libtbb-dev libnuma-dev
 
-git clone --branch users/qiazh/doc https://github.com/microsoft/SPTAG.git
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch users/qiazh/doc https://github.com/microsoft/SPTAG.git
 cd SPTAG
 git submodule update --init ThirdParty/zstd
 
@@ -141,7 +159,8 @@ is not waived by a passing static SDK test.
 - [Parameters](docs/Parameters.md) and [build options](docs/BuildOptions.md).
 - [Documentation index](docs/README.md), [changelog](CHANGELOG.md), and
   [contributing and tests](CONTRIBUTING.md).
-- [Benchmark methodology](docs/Benchmarking.md),
+- [Set up and run the FILEIO/TiKV benchmark](evaluation/2026-10-23-sift1m/Reproduce.md),
+  [benchmark methodology](docs/Benchmarking.md),
   [SIFT1M benchmark results](evaluation/2026-10-23-sift1m/README.md), and
   [evaluation index](evaluation/README.md).
 

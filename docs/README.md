@@ -18,6 +18,7 @@ in-memory ANN.
 | Goal | Guide | Current boundary |
 | --- | --- | --- |
 | Learn the API and use your own vectors/IDs | [SDK quick start](QuickStart.md) | Basic C++/Python in-memory path tested |
+| Reproduce the SIFT1M FILEIO/TiKV workload | [Benchmark setup and run guide](../evaluation/2026-10-23-sift1m/Reproduce.md) | Self-contained setup; recorded results are partial, not a completed ten-batch comparison |
 | Build and reload a disk index | [Small SPANN workflow](QuickStart.md#spann-disk-backed-search), then [SPANN configuration](GettingStart.md) | Single-layer STATIC example tested; large workloads require evaluation |
 | Keep an index fresh as data changes | [Dynamic maintenance](Architecture.md#dynamic-index-maintenance), [workload harness](Benchmarking.md) | Affected visibility paths have a known correctness blocker |
 | Compress vectors and select a bit width | [RaBitQ and native auto-tuning](RaBitQ_Global_Quantizer.md) | Opt-in pipeline; accuracy must be measured separately |
@@ -51,6 +52,8 @@ in-memory ANN.
 
 - [SPIRE paper and citation](References.md#spire).
 - [Benchmark methodology and reproduction](Benchmarking.md).
+- [Set up and run the SIFT1M FILEIO/TiKV benchmark](../evaluation/2026-10-23-sift1m/Reproduce.md)
+  (start here to run experiments; no prior SDK build required).
 - [SIFT1M benchmark results and FILEIO/TiKV reproduction](../evaluation/2026-10-23-sift1m/README.md).
 - [Evaluation and report index](../evaluation/README.md).
 - [Historical 1M observations](../evaluation/historical/TiKV-1M.md).
