@@ -108,6 +108,10 @@ and output JSON. An unset `BENCHMARK_CONFIG` skips the test.
 
 - **Isolation:** fresh key prefixes prevent experiments from sharing a namespace;
   they do not automatically delete old data.
+- **Initial counts:** dynamic index construction initializes TiKV version-map
+  counts and upper-layer membership before writing postings. Validate save/load
+  and the reported vector count before treating a build as complete. Insertions
+  also extend the version-map count, including implicitly alive leaf-layer IDs.
 - **Persistence:** TiKV durability covers the data stored there, not missing
   local head/index files. Coordinate backups and compatible restore points.
 - **Concurrency:** the implementation includes ordinary merge and CAS-specific
@@ -118,6 +122,8 @@ and output JSON. An unset `BENCHMARK_CONFIG` skips the test.
   against your chosen revision rather than assuming a universal retry count.
 - **Validation:** include build, read/write/update, restart/save/load,
   concurrent access, and relevant failure/retry tests before promoting a setup.
+  Version filtering must preserve the result max-heap; final sorting is performed
+  by the outer SPANN search path. `DedupCandidateTest` covers this contract.
 
 For developer context, see the
 [distributed version-map design](TiKVDistributedVersionMapDesign.md). It is a

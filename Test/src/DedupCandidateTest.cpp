@@ -160,4 +160,57 @@ BOOST_AUTO_TEST_CASE(SearchPathsMatchDeleteFirstAcrossVisibilityInterleavings)
     }
 }
 
+BOOST_AUTO_TEST_CASE(SearchPreservesMaxHeapAfterVersionFiltering)
+{
+    using namespace SPTAG;
+    for (bool isTiKV : {false, true})
+    for (int deletedID : {-1, 0, 31, 63, 64})
+    {
+        SPANN::Options options;
+        options.m_dim = 1;
+        options.m_storage = isTiKV ? Storage::TIKVIO : Storage::FILEIO;
+        options.m_asyncMergeInSearch = false;
+        options.m_distributedVersionMap = false;
+        SPANN::Index<std::uint8_t> head;
+        head.SetParameter("Dim", "1", "Base");
+        head.SetParameter("DistCalcMethod", "L2", "Base");
+        auto store = std::make_shared<PostingStore>();
+        SPANN::ExtraDynamicSearcher<std::uint8_t> searcher(options, 0, &head, store);
+        constexpr std::size_t recordSize = sizeof(SizeType) + 2;
+        store->posting.resize(64 * recordSize);
+        // Keep sparse-map Count() above all posting IDs even after deleting every posting.
+        for (SizeType id = 0; id < 128; ++id) searcher.ResetIndex(id);
+        for (SizeType id = 0; id < 64; ++id) {
+            const auto value = static_cast<std::uint8_t>(id + 1);
+            searcher.Serialize(store->posting.data() + id * recordSize, id, 0xff, &value);
+            if (id == deletedID || deletedID == 64) searcher.DeleteIndex(id);
+        }
+
+        SPANN::ExtraWorkSpace workspace;
+        workspace.Initialize(64, 2, 2, 4096, false, false);
+        workspace.m_postingIDs = {100};
+        const std::uint8_t target = 0;
+        COMMON::QueryResultSet<std::uint8_t> query(&target, 64);
+        SPANN::SearchStats stats;
+        BOOST_REQUIRE(searcher.SearchIndex(&workspace, query, &stats, nullptr, nullptr, true)
+            == ErrorCode::Success);
+        BOOST_REQUIRE(std::is_heap(query.GetResults(), query.GetResults() + 64, COMMON::Compare));
+        BOOST_REQUIRE(query.AddPoint(1000, 0.25f));
+        query.SortResult();
+
+        std::vector<SizeType> expected{1000};
+        for (SizeType id = 0; id < 64 && expected.size() < 64; ++id) {
+            if (id != deletedID && deletedID != 64) expected.push_back(id);
+        }
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            BOOST_TEST_CONTEXT("TiKV=" << isTiKV << ", deletedID=" << deletedID << ", result=" << i) {
+                BOOST_CHECK_EQUAL(query.GetResult(i)->VID, expected[i]);
+            }
+        }
+        for (std::size_t i = expected.size(); i < 64; ++i) {
+            BOOST_CHECK_EQUAL(query.GetResult(i)->VID, -1);
+        }
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()

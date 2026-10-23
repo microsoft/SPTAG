@@ -2044,7 +2044,9 @@ namespace SPTAG::SPANN {
                         vidIdx++;
                     }
                 }
-                queryResults.SortResult();
+                // Filtering changes heap keys; the caller still needs a max-heap for final sorting.
+                std::make_heap(queryResults.GetResults(),
+                               queryResults.GetResults() + queryResults.GetResultNum(), COMMON::Compare);
             }
 
             auto layerTotalEnd = std::chrono::high_resolution_clock::now();
@@ -2444,8 +2446,12 @@ namespace SPTAG::SPANN {
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
-            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
-            //m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
+#ifdef TIKV
+            if (auto* tikvMap = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get())) {
+                tikvMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize,
+                                    p_headIndex->m_iDataCapacity, &p_localToGlobal);
+            }
+#endif
 
             if (p_localToGlobal.R() > 0) {
                 for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
@@ -2733,7 +2739,9 @@ namespace SPTAG::SPANN {
             std::unordered_map<SizeType, std::string> headAppends;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
                 SizeType VID = begin + v;
-                if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, m_versionMap->Default());
+                if (VID >= m_versionMap->Count() || m_versionMap->Deleted(VID)) {
+                    m_versionMap->SetVersion(VID, m_versionMap->Default());
+                }
                 uint8_t version = m_versionMap->GetVersion(VID);
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
