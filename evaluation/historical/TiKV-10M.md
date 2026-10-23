@@ -5,10 +5,12 @@
 > [reporting requirements](../../docs/Benchmarking.md).
 
 There is no post-fix 10M result in this repository. The
-[2026-10-23 validation](../2026-10-23-sift1m/README.md) is a 1M-planned workload
+[2026-10-23 report](../2026-10-23-sift1m/README.md) is a 1M-planned workload
 with a 996K-vector query-only replay, not a replacement 10M benchmark.
 The revisions used below are unknown, so whether the historical runs were
-affected by the subsequently fixed TiKV result-heap bug cannot be established.
+affected by the TiKV result-heap bug described in the
+[developer record](../2026-10-23-sift1m/development/RecallRegression.md)
+cannot be established.
 
 ## Provenance and comparison limits
 

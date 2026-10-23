@@ -51,7 +51,7 @@ in-memory ANN.
 
 - [SPIRE paper and citation](References.md#spire).
 - [Benchmark methodology and reproduction](Benchmarking.md).
-- [Latest SIFT1M validation: TiKV recall fix and partial update runs](../evaluation/2026-10-23-sift1m/README.md).
+- [SIFT1M benchmark results and FILEIO/TiKV reproduction](../evaluation/2026-10-23-sift1m/README.md).
 - [Evaluation and report index](../evaluation/README.md).
 - [Historical 1M observations](../evaluation/historical/TiKV-1M.md).
 - [Historical 10M observations](../evaluation/historical/TiKV-10M.md).

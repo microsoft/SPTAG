@@ -1,14 +1,15 @@
 {
   "date_utc": "2026-10-23",
-  "report_type": "partial update benchmarks and same-index query-only correctness validation",
+  "report_type": "FILEIO partial-update measurements and TiKV saved-index query measurements",
+  "reproduction": "Reproduce.md",
+  "configuration_template": "benchmark.ini",
   "completed_full_update_runs": 0,
   "source": {
-    "baseline": "9e7fd9c401c9b2bb163fd6021503ade66aef16ef",
-    "build_fixes_recorded_as": "c3bcd8eac7a2689d604ea7db04737a77c159be74",
-    "functional_fixes_recorded_as": "192995914332cc2ecca9fbfde5742ee73166214c",
-    "count_fixes_present_before_and_after": true,
+    "fileio_baseline_commit": "9e7fd9c401c9b2bb163fd6021503ade66aef16ef",
+    "tikv_query_implementation_recorded_as": "192995914332cc2ecca9fbfde5742ee73166214c",
     "experiments_preceded_commits": true,
-    "zstd_submodule": "e47e674cd09583ff0503f0f6defd6d23d8b718d3"
+    "note": "Recorded binaries included preserved working-tree patches and toolchain-specific stub generation.",
+    "original_engineering_record": "development/results.json"
   },
   "cluster": {
     "topology": "one shared host, 3 PD + 3 TiKV, loopback networking",
@@ -32,201 +33,6 @@
     "layers": 2,
     "DistMethod": "L2"
   },
-  "replay": {
-    "activeVectors": 996000,
-    "truthPhase": 6,
-    "queries": 200,
-    "topK": 5,
-    "searchThreads": 16,
-    "roundCountPerBinary": 3,
-    "readOnly": true,
-    "indexRebuilt": false,
-    "insertsPerformed": 0,
-    "sameIndexForBothBinaries": true
-  },
-  "recall": {
-    "before": 0.776,
-    "after": 0.976,
-    "improvementPercentagePoints": 20.0,
-    "fileioPreviouslyObserved": 0.978,
-    "fileioUsesSeparatelyBuiltIndex": true
-  },
-  "replay_rounds": {
-    "before": [
-      {
-        "recallAt5": 0.776,
-        "idRecallAt5": 0.776,
-        "meanMs": 26.33412,
-        "p95Ms": 50.715384,
-        "p99Ms": 51.446359,
-        "qps": 594.629006
-      },
-      {
-        "recallAt5": 0.776,
-        "idRecallAt5": 0.776,
-        "meanMs": 21.638134,
-        "p95Ms": 25.358381,
-        "p99Ms": 28.356884,
-        "qps": 721.105677
-      },
-      {
-        "recallAt5": 0.776,
-        "idRecallAt5": 0.776,
-        "meanMs": 22.100166,
-        "p95Ms": 25.384711,
-        "p99Ms": 29.593423,
-        "qps": 707.696789
-      }
-    ],
-    "after": [
-      {
-        "recallAt5": 0.976,
-        "idRecallAt5": 0.976,
-        "meanMs": 24.021961,
-        "p95Ms": 42.067705,
-        "p99Ms": 44.312658,
-        "qps": 651.508607
-      },
-      {
-        "recallAt5": 0.976,
-        "idRecallAt5": 0.976,
-        "meanMs": 21.953681,
-        "p95Ms": 25.04085,
-        "p99Ms": 26.349582,
-        "qps": 713.19646
-      },
-      {
-        "recallAt5": 0.976,
-        "idRecallAt5": 0.976,
-        "meanMs": 22.120265,
-        "p95Ms": 25.462598,
-        "p99Ms": 27.103834,
-        "qps": 707.115032
-      }
-    ]
-  },
-  "per_query_results_stable": {
-    "before": true,
-    "after": true
-  },
-  "queries_with_old_top4_at_fixed_positions_2_to_5": 200,
-  "query0": {
-    "before": [
-      {
-        "id": 344333,
-        "distance": 62943.0
-      },
-      {
-        "id": 900184,
-        "distance": 73660.0
-      },
-      {
-        "id": 657385,
-        "distance": 77284.0
-      },
-      {
-        "id": 278818,
-        "distance": 80082.0
-      },
-      {
-        "id": 831624,
-        "distance": 82498.0
-      }
-    ],
-    "after": [
-      {
-        "id": 504814,
-        "distance": 61125.0
-      },
-      {
-        "id": 344333,
-        "distance": 62943.0
-      },
-      {
-        "id": 900184,
-        "distance": 73660.0
-      },
-      {
-        "id": 657385,
-        "distance": 77284.0
-      },
-      {
-        "id": 278818,
-        "distance": 80082.0
-      }
-    ]
-  },
-  "regression": {
-    "maxHeapCheckFailedBeforeFix": true,
-    "newHeapTestAndRecallStrideTestPassed": true,
-    "relatedSuitePassed": false,
-    "relatedSuiteFailureCase": "SearchPathsMatchDeleteFirstAcrossVisibilityInterleavings",
-    "relatedSuiteFailureAssertions": 45901,
-    "failuresExactlyMatchPreservedOriginalExecutable": true
-  },
-  "partial_runs": {
-    "tikv": {
-      "build_seconds": 1077.7032,
-      "completed_insertions": 6000,
-      "completion_markers": 5,
-      "last_measured_phase": 6,
-      "last_active_vectors": 996000,
-      "insertions": [
-        {
-          "phase": 1,
-          "inserted": 1000,
-          "seconds": 2.8339,
-          "vectors_per_second": 352.8661,
-          "checkpoint_marker_written": true
-        },
-        {
-          "phase": 2,
-          "inserted": 1000,
-          "seconds": 2.7761,
-          "vectors_per_second": 360.2177,
-          "checkpoint_marker_written": true
-        },
-        {
-          "phase": 3,
-          "inserted": 1000,
-          "seconds": 3.0895,
-          "vectors_per_second": 323.6738,
-          "checkpoint_marker_written": true
-        },
-        {
-          "phase": 4,
-          "inserted": 1000,
-          "seconds": 2.9295,
-          "vectors_per_second": 341.3579,
-          "checkpoint_marker_written": true
-        },
-        {
-          "phase": 5,
-          "inserted": 1000,
-          "seconds": 2.8557,
-          "vectors_per_second": 350.1808,
-          "checkpoint_marker_written": true
-        },
-        {
-          "phase": 6,
-          "inserted": 1000,
-          "seconds": 406.454,
-          "vectors_per_second": 2.4603,
-          "checkpoint_marker_written": false,
-          "index_save_logged_successful": true
-        }
-      ],
-      "phase6_query_source": "run.log; not flushed to raw JSON"
-    },
-    "fileio": {
-      "build_seconds": 277.4329,
-      "completed_batches": 7,
-      "last_active_vectors": 997000,
-      "stopped_during": "batch 8 cloning"
-    },
-    "raw_json_complete": false,
-    "query_rows": "partial-query-rounds.csv"
-  },
   "truth": {
     "metric": "exact squared L2",
     "header_int32": [
@@ -240,24 +46,287 @@
     "independent_checks": "queries 0, 1, 199 at every phase",
     "harness_distance_tolerance": "1e-4 * (abs(truth_distance) + 1e-4)"
   },
-  "measurement": {
-    "percentiles": "sorted zero-based floor(200*p), no interpolation",
-    "qps": "200 / threaded round wall seconds",
-    "cache_flushed": false,
-    "replay_order": [
-      "before",
-      "after"
-    ],
-    "random_seed_pinned": false
+  "measurements": {
+    "FILEIO": {
+      "kind": "partial_update_run",
+      "initial_recall_at_5": 0.979,
+      "batch_1_to_7_recall_at_5": 0.978,
+      "completed_batches": 7,
+      "last_active_vectors": 997000,
+      "build_seconds": 277.4329,
+      "stopped_during": "batch 8 cloning",
+      "id_only_recall_recorded": false
+    },
+    "TIKVIO": {
+      "kind": "saved_index_query",
+      "active_vectors": 996000,
+      "phase": 6,
+      "rounds": 3,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "independent_index_builds": 1,
+      "current_full_update_run_measured": false
+    }
   },
-  "limitations": [
-    "Query-only replay of the existing 996K-vector checkpoint, not a new full ten-batch insertion benchmark.",
-    "The asynchronous checkpoint-statistics hang and batch-6 insertion slowdown remain unresolved.",
-    "No public full-artifact bundle; hashes identify local-only evidence.",
-    "No post-fix 10M or multi-host result.",
-    "Latency rounds are ordered, not controlled cold-cache or independent repetitions."
+  "query_rows": [
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 0,
+      "active_vectors": 990000,
+      "round": 1,
+      "recall_at_5": 0.979,
+      "id_recall_at_5": null,
+      "mean_ms": 6.8459,
+      "p95_ms": 9.198,
+      "p99_ms": 10.974,
+      "qps": 2224.521
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 0,
+      "active_vectors": 990000,
+      "round": 2,
+      "recall_at_5": 0.979,
+      "id_recall_at_5": null,
+      "mean_ms": 6.6059,
+      "p95_ms": 9.718,
+      "p99_ms": 11.292,
+      "qps": 2319.7549
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 1,
+      "active_vectors": 991000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 8.0412,
+      "p95_ms": 10.38,
+      "p99_ms": 12.659,
+      "qps": 1908.5973
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 1,
+      "active_vectors": 991000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 8.1264,
+      "p95_ms": 11.671,
+      "p99_ms": 12.783,
+      "qps": 1902.7323
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 2,
+      "active_vectors": 992000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 7.2612,
+      "p95_ms": 10.229,
+      "p99_ms": 11.163,
+      "qps": 2121.4531
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 2,
+      "active_vectors": 992000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.9766,
+      "p95_ms": 9.645,
+      "p99_ms": 11.888,
+      "qps": 2195.7751
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 3,
+      "active_vectors": 993000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.8054,
+      "p95_ms": 9.379,
+      "p99_ms": 11.249,
+      "qps": 2268.7312
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 3,
+      "active_vectors": 993000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.7579,
+      "p95_ms": 9.146,
+      "p99_ms": 11.413,
+      "qps": 2282.7141
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 4,
+      "active_vectors": 994000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.117,
+      "p95_ms": 8.545,
+      "p99_ms": 10.62,
+      "qps": 2502.5964
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 4,
+      "active_vectors": 994000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.0638,
+      "p95_ms": 8.745,
+      "p99_ms": 10.64,
+      "qps": 2543.7524
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 5,
+      "active_vectors": 995000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1828,
+      "p95_ms": 8.361,
+      "p99_ms": 10.239,
+      "qps": 2473.1968
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 5,
+      "active_vectors": 995000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.2541,
+      "p95_ms": 8.695,
+      "p99_ms": 10.638,
+      "qps": 2449.4194
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1218,
+      "p95_ms": 8.544,
+      "p99_ms": 10.27,
+      "qps": 2520.3518
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1551,
+      "p95_ms": 8.259,
+      "p99_ms": 10.458,
+      "qps": 2489.8848
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 7,
+      "active_vectors": 997000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1473,
+      "p95_ms": 8.567,
+      "p99_ms": 10.135,
+      "qps": 2497.5649
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 7,
+      "active_vectors": 997000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1464,
+      "p95_ms": 8.482,
+      "p99_ms": 10.511,
+      "qps": 2507.2083
+    },
+    {
+      "experiment_kind": "saved_index_query",
+      "backend": "TIKVIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 1,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "mean_ms": 24.021961,
+      "p95_ms": 42.067705,
+      "p99_ms": 44.312658,
+      "qps": 651.508607
+    },
+    {
+      "experiment_kind": "saved_index_query",
+      "backend": "TIKVIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 2,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "mean_ms": 21.953681,
+      "p95_ms": 25.04085,
+      "p99_ms": 26.349582,
+      "qps": 713.19646
+    },
+    {
+      "experiment_kind": "saved_index_query",
+      "backend": "TIKVIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 3,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "mean_ms": 22.120265,
+      "p95_ms": 25.462598,
+      "p99_ms": 27.103834,
+      "qps": 707.115032
+    }
   ],
-  "local_artifacts": {
+  "measurement_notes": {
+    "timing": "Per-query SearchIndex wall milliseconds; QPS = 200 / threaded query-round wall seconds.",
+    "percentiles": "sorted zero-based floor(200*p), no interpolation",
+    "fileio_query_sequence": "Two recorded rounds per phase, each following a primer.",
+    "tikv_query_sequence": "Three sequential rounds against one saved index.",
+    "cache_flushed": false,
+    "random_seed_pinned": false,
+    "backend_speedup_comparison_controlled": false
+  },
+  "inputs": {
     "prepared_1m": {
       "filename": "sift-first-1m.u8bin",
       "sha256": "7cdd76b29c338b78bf17c2ad5060b383110b0bf6ba914e8a77e7e642ba7a6111",
@@ -271,86 +340,6 @@
     "phase_truth": {
       "filename": "perftest_batchtruth.L2.UInt8_990000_128_200_5_1000_0_10",
       "sha256": "b41cb5504f00cb49f00af2fc228f8128fcebc6d5b6ffa09ecf3d644d90911320",
-      "availability": "local-only; not published"
-    },
-    "tikv_config": {
-      "filename": "benchmark.ini",
-      "sha256": "2caf0a97a50896a29bdd703724d442a6d06e0a832c41874a35994f8442037b5f",
-      "availability": "local-only; not published"
-    },
-    "fileio_config": {
-      "filename": "benchmark.ini",
-      "sha256": "a9cd6b3feffc246cbfc2879ee54cf394bf99de7b702ae8837cf651e4208948ab",
-      "availability": "local-only; not published"
-    },
-    "before_source_patch": {
-      "filename": "source.patch",
-      "sha256": "331b07c4cc5792ccd71643d59502f36a2bb0e4fa9be8b1b1d7d75dc6f773245a",
-      "availability": "local-only; not published"
-    },
-    "fixed_source_patch": {
-      "filename": "source.patch",
-      "sha256": "d8af9ddf63b56986b52b13582cca0e67e0a53a110e77bb398fd93327fb60b4f1",
-      "availability": "local-only; not published"
-    },
-    "update_benchmark_binary": {
-      "filename": "SPTAGTest.preserved",
-      "sha256": "35c8af0c9111c36dc39ddb605b1525dfce1949ebe1a6ac24954cd15edc0a6268",
-      "availability": "local-only; not published"
-    },
-    "before_query_binary": {
-      "filename": "query_probe.before",
-      "sha256": "cb470bd2ae5172c10d378a8317774c151937c7ea05c1c39777e78a11df444e22",
-      "availability": "local-only; not published"
-    },
-    "after_query_binary": {
-      "filename": "query_probe.after",
-      "sha256": "b33ae3078ed11752728bd142f2ae266e4f0c69bc99ff1ac860dee5057980e4b3",
-      "availability": "local-only; not published"
-    },
-    "before_static_archive": {
-      "filename": "libSPTAGLibStatic.before.a",
-      "sha256": "d3cd5b0e49b640932c495c47af6a2f7339be3a4b042e734a84541cbf1eec1972",
-      "availability": "local-only; not published"
-    },
-    "after_static_archive": {
-      "filename": "libSPTAGLibStatic.after.a",
-      "sha256": "a1a1ee5a8ca8a082c6d53b25bba2219cf0cf53bece8bd8eb589a0ae73c4b950d",
-      "availability": "local-only; not published"
-    },
-    "before_query_output": {
-      "filename": "before.json",
-      "sha256": "49a604420b921e5da02f76479db577b4f509754ee1774656182b18ce7e99a17b",
-      "availability": "local-only; not published"
-    },
-    "after_query_output": {
-      "filename": "after.json",
-      "sha256": "0e0f200748e55fb8f8c4398c3e2f081de496828953975c83623f416f16820d91",
-      "availability": "local-only; not published"
-    },
-    "tikv_partial_summary": {
-      "filename": "summary.json",
-      "sha256": "7b0aa0e9df40e94ed63f4eaf5c68e515d2c98ad196669ef8c95277ca833bde3c",
-      "availability": "local-only; not published"
-    },
-    "fileio_comparison_summary": {
-      "filename": "comparison.json",
-      "sha256": "d5410dabf30a0cc427ed2ebf8309cfd11ad42c513e187d66132203247bcac098",
-      "availability": "local-only; not published"
-    },
-    "replay_comparison_summary": {
-      "filename": "comparison.json",
-      "sha256": "3e0d1da1c956122d11c81a9fe039e36e92542439403ed3d8cf4e6345444ef65b",
-      "availability": "local-only; not published"
-    },
-    "saved_index_config": {
-      "filename": "tested-indexloader.ini",
-      "sha256": "24b214c02bf4a988ccf40c2d2f004fc81d5dc9df57783b69dc2aedd5ad85764e",
-      "availability": "local-only; not published"
-    },
-    "measured_query_probe": {
-      "filename": "query_probe.cpp",
-      "sha256": "c8e8c0dd8eaaeb5bb4a61af9f3b85ca948612c375884ca1b0c74bd39f300b24f",
       "availability": "local-only; not published"
     }
   },
@@ -368,18 +357,21 @@
       "sha256": "2caf396d4e73c19b7552937fadf72beda841c4f58a1f12d2f4660435501f6676"
     }
   ],
+  "limitations": [
+    "No complete ten-batch backend comparison or post-query-implementation TiKV build/update measurement.",
+    "No 10M or multi-host result.",
+    "TiKV update testing encountered a checkpoint-statistics wait and insertion-throughput anomaly.",
+    "Raw logs, inputs and indexes are local-only; this checkout provides instructions for a new run."
+  ],
   "published_artifacts": {
-    "replay-rounds.csv": {
-      "sha256": "b09ad50734a866cc9eadf0d4df60ffb605291de507bcea6fad90a541b78361dd"
+    "query-rounds.csv": {
+      "sha256": "03649f14b1991858278cb8bbe405125470bd260f4787db7a81b573905ed1dfa1"
     },
-    "partial-query-rounds.csv": {
-      "sha256": "6a295e1b079cf1863676344f1286846fb6cc921edb81b16f5a20b2bedf2cb7a4"
+    "benchmark.ini": {
+      "sha256": "f75c467ecd97a3cf3c174785656c217a01b187f08a350b96c332f0250ec1eb16"
     },
     "tikv.toml": {
       "sha256": "ba4dd9056c67f1f8e2f1a4add9c46fbf63e049866299a56a7e54e1651da1691d"
-    },
-    "query_probe.cpp": {
-      "sha256": "42c7537290680766a6f42d938921ba838ce7637e038ea1aadc21a8bb7d10901a"
     }
   }
 }

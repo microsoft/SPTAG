@@ -1,11 +1,12 @@
 # Historical TiKV observations: 1M scale
 
 > Historical observations, not current-branch acceptance thresholds.
-> For current evidence, read the [2026-10-23 SIFT1M validation](../2026-10-23-sift1m/README.md).
+> For current evidence, read the [2026-10-23 SIFT1M measurements](../2026-10-23-sift1m/README.md).
 > See the [evaluation index](../README.md) and
 > [reporting requirements](../../docs/Benchmarking.md).
 
-The latest validation identified and fixed a TiKV result-heap ordering bug.
+The [developer investigation](../2026-10-23-sift1m/development/RecallRegression.md)
+identified and fixed a TiKV result-heap ordering bug.
 The revisions used below are unknown, so its impact on these historical runs
 cannot be established. These recall numbers are not evidence of an inherent
 TiKV accuracy limit, and have not been replaced with measurements from a

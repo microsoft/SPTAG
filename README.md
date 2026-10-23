@@ -142,7 +142,7 @@ is not waived by a passing static SDK test.
 - [Documentation index](docs/README.md), [changelog](CHANGELOG.md), and
   [contributing and tests](CONTRIBUTING.md).
 - [Benchmark methodology](docs/Benchmarking.md),
-  [latest SIFT1M validation](evaluation/2026-10-23-sift1m/README.md), and
+  [SIFT1M benchmark results](evaluation/2026-10-23-sift1m/README.md), and
   [evaluation index](evaluation/README.md).
 
 ## Research and citation

@@ -79,9 +79,10 @@ contains historical recipes, clearly separated from this integration guide.
 ## Configure and run
 
 Use the full harness configuration in [the benchmark guide](Benchmarking.md).
-The [latest SIFT1M validation](../evaluation/2026-10-23-sift1m/README.md)
-records a same-index recall fix and partial update runs, not a completed
-ten-batch or three-host benchmark.
+The [SIFT1M report](../evaluation/2026-10-23-sift1m/README.md) describes the
+available measurements and their limits. Follow its
+[step-by-step instructions](../evaluation/2026-10-23-sift1m/Reproduce.md)
+to build and evaluate a new FILEIO/TiKV index.
 Storage settings belong in `[BuildSSDIndex]`:
 
 ```ini
@@ -125,8 +126,6 @@ and output JSON. An unset `BENCHMARK_CONFIG` skips the test.
   against your chosen revision rather than assuming a universal retry count.
 - **Validation:** include build, read/write/update, restart/save/load,
   concurrent access, and relevant failure/retry tests before promoting a setup.
-  Version filtering must preserve the result max-heap; final sorting is performed
-  by the outer SPANN search path. `DedupCandidateTest` covers this contract.
 
 For developer context, see the
 [distributed version-map design](TiKVDistributedVersionMapDesign.md). It is a
