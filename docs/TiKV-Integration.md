@@ -129,6 +129,11 @@ and output JSON. An unset `BENCHMARK_CONFIG` skips the test.
 - **Concurrency:** the implementation includes ordinary merge and CAS-specific
   paths. Do not generalize one path's atomicity to every posting mode; in
   particular, CAS support is restricted for multi-chunk posting operations.
+- **Client lifecycle:** thread-local stub-cache entries are weak references;
+  each client owns its connection pools. Reloading an index must not retain
+  an old client's pools or reuse them when a new client occupies the same
+  address. The `TiKVIOTest` regression covers repeated asynchronous reads and
+  pool release across client destruction/reconstruction without a TiKV cluster.
 - **Routing:** PD/Region/store discovery, retry, and cache invalidation exist,
   but retry limits and failure behavior depend on the operation. Test faults
   against your chosen revision rather than assuming a universal retry count.

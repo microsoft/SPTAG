@@ -112,6 +112,8 @@ namespace SPTAG::SPANN
     /// cluster.
     class TiKVIO : public Helper::KeyValueIO
     {
+        friend struct TiKVIOTestAccess;
+
     public:
         // ---- Async (gRPC CompletionQueue) infrastructure ----
         //
@@ -3418,7 +3420,8 @@ namespace SPTAG::SPANN
         tikvpb::Tikv::Stub* GetOrCreateStub(const std::string& address) {
             struct TlsEntry {
                 uint64_t epoch;
-                std::shared_ptr<StubPool> pool;
+                // The owning client must release its channels before its address can be reused.
+                std::weak_ptr<StubPool> pool;
             };
             using PerInstance = std::unordered_map<std::string, TlsEntry>;
             thread_local std::unordered_map<const void*, PerInstance> tlsStubCache;
@@ -3427,7 +3430,9 @@ namespace SPTAG::SPANN
             const uint64_t curEpoch = m_stubEpoch.load(std::memory_order_acquire);
             auto tit = perInstance.find(address);
             if (tit != perInstance.end() && tit->second.epoch == curEpoch) {
-                return tit->second.pool->GetNext();
+                if (auto pool = tit->second.pool.lock()) {
+                    return pool->GetNext();
+                }
             }
             if (tit != perInstance.end()) {
                 perInstance.erase(tit);  // stale — refresh below
