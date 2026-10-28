@@ -10,7 +10,7 @@ It is implemented but remains an experimental deployment profile until a
 specific cluster/version/workload combination is validated.
 
 **To reproduce the FILEIO/TiKV benchmark**, go directly to the
-[SIFT1M setup and run guide](../evaluation/2026-10-23-sift1m/Reproduce.md).
+[SIFT1M setup and run guide](../evaluation/2026-10-28-sift1m/Reproduce.md).
 It includes dependencies, the build, a pinned single-host cluster and workload
 commands; you do not need to execute this page's build steps first.
 The sections below explain the integration for other deployments.
@@ -80,16 +80,16 @@ deployment; a reachable PD endpoint is not sufficient validation.
 
 Deployment topology, resource limits, Raft replication, and data lifecycle are
 the cluster operator's responsibility. For the benchmark's isolated local
-cluster, use the [current setup recipe](../evaluation/2026-10-23-sift1m/Reproduce.md#6-create-an-isolated-local-tikv-cluster).
+cluster, use the [current setup recipe](../evaluation/2026-10-28-sift1m/Reproduce.md#6-create-an-isolated-local-tikv-cluster).
 Other [evaluation records](../evaluation/README.md) include historical,
 machine-specific deployments.
 
 ## Configure and run
 
 Use the full harness configuration in [the benchmark guide](Benchmarking.md).
-The [SIFT1M report](../evaluation/2026-10-23-sift1m/README.md) describes the
+The [SIFT1M report](../evaluation/2026-10-28-sift1m/README.md) describes the
 available measurements and their limits. Follow its
-[step-by-step instructions](../evaluation/2026-10-23-sift1m/Reproduce.md)
+[step-by-step instructions](../evaluation/2026-10-28-sift1m/Reproduce.md)
 to build and evaluate a new FILEIO/TiKV index.
 Storage settings belong in `[BuildSSDIndex]`:
 

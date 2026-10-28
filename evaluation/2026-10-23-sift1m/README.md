@@ -1,5 +1,9 @@
 # SIFT1M benchmark: FILEIO and TiKV
 
+**Historical partial measurements.** For complete ten-batch runs with
+`4/4/4`, use the [2026-10-28 report](../2026-10-28-sift1m/README.md) and its
+[setup and run guide](../2026-10-28-sift1m/Reproduce.md).
+
 [Run the benchmark](Reproduce.md) | [Configuration template](benchmark.ini) |
 [Query measurements](query-rounds.csv) | [Environment and provenance](results.json)
 
@@ -57,8 +61,10 @@ current TiKV full-build measurement is reported.
 | TiKV topology | One host, 3 PD + 3 TiKV containers, loopback networking, replication factor 3 |
 
 Start with the [complete configuration template](benchmark.ini), then use
-the renderer in the [run instructions](Reproduce.md#4-render-the-two-complete-configurations)
+the renderer in the [current run instructions](../2026-10-28-sift1m/Reproduce.md#4-render-the-two-complete-configurations)
 to set absolute paths and a new TiKV key prefix for your experiment.
+This historical template retains the recorded `12/12/8` settings; the
+current report's template uses `4/4/4`.
 
 ## Interpreting the output
 
@@ -77,7 +83,7 @@ to set absolute paths and a new TiKV key prefix for your experiment.
   Neither is a set of independent index builds. Caches were not flushed.
 - **Completion:** a valid full run requires ten finished batches, a final
   saved count of 1,000,000 and complete JSON.
-  [Step 8](Reproduce.md#8-decide-whether-a-full-run-actually-completed)
+  [Step 8](../2026-10-28-sift1m/Reproduce.md#8-decide-whether-a-full-run-actually-completed)
   checks these conditions; process exit alone is insufficient.
 
 The truth file has an int32 header `(4400, 5)`, followed by eleven phases of

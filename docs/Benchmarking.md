@@ -1,23 +1,25 @@
 # Benchmark methodology and reproduction
 
 [Documentation index](README.md) | [Evaluation index](../evaluation/README.md) |
-[SIFT1M benchmark results](../evaluation/2026-10-23-sift1m/README.md)
+[SIFT1M benchmark results](../evaluation/2026-10-28-sift1m/README.md)
 
 This guide defines how to run and report the current SPFresh benchmark harness.
 It is not a promise to reproduce historical numbers. The historical reports
 have incomplete revision/image provenance and must be interpreted accordingly.
 
 **To set up and run the FILEIO/TiKV experiment, start directly with the
-[SIFT1M setup and run guide](../evaluation/2026-10-23-sift1m/Reproduce.md).**
+[SIFT1M setup and run guide](../evaluation/2026-10-28-sift1m/Reproduce.md).**
 It includes its own dependencies, data download/preparation, build and cluster
 instructions; the SDK quick start is not a prerequisite. This page is a
 reference for methodology and parameter semantics, not an additional setup
 sequence to execute first.
 
-The [SIFT1M report](../evaluation/2026-10-23-sift1m/README.md) describes the
-recorded FILEIO update workload and TiKV query measurements, including their
-completion status. It is not a completed ten-batch or multi-host benchmark.
-Older [1M](../evaluation/historical/TiKV-1M.md) and
+The [SIFT1M report](../evaluation/2026-10-28-sift1m/README.md) describes
+complete ten-batch FILEIO and TiKV update runs with `4/4/4`, including their
+source/binary differences. It is a single-host evaluation, not a multi-host
+or matched-binary backend comparison.
+Earlier [partial measurements](../evaluation/2026-10-23-sift1m/README.md) and
+older [1M](../evaluation/historical/TiKV-1M.md) and
 [10M](../evaluation/historical/TiKV-10M.md) observations are archived separately.
 
 ## 1. Pin the complete environment
@@ -138,9 +140,9 @@ NumberOfThreads=8
 [BuildSSDIndex]
 Storage=FILEIO
 NumberOfThreads=8
-PostingPageLimit=12
-SearchPostingPageLimit=12
-BufferLength=8
+PostingPageLimit=4
+SearchPostingPageLimit=4
+BufferLength=4
 SearchInternalResultNum=64
 LatencyLimit=50
 ```
@@ -177,15 +179,36 @@ Storage=TIKVIO
 TiKVPDAddresses=127.0.0.1:2379
 TiKVKeyPrefix=unique_run_identifier
 NumberOfThreads=8
-PostingPageLimit=12
-SearchPostingPageLimit=12
-BufferLength=8
+PostingPageLimit=4
+SearchPostingPageLimit=4
+BufferLength=4
 SearchInternalResultNum=64
 LatencyLimit=50
 ```
 
 Use a fresh key prefix **and** a fresh local index/run directory for an
 independent run. Do not assume a new local directory clears old TiKV keys.
+
+### Suggested settings for SIFT1M (128-dimensional UInt8)
+
+SIFT1M uses 128-dimensional **UInt8** vectors. The examples above and the
+[SIFT1M configuration template](../evaluation/2026-10-28-sift1m/benchmark.ini)
+use the following recommended starting settings for new runs on either backend:
+
+```ini
+[BuildSSDIndex]
+PostingPageLimit=4
+SearchPostingPageLimit=4
+BufferLength=4
+```
+
+Keep `ValueType=UInt8` and `Dimension=128` in `[Benchmark]`; these settings
+do not change the dataset representation or phase-specific truth.
+
+The current complete SIFT1M runs used `4/4/4`. The 2026-10-23 partial runs
+used `12`, `12`, and `8`, respectively; their historical configurations and
+results remain unchanged. Do not mix results across these parameter sets.
+Evaluate recall, latency and insertion behavior in a fresh run.
 
 ## 5. Run and confirm it actually ran
 

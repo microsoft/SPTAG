@@ -1,0 +1,144 @@
+{
+  "date_utc": "2026-10-28",
+  "report_type": "Complete post-fix TiKV run and complete FILEIO baseline",
+  "reproduction": "Reproduce.md",
+  "configuration_template": "benchmark.ini",
+  "completed_full_update_runs": 2,
+  "workload": {
+    "ValueType": "UInt8",
+    "dimension": 128,
+    "DistMethod": "L2",
+    "baseVectorCount": 990000,
+    "insertVectorCount": 10000,
+    "DeleteVectorCount": 0,
+    "BatchNum": 10,
+    "numQueries": 200,
+    "topK": 5,
+    "numSearchThreads": 16,
+    "numInsertThreads": 4,
+    "numSearchDuringInsertThreads": 0,
+    "buildThreads": 8,
+    "layers": 2,
+    "PostingPageLimit": 4,
+    "SearchPostingPageLimit": 4,
+    "BufferLength": 4,
+    "SearchInternalResultNum": 64,
+    "LatencyLimit": 50
+  },
+  "source": {
+    "tikv_lifecycle_fix_commit": "bdb2b64be9b6fe0854c8f268a94cf779f8a4e8dc",
+    "tikv_source_state": "Measured before committing; runtime change committed as tikv_lifecycle_fix_commit.",
+    "matched_executable_comparison": false,
+    "note": "FILEIO baseline predates the TiKV-only lifecycle fix. Do not claim both runs used the final executable."
+  },
+  "cluster": {
+    "topology": "One shared host, 3 PD + 3 TiKV, loopback networking",
+    "replication_factor": 3,
+    "pd_image_digest": "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e",
+    "tikv_image_digest": "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a",
+    "configuration": "tikv.toml"
+  },
+  "environment": {
+    "os": "Ubuntu 22.04",
+    "compiler": "GCC 11.4",
+    "cmake": "3.31.12",
+    "boost": "1.74",
+    "protobuf": "3.12.4",
+    "grpc": "1.30.2",
+    "abseil": "20210324",
+    "tbb": "oneTBB",
+    "cpu": "AMD EPYC 7V12",
+    "logical_cpus": 96,
+    "ram": "approximately 1.7 TiB",
+    "storage": "SSD-backed shared filesystem",
+    "build": "Release; FOLLY=OFF,TBB=ON,SPDK=OFF,ROCKSDB=OFF,TIKV=ON,GPU=OFF,RABITQ=OFF,LARGEVID=OFF",
+    "measurement_controls": "Random seed, affinity, host contention and cache state were not controlled."
+  },
+  "truth": {
+    "definition": "Exact squared L2 for each active-corpus prefix",
+    "header_int32": [
+      4400,
+      5
+    ],
+    "phases": 11,
+    "queries_per_phase": 200,
+    "size_bytes": 88008,
+    "harness_distance_tolerance": "1e-4 * (abs(truth_distance) + 1e-4)",
+    "id_only_recall_recorded": false,
+    "independent_truth_checks": "Queries 0, 1 and 199 at all eleven phases, retained from original truth preparation."
+  },
+  "measurements": {
+    "FILEIO": {
+      "date_utc": "2026-10-27",
+      "exit_code": 0,
+      "completed_batches": 10,
+      "final_saved_vectors": 1000000,
+      "measured_query_rounds": 22,
+      "build_seconds": 307.3029,
+      "initial_recall_at_5": 0.985,
+      "final_recall_at_5": 0.986,
+      "minimum_recall_at_5": 0.985,
+      "maximum_recall_at_5": 0.986,
+      "insert_vectors_per_second": {
+        "minimum": 145.0077,
+        "maximum": 188.6462,
+        "median": 164.3827,
+        "aggregate": 164.78428089787658
+      },
+      "source_base_commit": "bf0f98522d12dd47365b06e0d8fa415ae185e5f3",
+      "source_patch_sha256": "ae4b812499223910a7add9d35d1e93037470960c47aa359399f4ac11ac619b89",
+      "lifecycle_fix_present": false,
+      "binary_sha256": "077247b753178234780d2ef71aaa0b5050d828d2d0b5a1d3d66ecb29991e9076",
+      "raw_output": "fileio-output.json",
+      "raw_output_sha256": "9306cda1a78d1ee8e6b4d7faaa23cc2c6cd42a878644d46f94d9e9c8a3a5de76",
+      "recorded_config": "fileio-recorded.ini",
+      "local_artifact_directory": "benchmark-output/sift1m-pages4-20261027"
+    },
+    "TIKVIO": {
+      "date_utc": "2026-10-28",
+      "exit_code": 0,
+      "completed_batches": 10,
+      "final_saved_vectors": 1000000,
+      "measured_query_rounds": 22,
+      "build_seconds": 1059.9998,
+      "initial_recall_at_5": 0.982,
+      "final_recall_at_5": 0.982,
+      "minimum_recall_at_5": 0.982,
+      "maximum_recall_at_5": 0.982,
+      "insert_vectors_per_second": {
+        "minimum": 34.4033,
+        "maximum": 285.2437,
+        "median": 69.1302,
+        "aggregate": 66.09686760334743
+      },
+      "source_base_commit": "bf0f98522d12dd47365b06e0d8fa415ae185e5f3",
+      "source_patch_sha256": "8880c73d504b196c2622d1388ff45c443bdd88ed8b9b71c1c269438b01e04e37",
+      "lifecycle_fix_present": true,
+      "binary_sha256": "def5be52e72843b36c0767eb4bca35149475f8a94c00b11b2df788e31b221647",
+      "raw_output": "tikv-output.json",
+      "raw_output_sha256": "b8b392751b0140097070139d198b3ec11af2b60430df9d2a31d3f1d40f209eab",
+      "recorded_config": "tikv-recorded.ini",
+      "local_artifact_directory": "benchmark-output/sift1m-pages4-fixed-20261028"
+    }
+  },
+  "query_measurements": "query-rounds.csv",
+  "insert_measurements": "insertions.csv",
+  "input_sha256": {
+    "sift_first_1m": "7cdd76b29c338b78bf17c2ad5060b383110b0bf6ba914e8a77e7e642ba7a6111",
+    "queries_10k": "eca755831fc9a8004e14886df48b81109a8ed3bfc6b632509c93c0460a30d552"
+  },
+  "limitations": [
+    "One independent build per backend; two measured rounds per phase following primer queries.",
+    "Different executable revisions and dates; not a controlled storage-only speedup comparison.",
+    "No pre-fix incomplete TiKV update data is included in current measurement tables.",
+    "TiKV insertion throughput remains variable despite successful completion.",
+    "No 10M, multi-host, concurrent-search-during-insertion or fault-recovery result.",
+    "Full logs, patches, inputs and indexes are local-only; small raw JSON outputs are published byte-for-byte."
+  ],
+  "generated_input_sha256": {
+    "perftest_vector.bin.UInt8_990000_128": "99f84dd53715125bfc9c2450212d6562f0ac1e3e303bc9294236e656d47b42c3",
+    "perftest_addvector.bin.UInt8_10000_128": "84ce0a704422eb7e3977655ffd6d132d6905c561473fa6142141dbc874655a40",
+    "perftest_query.bin.UInt8_200_128": "2caf396d4e73c19b7552937fadf72beda841c4f58a1f12d2f4660435501f6676",
+    "perftest_batchtruth.L2.UInt8_990000_128_200_5_1000_0_10": "b41cb5504f00cb49f00af2fc228f8128fcebc6d5b6ffa09ecf3d644d90911320"
+  }
+}

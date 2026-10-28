@@ -1,0 +1,22 @@
+memory-usage-limit = "8GB"
+
+[server]
+grpc-concurrency = 8
+grpc-memory-pool-quota = "1GB"
+
+[raftstore]
+apply-pool-size = 2
+store-pool-size = 2
+
+[rocksdb]
+max-background-jobs = 4
+
+[storage]
+reserve-space = "1GB"
+
+[storage.block-cache]
+capacity = "2GB"
+
+[coprocessor]
+region-max-size = "512MB"
+region-split-size = "384MB"

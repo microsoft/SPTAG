@@ -10,7 +10,7 @@ construction. It was originally released by Microsoft Research and Microsoft Bin
 
 **Start with:** [choose a capability](#choose-a-capability) |
 [quick start](docs/QuickStart.md) |
-[reproduce FILEIO/TiKV benchmarks](evaluation/2026-10-23-sift1m/Reproduce.md) |
+[reproduce FILEIO/TiKV benchmarks](evaluation/2026-10-28-sift1m/Reproduce.md) |
 [API and data contracts](docs/SDK.md) |
 [platform and feature status](docs/SupportMatrix.md).
 
@@ -46,11 +46,11 @@ can still require integration testing or correctness fixes. See the
 | Use NumPy vectors in your application | Python `SPTAG.AnnIndex` | [Python quick start](docs/QuickStart.md#python) |
 | Embed search in a C++ application | `SPTAG::VectorIndex`, CMake target `SPTAG::SPTAG` | [C++ quick start](docs/QuickStart.md#c) |
 | Build or query an index from files | `indexbuilder`, `indexsearcher` | [CLI quick start](docs/CLIQuickStart.md) |
-| Set up and run the SIFT1M FILEIO/TiKV benchmark | `SPTAGTest` workload harness | [Benchmark setup and run instructions](evaluation/2026-10-23-sift1m/Reproduce.md) |
+| Set up and run the SIFT1M FILEIO/TiKV benchmark | `SPTAGTest` workload harness | [Benchmark setup and run instructions](evaluation/2026-10-28-sift1m/Reproduce.md) |
 
 ## Reproduce the FILEIO/TiKV benchmark
 
-Follow the [SIFT1M setup and run guide](evaluation/2026-10-23-sift1m/Reproduce.md)
+Follow the [SIFT1M setup and run guide](evaluation/2026-10-28-sift1m/Reproduce.md)
 directly; **you do not need to complete the SDK installation below first**.
 It covers dependencies, public dataset downloads, configuration, a local TiKV
 cluster, execution, output checks and shutdown. You can run FILEIO alone or
@@ -58,9 +58,9 @@ compare both backends using the same executable.
 
 This is a substantial Linux/SSD experiment, not the small SDK example.
 Read the guide's resource requirements and known limits before starting.
-The [recorded results](evaluation/2026-10-23-sift1m/README.md) are partial
-measurements; the guide reproduces the workload, not guaranteed timings or a
-previously completed ten-batch comparison.
+The [recorded results](evaluation/2026-10-28-sift1m/README.md) include complete
+ten-batch runs for both backends, with their dates and executable differences
+disclosed. The guide reproduces the workload, not guaranteed timings.
 
 ## Install from source
 
@@ -159,9 +159,9 @@ is not waived by a passing static SDK test.
 - [Parameters](docs/Parameters.md) and [build options](docs/BuildOptions.md).
 - [Documentation index](docs/README.md), [changelog](CHANGELOG.md), and
   [contributing and tests](CONTRIBUTING.md).
-- [Set up and run the FILEIO/TiKV benchmark](evaluation/2026-10-23-sift1m/Reproduce.md),
+- [Set up and run the FILEIO/TiKV benchmark](evaluation/2026-10-28-sift1m/Reproduce.md),
   [benchmark methodology](docs/Benchmarking.md),
-  [SIFT1M benchmark results](evaluation/2026-10-23-sift1m/README.md), and
+  [SIFT1M benchmark results](evaluation/2026-10-28-sift1m/README.md), and
   [evaluation index](evaluation/README.md).
 
 ## Research and citation

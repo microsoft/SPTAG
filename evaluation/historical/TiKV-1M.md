@@ -1,7 +1,7 @@
 # Historical TiKV observations: 1M scale
 
 > Historical observations, not current-branch acceptance thresholds.
-> For current evidence, read the [2026-10-23 SIFT1M measurements](../2026-10-23-sift1m/README.md).
+> For current evidence, read the [complete 2026-10-28 SIFT1M results](../2026-10-28-sift1m/README.md).
 > See the [evaluation index](../README.md) and
 > [reporting requirements](../../docs/Benchmarking.md).
 

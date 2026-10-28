@@ -9,7 +9,8 @@ or existing data.
 
 | Record | Scope | Status |
 | --- | --- | --- |
-| [2026-10-23 SIFT1M measurements](2026-10-23-sift1m/README.md) | FILEIO update measurements and TiKV queries; [fresh-run instructions](2026-10-23-sift1m/Reproduce.md) | Partial measurements, not a completed ten-batch or multi-host benchmark |
+| [2026-10-28 SIFT1M results](2026-10-28-sift1m/README.md) | Complete FILEIO baseline and post-fix TiKV build/update runs; [setup and run instructions](2026-10-28-sift1m/Reproduce.md) | Ten batches and 1M final vectors per backend; different executable revisions; single host |
+| [2026-10-23 SIFT1M measurements](2026-10-23-sift1m/README.md) | Historical `12/12/8` FILEIO update measurements and TiKV queries | Partial measurements, superseded as the current entry point |
 | [Historical 1M observations](historical/TiKV-1M.md) | Three old runs, single-machine multi-process TiKV | Revision and raw-log provenance incomplete; heap-bug impact unknown |
 | [Historical 10M observations](historical/TiKV-10M.md) | Old multi-process TiKV run | Revision and cross-scale comparability incomplete; no post-fix 10M run |
 | [2026-04-23 evaluation](2026-04-23/README.md) | Dated SIFT1B update experiments and subsequent analysis | Machine-specific historical record; distinguish local and three-host runs |
