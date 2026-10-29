@@ -323,6 +323,7 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
         if ((ret = searcher->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
             return ret;
     }
+    if (m_options.m_shareDB) { m_db->Checkpoint(m_options.m_indexDirectory); }
     return ErrorCode::Success;
 }
 
@@ -2039,13 +2040,10 @@ ErrorCode Index<T>::Check()
                     i = sent.fetch_add(1);
                     if (i < currentPostingNum)
                     {
-                        if (ContainSample(i, layer + 1))
+                        if (m_extraSearchers[layer]->CheckPosting(globalIDs[i], &checked, workSpace.get()) != ErrorCode::Success)
                         {
-                            if (m_extraSearchers[layer]->CheckPosting(globalIDs[i], &checked, workSpace.get()) != ErrorCode::Success)
-                            {
-                                ret = ErrorCode::Fail;
-                                return;
-                            }
+                            ret = ErrorCode::Fail;
+                            return;
                         }
                     }
                     else
@@ -2070,13 +2068,11 @@ template <typename T> ErrorCode Index<T>::DeleteIndex(const SizeType &p_id, int 
     std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
     if (tolayer >= m_extraSearchers.size()) {
         auto it = m_topGlobalToLocalID.find(p_id);
-        if (it != m_topGlobalToLocalID.end())
+        if (it == m_topGlobalToLocalID.end())
         {
-            m_topIndex->DeleteIndex(it->second);
-        } else {
             return ErrorCode::VectorNotFound;
         }
-        return ErrorCode::Success;
+        return m_topIndex->DeleteIndex(it->second);
     }
     return m_extraSearchers[tolayer]->DeleteIndex(p_id);
 }

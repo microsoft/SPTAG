@@ -946,7 +946,9 @@ namespace SPTAG::SPANN {
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %lld split into : %lld, length: %d\n", (std::int64_t)headID, (std::int64_t)newHeadVID, args.counts[k]);
                 }
                 if (!theSameHead) {
-                    m_headIndex->DeleteIndex(headID, m_layer + 1);
+                    if (m_headIndex->DeleteIndex(headID, m_layer + 1) != ErrorCode::Success || m_headIndex->ContainSample(headID, m_layer + 1)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old head index in Split: %lld\n", (std::int64_t)headID);
+                    }
                     if ((ret=db->Delete(DBKey(headID))) != ErrorCode::Success)
                     {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting in Split: %lld\n", (std::int64_t)headID);
@@ -1141,7 +1143,9 @@ namespace SPTAG::SPANN {
                             return ret;
                         }
                         CheckCentroid(headID, mergedPostingList, "MergePostings-currentLength >= nextLength");
-                        m_headIndex->DeleteIndex(queryResult->VID, m_layer + 1);
+                        if (m_headIndex->DeleteIndex(queryResult->VID, m_layer + 1) != ErrorCode::Success || m_headIndex->ContainSample(queryResult->VID, m_layer + 1)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old head index in MergePostings queryResult->VID: %lld\n", (std::int64_t)(queryResult->VID));
+                        }
                         if ((ret=db->Delete(DBKey(queryResult->VID))) != ErrorCode::Success)
                         {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting %lld in Merge\n", (std::int64_t)(queryResult->VID));
@@ -1162,7 +1166,9 @@ namespace SPTAG::SPANN {
                             return ret;
                         }
                         CheckCentroid(queryResult->VID, mergedPostingList, "MergePostings-currentLength < nextLength");
-                        m_headIndex->DeleteIndex(headID, m_layer + 1);
+                        if (m_headIndex->DeleteIndex(headID, m_layer + 1) != ErrorCode::Success || m_headIndex->ContainSample(headID, m_layer + 1)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old head index in MergePostings headID: %lld\n", (std::int64_t)(headID));
+                        }
                         if ((ret = db->Delete(DBKey(headID))) != ErrorCode::Success)
                         {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting %lld in Merge\n", (std::int64_t)(headID));
@@ -1566,7 +1572,7 @@ namespace SPTAG::SPANN {
                 {
                     if (ret == ErrorCode::Posting_OverFlow) {
                         int tofill = m_postingSizeLimit + m_bufferSizeLimit - (postingSize / m_vectorInfoSize);
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Merge failed:Posting overflow when appending to %lld! existing size:%d tofill:%d Do split and then retry...\n", (std::int64_t)headID, (int)postingSize, tofill);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Merge failed:Posting overflow when appending to %lld! existing size:%d tofill:%d Do split and then retry...\n", (std::int64_t)headID, (int)postingSize, tofill);
                         if (tofill > 0) {
                             std::string subPosting = appendPosting.substr(0, tofill * m_vectorInfoSize);
                             ret = db->Merge(DBKey(headID), subPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests), postingSize);
@@ -2231,6 +2237,46 @@ namespace SPTAG::SPANN {
            return ErrorCode::Undefined;
         }
 
+        bool CheckAll() {
+            std::vector<SizeType> globalIDs;
+            m_headIndex->GetHeadIndexMapping(m_layer + 1, globalIDs);
+            SizeType currentPostingNum = globalIDs.size();
+
+            std::vector<std::thread> mythreads;
+            mythreads.reserve(m_opt->m_iSSDNumberOfThreads);
+            std::atomic_size_t sent(0);
+            std::vector<std::uint8_t> checked(GetNumBlocks(), false);
+            ErrorCode ret = ErrorCode::Success;
+            for (int tid = 0; tid < m_opt->m_iSSDNumberOfThreads; tid++)
+            {
+                mythreads.emplace_back([&, tid]() {
+                    size_t i = 0;
+                    while (true)
+                    {
+                        i = sent.fetch_add(1);
+                        if (i < currentPostingNum)
+                        {
+                            if (CheckPosting(globalIDs[i], &checked) != ErrorCode::Success)
+                            {
+                                ret = ErrorCode::Fail;
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                });
+            }
+            for (auto &t : mythreads)
+            {
+                t.join();
+            }
+            mythreads.clear();
+            return ret == ErrorCode::Success;
+        }
+
         bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::Dataset<SizeType>& p_headToLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) override {
             m_opt = &p_opt;
             int numThreads = m_opt->m_iSSDNumberOfThreads;
@@ -2443,10 +2489,8 @@ namespace SPTAG::SPANN {
 
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
-
-            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
             //m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
-
+            m_versionMap->DeleteAll();
             if (p_localToGlobal.R() > 0) {
                 for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
                     SizeType globalID = *(p_localToGlobal[i]);
@@ -2458,6 +2502,7 @@ namespace SPTAG::SPANN {
                 }
             }
 
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize p_localToGlobal(%lld) and versionMap (%lld)\n", (std::int64_t)p_localToGlobal.R(), (std::int64_t)m_versionMap->Count());
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
 
             if (p_localToGlobal.R() > 0) {
@@ -2553,7 +2598,7 @@ namespace SPTAG::SPANN {
                             {
                                 std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)fullVectors->GetVector(it), m_vectorDataSize, false),
                                     GetEnumValueType<ValueType>(), m_opt->m_dim, 1));
-                                ErrorCode addRet = AddIndex(&workSpace, vectorSet, it, m_opt->m_storage == Storage::TIKVIO && !m_opt->m_globalIDPath.empty());
+                                ErrorCode addRet = AddIndex(&workSpace, vectorSet, p_localToGlobal.R() > 0 ? *(p_localToGlobal[it]) : it, m_opt->m_storage == Storage::TIKVIO && !m_opt->m_globalIDPath.empty());
                                 if (addRet != ErrorCode::Success) {
                                     zeroReplicaFail(addRet, it);
                                     return;
@@ -2621,9 +2666,13 @@ namespace SPTAG::SPANN {
                                                                      p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
                     for (int i = 0; i < p_headToLocal.R(); i++)
                     {
-                        if (p_headIndex->ContainSample(i))
+                        if (headOldtoNew[i] >= 0)
                         {
                             *(new_topLocalToGlobalID[headOldtoNew[i]]) = *(p_headToLocal[i]);
+                            if (CheckPosting(*(p_headToLocal[i])) != ErrorCode::Success)
+                            {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "SPFresh: headToLocal ID %zu not found in DB\n", *(p_headToLocal[i]));
+                            }
                         }
                     }
                     new_topLocalToGlobalID.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile);
@@ -3014,8 +3063,10 @@ namespace SPTAG::SPANN {
             if ((ret = m_versionMap->Save(p_persistenMap)) != ErrorCode::Success)
                 return ret;
 
-            if ((ret = db->Checkpoint(prefix)) != ErrorCode::Success)
-                return ret;
+            if (!m_opt->m_shareDB) {
+                if ((ret = db->Checkpoint(prefix)) != ErrorCode::Success)
+                    return ret;
+            }
             if (m_opt->m_enableWAL && m_wal) {
                 /** delete all the previous record **/
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Checkpoint done, delete previous record\n");

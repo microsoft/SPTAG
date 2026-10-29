@@ -609,12 +609,15 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
         }
         else
         {
-            while (m_deletedID.Contains(newR - 1) && newR > i)
+            while (m_deletedID.Contains(newR - 1) && newR > i) {
+                (*p_mapping)[newR - 1] = -1;
                 newR--;
+            }
             if (newR == i)
                 break;
             indices.push_back(newR - 1);
             (*p_mapping)[newR - 1] = i;
+            (*p_mapping)[i] = -1;
             newR--;
         }
     }

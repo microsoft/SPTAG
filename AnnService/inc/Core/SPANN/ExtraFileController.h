@@ -1006,11 +1006,11 @@ namespace SPTAG::SPANN {
             auto newSize = size + value.size();
             int newblocks = (int)(((newSize + PageSize - 1) >> PageSizeEx));
             if (newblocks >= m_blockLimit) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
                     "[Merge] Key %lld failed: new size %d bytes requires %d blocks (limit: %d)\n",
                     (int64_t)key, (int)newSize, newblocks, m_blockLimit);
 
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
                     "[Merge] Original size: %d bytes, Merge size: %d bytes\n",
                     size, static_cast<int>(value.size()));
                 if (lock) lock->unlock();
@@ -1192,7 +1192,7 @@ namespace SPTAG::SPANN {
                 SetKey((SizeType)key, (uintptr_t)(new AddressType[m_blockLimit]));
                 IOBINARY(ptr, ReadBinary, sizeof(AddressType) * m_blockLimit, (char*)GetKey(key));
             }
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%lld,%lld) Finish!\n", (std::int64_t)CR, (std::int64_t)mycols);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load block mapping (%lld,%lld) Finish!\n", (std::int64_t)CR, (std::int64_t)mycols);
             return ErrorCode::Success;
         }
         
@@ -1212,13 +1212,15 @@ namespace SPTAG::SPANN {
             SizeType CC = m_blockLimit + 1;
             IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
             IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CC);
+            SizeType total = 0;
             for (auto& it : m_pBlockMapping) {
                 AddressType key = (AddressType)it.first;
                 IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(key));
                 int64_t* postingSize = (int64_t*)(it.second);
                 IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
+                total += 1;
             }
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%lld, %lld) Finish!\n", (std::int64_t)CR, (std::int64_t)CC);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save block mapping (%lld, %lld) Finish! Total: %lld\n", (std::int64_t)CR, (std::int64_t)CC, (std::int64_t)total);
             return ErrorCode::Success;
         }
 

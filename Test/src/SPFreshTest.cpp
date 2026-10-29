@@ -314,7 +314,8 @@ std::shared_ptr<VectorIndex> BuildLargeIndex(const std::string &outDirectory, st
                                         std::shared_ptr<COMMON::IQuantizer> quantizer = nullptr, std::string quantizerFilePath = "quantizer.bin")
 {
     auto vecIndex = VectorIndex::CreateInstance(IndexAlgoType::SPANN, GetEnumValueType<T>());
-    int maxthreads = std::thread::hardware_concurrency();
+    int numBuildThreads = iniReader.GetParameter("Benchmark", "NumBuildThreads", 0);
+    int maxthreads = numBuildThreads > 0 ? numBuildThreads : std::thread::hardware_concurrency();
     int postingLimit = 4 * sizeof(T);
     std::string configuration = R"(
         [Base]
@@ -2298,7 +2299,7 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     int topK = iniReader.GetParameter("Benchmark", "TopK", 10);
     int numSearchThreads = iniReader.GetParameter("Benchmark", "NumSearchThreads", 8);
     int numInsertThreads = iniReader.GetParameter("Benchmark", "NumInsertThreads", 8);
-    int appendThreadNum = iniReader.GetParameter("Benchmark", "AppendThreadNum", 0);
+    int numBuildThreads = iniReader.GetParameter("Benchmark", "NumBuildThreads", 0);
     int numSearchDuringInsertThreads = iniReader.GetParameter("Benchmark", "NumSearchDuringInsertThreads", 1);
     int numQueries = iniReader.GetParameter("Benchmark", "NumQueries", 1000);
     int layers = iniReader.GetParameter("Benchmark", "Layers", 1);
@@ -2316,6 +2317,7 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     BOOST_TEST_MESSAGE("Top-K: " << topK);
     BOOST_TEST_MESSAGE("SearchThreads: " << numSearchThreads);
     BOOST_TEST_MESSAGE("InsertThreads: " << numInsertThreads);
+    BOOST_TEST_MESSAGE("BuildThreads: " << numBuildThreads);
     BOOST_TEST_MESSAGE("SearchDuringInsertThreads: " << numSearchDuringInsertThreads);
     BOOST_TEST_MESSAGE("Queries: " << numQueries);
     BOOST_TEST_MESSAGE("Layers: " << layers);
