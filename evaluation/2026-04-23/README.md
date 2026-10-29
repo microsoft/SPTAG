@@ -1,5 +1,16 @@
 # Evaluation 2026-04-23 — SPFresh + TiKV (SIFT1B, 10× insert, single-key posting)
 
+> Historical, machine-specific experiment. This directory also contains later
+> three-host scripts and analysis; do not conflate those runs with the local
+> deployment below. Exact commits, image digests, dataset/config checksums,
+> replication, and raw-output links must be recovered per run before claiming
+> reproducibility. See the [evaluation index](../README.md).
+>
+> **Destructive operations:** cleanup below deletes data and forcibly removes
+> containers. Do not copy it to an existing deployment. Use a dedicated cluster
+> and review every resolved path/host before any reset. These commands are not
+> installation steps.
+
 This run measures SPANN/SPFresh insert + concurrent search performance against a
 3-node local TiKV cluster, using the SIFT1B dataset (1M base + 10M inserts in
 10 batches). Concurrent in-insert search threads now run continuously (1 query

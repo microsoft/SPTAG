@@ -1,3 +1,5 @@
+# Legacy organization-specific pipeline. Baseline PR validation lives in
+# .github/workflows/ci.yml; the security/compliance tasks below are preserved.
 resources:
 
 - repo: self
@@ -46,9 +48,9 @@ phases:
 
     demands: 
 
-   - msbuild
+      - msbuild
 
-   - visualstudio
+      - visualstudio
 
 
 
@@ -227,4 +229,3 @@ phases:
   - task: ms.vss-governance-buildtask.governance-build-task-component-detection.ComponentGovernanceComponentDetection@0
 
     displayName: 'Component Detection'
-

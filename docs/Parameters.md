@@ -1,159 +1,60 @@
-## **Parameters**
+# In-memory index parameters
 
-> Common Parameters
+[SDK quick start](QuickStart.md) | [API contracts](SDK.md) | [Documentation index](README.md)
 
-|  ParametersName | type  |  default | definition|
-|---|---|---|---|
-| Samples | int | 1000 | how many points will be sampled to do tree node split |
-|TPTNumber | int | 32 | number of TPT trees to help with graph construction |
-|TPTLeafSize | int | 2000 | TPT tree leaf size |
-NeighborhoodSize | int | 32 | number of neighbors each node has in the neighborhood graph |
-|GraphNeighborhoodScale | int | 2 | number of neighborhood size scale in the build stage |
-|CEF | int | 1000 | number of results used to construct RNG | 
-|MaxCheckForRefineGraph| int | 10000 | how many nodes each node will visit during graph refine in the build stage | 
-|NumberOfThreads | int | 1 | number of threads to uses for speed up the build |
-|DistCalcMethod | string | Cosine | choose from Cosine and L2 |
-|MaxCheck | int | 8192 | how many nodes will be visited for a query in the search stage
+These defaults describe the current BKT/KDT SDK, not SPANN sections or a
+benchmark harness. The source of truth is the
+[BKT definitions](../AnnService/inc/Core/BKT/ParameterDefinitionList.h) and
+[KDT definitions](../AnnService/inc/Core/KDT/ParameterDefinitionList.h).
+Use canonical parameter spelling even where an implementation accepts case-insensitive names.
 
-> BKT
+## Set parameters
 
-|  ParametersName | type  |  default | definition|
-|---|---|---|---|
-| BKTNumber | int | 1 | number of BKT trees |
-| BKTKMeansK | int | 32 | how many childs each tree node has |
+Python values are strings; set build parameters before `Build`:
 
-> KDT
-
-|  ParametersName | type  |  default | definition|
-|---|---|---|---|
-| KDTNumber | int | 1 | number of KDT trees |
-
-> Parameters that will affect the index size
-* NeighborhoodSize
-* BKTNumber
-* KDTNumber
-
-> Parameters that will affect the index build time
-* NumberOfThreads
-* TPTNumber
-* TPTLeafSize
-* GraphNeighborhoodScale
-* CEF
-* MaxCheckForRefineGraph
-
-> Parameters that will affect the index quality
-* TPTNumber
-* TPTLeafSize
-* GraphNeighborhoodScale
-* CEF
-* MaxCheckForRefineGraph
-* NeighborhoodSize
-* KDTNumber
-
-> Parameters that will affect search latency and recall
-* MaxCheck
-
-## **NNI for parameters tuning**
-
-Prepare vector data file **data.tsv**, query data file **query.tsv**, and truth file **truth.txt** following the format introduced in the [Get Started](GettingStart.md). 
-
-Install [microsoft nni](https://github.com/microsoft/nni) and write the following python code (nni_sptag.py), parameter search space configuration (search_space.json) and nni environment configuration (config.yml).
-
-> nni_sptag.py
-
-```Python
-import nni
-import os
-
-vector_dimension = 10
-vector_type = 'Float'
-index_algo = 'BKT'
-threads = 32
-k = 3
-
-def main():
-    para = nni.get_next_parameter()
-    cmd_build = "./indexbuilder -d %d -v %s -i data.tsv -o index -a %s -t %d " % (vector_dimension, vector_type, index_algo, threads)
-    for p, v in para.items():
-        cmd_build += "Index." + p + "=" + str(v)
-    cmd_test = "./indexsearcher index Index.QueryFile=query.tsv Index.TruthFile=truth.txt Index.K=%d" % (k)
-    os.system(cmd_build)
-    os.system(cmd_test + " > out.txt")
-    with open("out.txt", "r") as fd:
-        lines = fd.readlines()
-        res = lines[-2]
-        segs = res.split()
-        recall = float(segs[-2])
-        avg_latency = float(segs[-5])
-    score = recall
-    nni.report_final_result(score)
-
-if __name__ == '__main__':
-    main()
-```
-> search_space.json
-
-```json
-{
-        "BKTKmeansK": {"_type": "choice", "_value": [2, 4, 8, 16, 32]},
-        "GraphNeighborhoodScale": {"_type": "choice", "_value": [2, 4, 8, 16, 32]}
-}
-
+```python
+index.SetBuildParam("DistCalcMethod", "L2", "Index")
+index.SetBuildParam("NumberOfThreads", "4", "Index")
+index.SetSearchParam("MaxCheck", "8192", "Index")
 ```
 
-> config.yml
+In C++, call `SetParameter(name, value)` and check its `ErrorCode`.
+Python's legacy setters do not return an acceptance status.
 
-```yaml
-authorName: default
+## Common BKT/KDT parameters
 
-experimentName: example_sptag
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Samples` | int | BKT: 1000; KDT: 100 | Samples used when constructing partition trees |
+| `TPTNumber` | int | 32 | Trees used to initialize graph construction |
+| `TPTLeafSize` | int | 2000 | Leaf size for graph-initialization trees |
+| `NeighborhoodSize` | int | 32 | Graph neighborhood size |
+| `GraphNeighborhoodScale` | float | 2.0 | Neighborhood expansion during construction |
+| `CEF` | int | 1000 | Candidate count for relative-neighborhood graph construction |
+| `MaxCheckForRefineGraph` | int | 8192 | Search budget during graph refinement |
+| `NumberOfThreads` | int | 1 | Index worker-thread setting |
+| `DistCalcMethod` | string | Cosine | Distance method; the SDK examples explicitly use L2 |
+| `MaxCheck` | int | 8192 | Query search budget; tune against recall and latency |
 
-trialConcurrency: 1
+## Algorithm-specific parameters
 
-maxExecDuration: 1h
+| Algorithm | Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| BKT | `BKTNumber` | int | 1 | Number of balanced k-means trees |
+| BKT | `BKTKmeansK` | int | 32 | Branching factor |
+| KDT | `KDTNumber` | int | 1 | Number of kd-trees |
 
-maxTrialNum: 10
+## Tuning
 
-#choice: local, remote, pai
+Start with the defaults and a ground-truth query set from your application.
+Increase `MaxCheck` to explore the recall/latency tradeoff. Construction
+parameters such as `TPTNumber`, `NeighborhoodSize`, `CEF`, and refinement
+budget also affect index quality, build cost, and memory. Change one group at
+a time and record the source revision, data, hardware, and configuration.
+See [benchmark methodology](Benchmarking.md).
 
-trainingServicePlatform: local
-
-searchSpacePath: search_space.json
-
-#choice: true, false
-
-useAnnotation: false
-
-tuner:
-
-  #choice: TPE, Random, Anneal, Evolution, BatchTuner, MetisTuner
-
-  #SMAC (SMAC should be installed through nnictl)
-
-  builtinTunerName: TPE
-
-  classArgs:
-
-    #choice: maximize, minimize
-
-    optimize_mode: maximize
-
-trial:
-
-  command: python3 nni_sptag.py
-
-  codeDir: .
-
-  gpuNum: 0
-
-```
-
-Then start the tuning (tunning results can be found in the Web UI urls in the command output):
-```bash
-nnictl create --config config.yml
-```
-
-stop the tunning:
-```bash
-nnictl stop
-```
+The old inline NNI/CLI tutorial used an obsolete search invocation and is no
+longer a runnable SDK guide. It remains in
+[Git history](https://github.com/microsoft/SPTAG/blob/49ddc8bd/docs/Parameters.md).
+The separate [NNI experiment](../Tools/nni-auto-tune/README.md) is a legacy
+integration with its own dependencies, not part of the SDK baseline.

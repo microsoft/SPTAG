@@ -2,25 +2,38 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Configure Debug",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "-S", "${workspaceFolder}", "-B", "${workspaceFolder}/build",
+                "-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                "-DFOLLY=OFF", "-DTBB=ON", "-DSPDK=OFF", "-DROCKSDB=OFF",
+                "-DTIKV=OFF", "-DGPU=OFF", "-DRABITQ=OFF"
+            ],
+            "windows": {
+                "args": [
+                    "-S", "${workspaceFolder}", "-B", "${workspaceFolder}/build",
+                    "-A", "x64", "-DCMAKE_BUILD_TYPE=Debug",
+                    "-DFOLLY=OFF", "-DTBB=OFF", "-DSPDK=OFF", "-DROCKSDB=OFF",
+                    "-DTIKV=OFF", "-DGPU=OFF", "-DRABITQ=OFF"
+                ]
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "Build Debug",
-            "type": "shell",
-            "command": "make",
-            "args": ["-j4"],
+            "type": "process",
+            "command": "cmake",
+            "args": ["--build", "${workspaceFolder}/build", "--config", "Debug", "--target", "SPTAGTest", "--parallel", "2"],
+            "dependsOn": "Configure Debug",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "options": {
-                "cwd": "${workspaceFolder}/build"
-            },
             "problemMatcher": ["$gcc"],
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared",
-                "showReuseMessage": true,
-                "clear": false
+            "windows": {
+                "problemMatcher": ["$msCompile"]
             }
         }
     ]

@@ -1,5 +1,11 @@
 # ANN-auto-tune using NNI
 
+> Legacy experiment, not the current SDK installation or quick-start path.
+> Its older Python/NNI constraints and test-package-index command do not
+> describe the current development branch. Start with the
+> [SDK guide](../../docs/QuickStart.md); adapt and validate this experiment's
+> dependencies separately.
+
 
 ## Requirements
 

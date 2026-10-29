@@ -1,4 +1,33 @@
-# SPTAG/SPFresh + TiKV Benchmark Results (1M Scale)
+# Historical TiKV observations: 1M scale
+
+> Historical observations, not current-branch acceptance thresholds.
+> For current evidence, read the [complete 2026-10-28 SIFT1M results](../2026-10-28-sift1m/README.md).
+> See the [evaluation index](../README.md) and
+> [reporting requirements](../../docs/Benchmarking.md).
+
+The [developer investigation](../2026-10-23-sift1m/development/RecallRegression.md)
+identified and fixed a TiKV result-heap ordering bug.
+The revisions used below are unknown, so its impact on these historical runs
+cannot be established. These recall numbers are not evidence of an inherent
+TiKV accuracy limit, and have not been replaced with measurements from a
+different index or workload.
+
+## Provenance and limitations
+
+| Field | Recorded status |
+| --- | --- |
+| SPTAG / TiKV commits and dirty state | Not recorded |
+| PD/TiKV immutable image digests | Not recorded |
+| Exact toolchain / hardware / replication factor | Not fully recorded |
+| Input / truth / configuration checksums | Not recorded |
+| Raw per-run logs / JSON | No artifact location recorded here |
+| Topology | Three PD and three TiKV processes on one machine, not three independent hosts |
+
+Do not guess these values retroactively. Preserve the observations below as
+historical data; rerun a pinned configuration before making a current performance
+claim. The scale summary below is ambiguous: `InsertVectorCount` in the current
+harness is a total across all batches, so a configuration file is needed to
+resolve whether "10K per batch" or "10K total" was intended.
 
 ## Configuration
 
@@ -91,7 +120,7 @@ At 100K scale: **7-10x improvement** (56ms -> 7.6ms mean latency)
 - **Recall@5**: 0.754-0.787 (degrades slightly with inserts)
 - **Build time**: ~985-991s (~16.5 min)
 
-### Key Observations
+### Original interpretations (not revalidated)
 
 1. Each search query requires 2 serial gRPC round trips (Layer 1 head-of-heads + Layer 0 main postings)
 2. Each round trip fetches up to 64 keys via RawBatchGet grouped by region

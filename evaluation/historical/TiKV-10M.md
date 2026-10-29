@@ -1,4 +1,33 @@
-# SPTAG/SPFresh + TiKV Benchmark Results (10M Scale)
+# Historical TiKV observations: 10M scale
+
+> Historical observations, not current-branch acceptance thresholds.
+> See the [evaluation index](../README.md) and
+> [reporting requirements](../../docs/Benchmarking.md).
+
+There is no post-fix 10M result in this repository. The
+[2026-10-28 report](../2026-10-28-sift1m/README.md) contains complete
+SIFT1M runs, not a replacement 10M benchmark.
+The revisions used below are unknown, so whether the historical runs were
+affected by the TiKV result-heap bug described in the
+[developer record](../2026-10-23-sift1m/development/RecallRegression.md)
+cannot be established.
+
+## Provenance and comparison limits
+
+| Field | Recorded status |
+| --- | --- |
+| SPTAG / TiKV commits and dirty state | Not recorded |
+| PD/TiKV immutable image digests | Not recorded; `nightly` is not an immutable identity |
+| Complete hardware / toolchain / replication factor | Not recorded |
+| Input / truth / configuration checksums | Not recorded |
+| Raw logs / JSON | No artifact location recorded here |
+| Repetitions | Not recorded for this report |
+
+The cross-scale table is retained as originally reported, not as a controlled
+comparison. Its 1M build time and pre-insert latency differ from the separate
+1M report; the available provenance does not establish that they represent the
+same run or binary. Do not combine them into a speedup or scalability claim
+without recovering the underlying run records.
 
 ## Configuration
 

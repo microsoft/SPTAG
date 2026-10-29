@@ -22,8 +22,12 @@
         {
             PyList_SetItem(dstVecIDs, i, PyInt_FromLong(res.VID));
             PyList_SetItem(dstVecDists, i, PyFloat_FromDouble(res.Dist));
-            if (res.RelaxedMono) PyList_SetItem(dstRelaxMono, i, Py_True);
-            else PyList_SetItem(dstRelaxMono, i, Py_False);
+            PyList_SetItem(dstRelaxMono, i, PyBool_FromLong(res.RelaxedMono));
+            if (!$1->WithMeta())
+            {
+                Py_INCREF(Py_None);
+                PyList_SetItem(dstMetadata, i, Py_None);
+            }
             i++;
         }
     

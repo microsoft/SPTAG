@@ -1,0 +1,377 @@
+{
+  "date_utc": "2026-10-23",
+  "report_type": "FILEIO partial-update measurements and TiKV saved-index query measurements",
+  "reproduction": "Reproduce.md",
+  "configuration_template": "benchmark.ini",
+  "completed_full_update_runs": 0,
+  "source": {
+    "fileio_baseline_commit": "9e7fd9c401c9b2bb163fd6021503ade66aef16ef",
+    "tikv_query_implementation_recorded_as": "192995914332cc2ecca9fbfde5742ee73166214c",
+    "experiments_preceded_commits": true,
+    "note": "Recorded binaries included preserved working-tree patches and toolchain-specific stub generation.",
+    "original_engineering_record": "development/results.json"
+  },
+  "cluster": {
+    "topology": "one shared host, 3 PD + 3 TiKV, loopback networking",
+    "replication_factor": 3,
+    "tikv_image_digest": "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a",
+    "tikv_commit": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+    "pd_image_digest": "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e",
+    "pd_commit": "f941a7ec5bf87222f937c88de1368dd122acaf47"
+  },
+  "workload": {
+    "ValueType": "UInt8",
+    "dimension": 128,
+    "baseVectorCount": 990000,
+    "insertVectorCount": 10000,
+    "DeleteVectorCount": 0,
+    "BatchNum": 10,
+    "topK": 5,
+    "numQueries": 200,
+    "numSearchThreads": 16,
+    "numInsertThreads": 4,
+    "layers": 2,
+    "DistMethod": "L2"
+  },
+  "truth": {
+    "metric": "exact squared L2",
+    "header_int32": [
+      4400,
+      5
+    ],
+    "phases": 11,
+    "queries_per_phase": 200,
+    "top_k": 5,
+    "size_bytes": 88008,
+    "independent_checks": "queries 0, 1, 199 at every phase",
+    "harness_distance_tolerance": "1e-4 * (abs(truth_distance) + 1e-4)"
+  },
+  "measurements": {
+    "FILEIO": {
+      "kind": "partial_update_run",
+      "initial_recall_at_5": 0.979,
+      "batch_1_to_7_recall_at_5": 0.978,
+      "completed_batches": 7,
+      "last_active_vectors": 997000,
+      "build_seconds": 277.4329,
+      "stopped_during": "batch 8 cloning",
+      "id_only_recall_recorded": false
+    },
+    "TIKVIO": {
+      "kind": "saved_index_query",
+      "active_vectors": 996000,
+      "phase": 6,
+      "rounds": 3,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "independent_index_builds": 1,
+      "current_full_update_run_measured": false
+    }
+  },
+  "query_rows": [
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 0,
+      "active_vectors": 990000,
+      "round": 1,
+      "recall_at_5": 0.979,
+      "id_recall_at_5": null,
+      "mean_ms": 6.8459,
+      "p95_ms": 9.198,
+      "p99_ms": 10.974,
+      "qps": 2224.521
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 0,
+      "active_vectors": 990000,
+      "round": 2,
+      "recall_at_5": 0.979,
+      "id_recall_at_5": null,
+      "mean_ms": 6.6059,
+      "p95_ms": 9.718,
+      "p99_ms": 11.292,
+      "qps": 2319.7549
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 1,
+      "active_vectors": 991000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 8.0412,
+      "p95_ms": 10.38,
+      "p99_ms": 12.659,
+      "qps": 1908.5973
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 1,
+      "active_vectors": 991000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 8.1264,
+      "p95_ms": 11.671,
+      "p99_ms": 12.783,
+      "qps": 1902.7323
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 2,
+      "active_vectors": 992000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 7.2612,
+      "p95_ms": 10.229,
+      "p99_ms": 11.163,
+      "qps": 2121.4531
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 2,
+      "active_vectors": 992000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.9766,
+      "p95_ms": 9.645,
+      "p99_ms": 11.888,
+      "qps": 2195.7751
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 3,
+      "active_vectors": 993000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.8054,
+      "p95_ms": 9.379,
+      "p99_ms": 11.249,
+      "qps": 2268.7312
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 3,
+      "active_vectors": 993000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.7579,
+      "p95_ms": 9.146,
+      "p99_ms": 11.413,
+      "qps": 2282.7141
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 4,
+      "active_vectors": 994000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.117,
+      "p95_ms": 8.545,
+      "p99_ms": 10.62,
+      "qps": 2502.5964
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 4,
+      "active_vectors": 994000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.0638,
+      "p95_ms": 8.745,
+      "p99_ms": 10.64,
+      "qps": 2543.7524
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 5,
+      "active_vectors": 995000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1828,
+      "p95_ms": 8.361,
+      "p99_ms": 10.239,
+      "qps": 2473.1968
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 5,
+      "active_vectors": 995000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.2541,
+      "p95_ms": 8.695,
+      "p99_ms": 10.638,
+      "qps": 2449.4194
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1218,
+      "p95_ms": 8.544,
+      "p99_ms": 10.27,
+      "qps": 2520.3518
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1551,
+      "p95_ms": 8.259,
+      "p99_ms": 10.458,
+      "qps": 2489.8848
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 7,
+      "active_vectors": 997000,
+      "round": 1,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1473,
+      "p95_ms": 8.567,
+      "p99_ms": 10.135,
+      "qps": 2497.5649
+    },
+    {
+      "experiment_kind": "partial_update_run",
+      "backend": "FILEIO",
+      "phase": 7,
+      "active_vectors": 997000,
+      "round": 2,
+      "recall_at_5": 0.978,
+      "id_recall_at_5": null,
+      "mean_ms": 6.1464,
+      "p95_ms": 8.482,
+      "p99_ms": 10.511,
+      "qps": 2507.2083
+    },
+    {
+      "experiment_kind": "saved_index_query",
+      "backend": "TIKVIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 1,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "mean_ms": 24.021961,
+      "p95_ms": 42.067705,
+      "p99_ms": 44.312658,
+      "qps": 651.508607
+    },
+    {
+      "experiment_kind": "saved_index_query",
+      "backend": "TIKVIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 2,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "mean_ms": 21.953681,
+      "p95_ms": 25.04085,
+      "p99_ms": 26.349582,
+      "qps": 713.19646
+    },
+    {
+      "experiment_kind": "saved_index_query",
+      "backend": "TIKVIO",
+      "phase": 6,
+      "active_vectors": 996000,
+      "round": 3,
+      "recall_at_5": 0.976,
+      "id_recall_at_5": 0.976,
+      "mean_ms": 22.120265,
+      "p95_ms": 25.462598,
+      "p99_ms": 27.103834,
+      "qps": 707.115032
+    }
+  ],
+  "measurement_notes": {
+    "timing": "Per-query SearchIndex wall milliseconds; QPS = 200 / threaded query-round wall seconds.",
+    "percentiles": "sorted zero-based floor(200*p), no interpolation",
+    "fileio_query_sequence": "Two recorded rounds per phase, each following a primer.",
+    "tikv_query_sequence": "Three sequential rounds against one saved index.",
+    "cache_flushed": false,
+    "random_seed_pinned": false,
+    "backend_speedup_comparison_controlled": false
+  },
+  "inputs": {
+    "prepared_1m": {
+      "filename": "sift-first-1m.u8bin",
+      "sha256": "7cdd76b29c338b78bf17c2ad5060b383110b0bf6ba914e8a77e7e642ba7a6111",
+      "availability": "local-only; not published"
+    },
+    "queries_10k": {
+      "filename": "query.10K.u8bin",
+      "sha256": "eca755831fc9a8004e14886df48b81109a8ed3bfc6b632509c93c0460a30d552",
+      "availability": "local-only; not published"
+    },
+    "phase_truth": {
+      "filename": "perftest_batchtruth.L2.UInt8_990000_128_200_5_1000_0_10",
+      "sha256": "b41cb5504f00cb49f00af2fc228f8128fcebc6d5b6ffa09ecf3d644d90911320",
+      "availability": "local-only; not published"
+    }
+  },
+  "derived_inputs": [
+    {
+      "file": "perftest_vector.bin.UInt8_990000_128",
+      "sha256": "99f84dd53715125bfc9c2450212d6562f0ac1e3e303bc9294236e656d47b42c3"
+    },
+    {
+      "file": "perftest_addvector.bin.UInt8_10000_128",
+      "sha256": "84ce0a704422eb7e3977655ffd6d132d6905c561473fa6142141dbc874655a40"
+    },
+    {
+      "file": "perftest_query.bin.UInt8_200_128",
+      "sha256": "2caf396d4e73c19b7552937fadf72beda841c4f58a1f12d2f4660435501f6676"
+    }
+  ],
+  "limitations": [
+    "No complete ten-batch backend comparison or post-query-implementation TiKV build/update measurement.",
+    "No 10M or multi-host result.",
+    "TiKV update testing encountered a checkpoint-statistics wait and insertion-throughput anomaly.",
+    "Raw logs, inputs and indexes are local-only; this checkout provides instructions for a new run."
+  ],
+  "published_artifacts": {
+    "query-rounds.csv": {
+      "sha256": "03649f14b1991858278cb8bbe405125470bd260f4787db7a81b573905ed1dfa1"
+    },
+    "benchmark.ini": {
+      "sha256": "f75c467ecd97a3cf3c174785656c217a01b187f08a350b96c332f0250ec1eb16"
+    },
+    "tikv.toml": {
+      "sha256": "ba4dd9056c67f1f8e2f1a4add9c46fbf63e049866299a56a7e54e1651da1691d"
+    }
+  }
+}

@@ -2050,7 +2050,9 @@ namespace SPTAG::SPANN {
                         vidIdx++;
                     }
                 }
-                queryResults.SortResult();
+                // Filtering changes heap keys; the caller still needs a max-heap for final sorting.
+                std::make_heap(queryResults.GetResults(),
+                               queryResults.GetResults() + queryResults.GetResultNum(), COMMON::Compare);
             }
 
             auto layerTotalEnd = std::chrono::high_resolution_clock::now();
@@ -2489,7 +2491,14 @@ namespace SPTAG::SPANN {
 
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
-            //m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
+
+#ifdef TIKV
+            if (auto* tikvMap = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get())) {
+                tikvMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize,
+                                    p_headIndex->m_iDataCapacity, &p_localToGlobal);
+            }
+#endif
+
             m_versionMap->DeleteAll();
             if (p_localToGlobal.R() > 0) {
                 for (SizeType i = 0; i < p_localToGlobal.R(); i++) {

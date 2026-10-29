@@ -1,3 +1,5 @@
+# Legacy research recipe; not part of the validated CPU baseline.
+# See docs/SupportMatrix.md before attempting a CUDA build.
 FROM mcr.microsoft.com/mirror/nvcr/nvidia/cuda:11.8.0-base-ubuntu20.04
 WORKDIR /app
 

@@ -1,137 +1,160 @@
-# Global RaBitQ quantizer
+# RaBitQ compression, automatic tuning, and search
 
-Global RaBitQ is an `IQuantizer` implementation backed by the official
-full-code quantizer, compact-code packer, and asymmetric distance estimator.
-Base vectors use `quantize_full_single` and `packing_rabitqplus_code`; ADC
-queries are evaluated with `full_est_dist` and the official SIMD inner-product
-kernel selected for the configured bit width. Query-only distance factors are
-computed once when the ADC query buffer is prepared, not once per candidate.
+[Documentation index](README.md) |
+[Implementation and compatibility](development/RaBitQ.md)
 
-The SDC compatibility path reconstructs its query code with the official
-`reconstruct_vec` API before invoking the same official asymmetric estimator.
-Online search with `EnableADC=true` does not reconstruct base vectors.
+RaBitQ compresses vector representations and supplies matching distance
+estimation through `IQuantizer`; it is not a posting-storage backend.
+Use it to investigate the storage/accuracy tradeoff, including native bit-width
+selection before building SPANN. It is an opt-in engine capability, separate
+from the unquantized BKT/STATIC SPANN tutorial.
 
-Use `SetQuantizerADC(true)` on the SPANN index to enable ADC at runtime and
-persist `EnableADC=true` for save/load and cloning. Calling
-`GetQuantizer()->SetEnableADC(true)` directly changes only the live quantizer,
-not the index configuration. Keep this setting fixed when measuring incremental
-recall: with ADC disabled, raw queries are quantized before distance estimation.
-Previously, the SPANN setter also changed only the live mode, so an ADC initial
-measurement could silently become SDC after the benchmark reloaded or cloned
-the index. Attaching a quantizer now also applies the configured mode, including
-when model loading follows configuration loading. For existing indexes, set
-the intended mode explicitly and save it;
-the quantizer model and stored codes do not need conversion.
+## Prerequisites
 
-Graph construction/refinement and posting replica selection compare **two stored
-codes**, not a query buffer and a code. They use
-`VectorIndex::ComputeDistanceBetweenStoredVectors` and the quantizer's explicit
-`L2DistanceSDC` entry point, independently of `EnableADC`. Do not pass a stored
-code as the first operand of the ADC query-distance API or toggle a shared
-quantizer's mode inside a parallel build. Quantized indexes previously built
-with ADC enabled must have their head graph and postings rebuilt to correct
-these comparisons; the model and encoded base vectors can be reused.
+- A Linux baseline build environment and an AVX2/FMA or AVX512 CPU.
+- The official `ThirdParty/RaBitQOfficial` submodule, with parent-repository
+  portability overlays left in `ThirdParty/RaBitQOfficialPatches`.
+- Float training/base vectors, raw Float queries, and matching ground truth.
+- Separate output paths for each new model and encoded corpus.
 
-RaBitQ's stored-code estimator is directional, unlike PQ's symmetric codebook
-L2 distance. Split reassign checks must compare the current, old, and new heads
-with the data vector as the first operand throughout. The reassign predicate
-accepts the current head vector and computes this distance itself, rather than
-accepting a caller-provided scalar that may have the opposite direction.
-This does not change the estimator, centroid, model, or version-update rules.
+```bash
+git submodule update --init ThirdParty/RaBitQOfficial
+cmake -S . -B build-rabitq -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DFOLLY=OFF -DTBB=ON -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=ON
+cmake --build build-rabitq --target quantizer indexbuilder indexsearcher SPTAGTest --parallel 2
+```
 
-Local reassign version updates separately enforce `expectedOld` with atomic
-compare-and-swap. An outdated task must not advance a newer version, and a
-failed update must not change the posting's version or append its selected
-replicas. Both batched split reassign and individual reassign check the update
-result. Unconditional increments (`expectedOld=0xff`) and 7-bit wraparound
-remain supported; the existing TiKV idempotent-update behavior is unchanged.
+Native Windows is not certified by this recipe. Do not infer RaBitQ accuracy
+or portability from a successful baseline build.
 
-Train the model and encode Float base vectors with `Release/quantizer`:
+## Automatic bit-width selection
+
+The current `indexbuilder` has an INI-driven C++ tuning path. It evaluates
+RaBitQ bit widths in the supported range 1..8, chooses a qualifying width,
+encodes the input corpus, and continues index construction with that model.
+This is not the legacy NNI/Python tuning example.
+
+The recipe below is checked against the current source, **not a recorded
+RABITQ-enabled end-to-end run**. The default developer build has `RABITQ=OFF`
+and explicitly rejects this request. Follow the enabled build above first.
+
+In a **new, empty run directory**, place a writable copy of your 128-dimensional
+Float DEFAULT-format base vectors at `base.fbin`. Create an empty `tmp`
+directory and save this as `build.ini`:
+
+```ini
+[Base]
+ValueType=Float
+Dim=128
+DistCalcMethod=L2
+IndexAlgoType=BKT
+VectorPath=base.fbin
+VectorType=DEFAULT
+IndexDirectory=index
+
+[RaBitQAutoTune]
+isExecute=true
+TrainSamples=10000
+TestQueries=100
+ResultCount=10
+TargetRecall=0.9
+BatchSize=1000000
+
+[SelectHead]
+isExecute=true
+Ratio=0.12
+
+[BuildHead]
+isExecute=true
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+Storage=STATIC
+EnableADC=true
+TmpDir=tmp
+```
+
+Set `SPTAG_ROOT` to the absolute source checkout. From that run directory:
+
+```bash
+"$SPTAG_ROOT/Release/indexbuilder" -c build.ini -a SPANN \
+  -v Float -d 128 -f DEFAULT -o index -t 2
+```
+
+Do not pass `-pq` for automatic selection: an explicit quantizer file bypasses
+the auto-tuning branch. This example reads its corpus from `Base.VectorPath`,
+not the CLI `-i` option, and uses L2 plus `EnableADC=true` explicitly.
+
+| Setting | Current default | Meaning / constraint |
+| --- | --- | --- |
+| `TrainSamples` | 10000 | Leading input rows used for tuning; choose a positive sample count with enough rows for K |
+| `TestQueries` | 100 | Leading rows of that tuning sample, capped at the sample count; not an external held-out query set |
+| `ResultCount` | 10 | Calibration K; positive and no larger than the tuning corpus |
+| `TargetRecall` | 0.9 | Calibration target in [0, 1]; not the final SPANN query recall guarantee |
+| `BatchSize` | 1000000 | Positive number of corpus vectors encoded per batch |
+| CLI `-t` | Reader default unless supplied | Tuning worker count; this example sets 2 and supplies missing build-section thread settings |
+
+Expect logs for candidate bits, `Recall@K`, and the selected width.
+The current implementation writes `rabitq_auto_quantizer.bin` in the working
+directory and appends `.quan` to the input vector path for the encoded corpus.
+For this recipe that is `base.fbin.quan`; do not run it against a protected
+or shared dataset location or reuse a directory containing published artifacts.
+The builder changes the encoded value type/dimension internally; do not guess
+the resulting code width or reuse a manually chosen `Dim=68`.
+The requested saved index is under `index/`.
+
+Failure to meet the target in the supported bit range, encoding/build errors,
+or a disabled RaBitQ build must fail the command. A model or `.quan` file left
+behind is not proof that the complete index was built and saved.
+Reopen the saved index with matching raw Float queries and measure recall
+against an **independent** query/truth set. The calibration uses training rows
+and quantized distance estimates, not a full end-to-end SPANN recall evaluation.
+
+## Train and encode
+
+Use this manual path when you want a specific bit width or model configuration
+instead of automatic selection.
+
+For 128-dimensional SIFT Float XVEC data:
 
 ```bash
 Release/quantizer \
   -d 128 -v Float -f XVEC \
-  -i sift/sift_base.fvecs \
-  -o sift/sift_base.rabitq3.u8bin \
-  -oq sift/official_rabitq3_global.bin \
+  -i sift1m/sift_base.fvecs \
+  -o sift1m/sift_base.rabitq3.u8bin \
+  -oq sift1m/official_rabitq3_global.bin \
   -qt RaBitQQuantizer -qd 3 -ts 1000000
 ```
 
-The encoded vectors are stored in a `UInt8` container, but their code payload is
-packed at the configured bit width. Five Float factors follow each packed code,
-so 128-dimensional 3-bit SIFT vectors use `Dim=68`
-(`128 * 3 / 8 + 5 * sizeof(float)`). Configure the encoded base-vector file and
-`QuantizerFilePath` in the regular SPANN build configuration. Queries remain
-raw Float vectors and are prepared through the loaded global `IQuantizer`.
+Training data and dataset downloads are not supplied by this guide. Use only
+base/training vectors for training, not held-out query vectors.
 
-The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
-multiple of 64. The current adapter supports the official L2 estimator; cosine
-distance is intentionally unsupported.
+## Build and query
 
-## Rotation and model compatibility
+Use the [canonical SIFT1M configuration](../Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini)
+as an advanced example and adjust all input/output paths to your dataset.
+It uses STATIC postings and a global 3-bit model.
 
-New models apply the same random orthogonal rotation to training vectors,
-centroids, encoded vectors, and ADC queries. Reconstruction applies the inverse
-transform, and bit-width clones retain the original rotation.
+- Encoded vectors use the `UInt8` container.
+- For this 128-dimensional 3-bit example, `Dim=68`: 48 packed bytes plus
+  five Float factors. This is not the original Float dimension.
+- Set `QuantizerFilePath` to the matching model.
+- Queries remain raw Float vectors; enable ADC for query evaluation.
 
-Global models store the rotation in version 3. Existing version-2 models retain
-their identity transform and serialization; loading them does not silently
-upgrade their codes. To use rotation with an old corpus, train a new model,
-re-encode the base vectors, and build a separate index. Do not replace only the
-model file under an existing index.
+Consult [the SPANN command examples](GettingStart.md) for build/search invocation.
+The encoded dimension depends on bit width, padding, and model mode; do not
+reuse `Dim=68` for another configuration.
 
-## Optional local residual quantization
+## Compatibility and evaluation
 
-The default remains a single global centroid and the upstream fast quantizer.
-For higher accuracy at a fixed bit width, supply Float XVEC centroids trained
-from base vectors only:
+Never replace only the model beneath an existing encoded corpus or index.
+Rotation and optional local-centroid models require matching codes; changing
+them requires re-encoding and a separate index build. The
+[developer contract](development/RaBitQ.md) records model versions, ADC/SDC
+distance requirements, local residual quantization, and rebuild conditions.
 
-```bash
-Release/quantizer \
-  -d 128 -v Float -f XVEC \
-  -i sift/sift_base.fvecs -o sift/sift_base.rabitq7-local.u8bin \
-  -oq sift/rabitq7-local.bin -qt RaBitQQuantizer -qd 7 \
-  -rc sift/centroids.fvecs -ts 1000000
-```
-
-Use a **new** model and output path. `-rc` is rejected when the model already
-exists; omit it when reusing a saved local model. Centroids must have the input
-dimension, contain finite values, and number between 1 and 65,536. They use the
-model's input normalization and persisted rotation. The C++ equivalent is
-`SetLocalCentroids` on a trained rotated `RaBitQQuantizer`; bit-width clones
-retain those centers.
-
-Each base vector is assigned to its nearest center and its residual is encoded
-with upstream per-vector optimal scaling, rather than the shared expected scale.
-The model stores the centers; each code appends a `uint32` center ID after the
-existing packed payload and five Float factors. For 128-dimensional 7-bit
-vectors this is **136 bytes** (112 + 20 + 4), versus 132 for global quantization.
-Set the index's `Dim` to that encoded width. Center storage is additional to the
-7-bit payload; the bit count is not a claim about total index size.
-
-ADC query preparation computes the query norm relative to every center once,
-alongside the rotated query and existing factors. Its buffer uses
-`4 * (paddedDimension + 2 + centerCount)` bytes. Scoring selects the matching
-center's norm without fetching or reranking raw base vectors. SDC and vector
-reconstruction likewise use each code's stored center.
-
-Local models use **version 4**: the version-3 payload is followed by a `uint32`
-center count and row-major rotated Float centers. Version-2/3 models keep their
-existing encoding, scoring, serialization, and fast quantization behavior.
-Never replace a model beneath an existing encoded corpus/index: re-encode and
-build a separate index when enabling or changing local centers.
-
-Local quantization reduces distance-estimation error, but does not guarantee
-a fixed recall. Search candidate coverage remains an independent requirement;
-validate the complete query set and report any changed search parameters.
-
-`Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini` is the canonical
-SIFT1M example. It uses STATIC postings containing the global RaBitQ codes.
-
-STATIC search workspaces must use one asynchronous read request per posting,
-pointing to the start of that posting's buffer. Dynamic storage instead uses
-one request per page. Using the dynamic layout for STATIC reads can overlap
-posting data and write past the buffer, causing corrupt IDs, repeated hash-table
-expansion, and heap corruption. Workspace initialization selects the layout from
-the storage type and refreshes it when a reused workspace changes layouts.
-This does not change the index format or require rebuilding an existing index.
+Run the RaBitQ tests with `--list_content` first to confirm the test names in
+your binary, then select the RaBitQ suite. Evaluate recall on the complete
+query set and report candidate/search settings, total model/code memory, and
+latency. A small nominal bit width alone is not a total-index-size claim.

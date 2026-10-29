@@ -1,13 +1,22 @@
-## **Quick start**
+# Command-line and SPANN reference
+
+[Documentation index](README.md) | [Minimal runnable example](QuickStart.md)
+
+These are advanced parameter and dataset examples, not the baseline quick start.
+Linux CMake executable names are lowercase (`indexbuilder`, `indexsearcher`,
+`ssdserving`); the older `IndexBuilder.exe` / `SSDServing.exe` names below refer
+to historical Visual Studio workflows. On Windows CMake builds, use the
+lowercase target name with `.exe` under `build\Release`.
+Replace dataset paths and resource settings for your own environment.
 
 ### **Memory SPTAG Index Build**
  ```bash
  Usage:
- ./IndexBuiler [options]
+ ./indexbuilder [options]
  Options:
   -d, --dimension <value>       Dimension of vector, required.
   -v, --vectortype <value>      Input vector data type (e.g. Float, Int8, Int16), required.
-  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
+  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is TXT; specify it explicitly.
   -i, --input <value>           Input raw data, required.
   -o, --outputfolder <value>    Output folder, required.
   -a, --algo <value>            Index Algorithm type (e.g. BKT, KDT), required.
@@ -24,12 +33,12 @@
   ### **Memory SPTAG Index Search**
   ```bash
   Usage:
-  ./IndexSearcher [options]
+  ./indexsearcher [options]
   Options:
   -d, --dimension <value>       Dimension of vector.
   -v, --vectortype <value>      Input vector data type. Default is float.
   -i, --input <value>           Input query data.
-  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
+  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is TXT; specify it explicitly.
   -x, --index <value>           Index folder.
 
   -t, --thread <value>          Thread Number.
@@ -119,11 +128,11 @@ IndexAlgoType=BKT
 Dim=128
 VectorPath=sift1b/base.1B.u8bin
 VectorType=DEFAULT
-QueryPath==sift1b/query.public.10K.u8bin
+QueryPath=sift1b/query.public.10K.u8bin
 QueryType=DEFAULT
-WarmupPath==sift1b/query.public.10K.u8bin
+WarmupPath=sift1b/query.public.10K.u8bin
 WarmupType=DEFAULT
-TruthPath==sift1b/public_query_gt100.bin
+TruthPath=sift1b/public_query_gt100.bin
 TruthType=DEFAULT
 IndexDirectory=sift1b
 
@@ -241,22 +250,8 @@ SearchPostingPageLimit=12
 
 ### **Local SPFresh version tracking**
 
-Non-TiKV dynamic storage uses `LocalVersionMap` with the same serialized ID and
-version format as before. In non-MSVC builds with TBB enabled, version reads,
-updates, and erases use concurrent-hash-map accessors. Membership checks use a
-segmented atomic bitmap for nonnegative 32-bit IDs; negative and wider IDs use
-the concurrent map. Lazy 8 KiB pages each cover 65,536 IDs, with a 512 KiB
-directory on 64-bit platforms.
-
-The bitmap tracks presence, not version values. Same-key accessors synchronize
-map and bitmap updates; striped operation gates protect whole-table maintenance
-and page reclamation. This is not a globally lock-free map. Other builds retain
-the locked fallback. Existing version-map files need no conversion: loading
-reconstructs the bitmap.
-
-Dynamic search skips already accepted duplicate candidates before local
-membership checks without inserting unseen IDs into the deduper. The existing
-TiKV visibility path and merge accounting remain unchanged.
+Implementation details and validation limits are in the
+[local version-map developer note](development/LocalVersionMap.md).
 
 ### **Global RaBitQ Quantizer**
 

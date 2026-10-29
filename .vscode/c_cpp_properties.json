@@ -7,14 +7,19 @@
                 "${workspaceFolder}/AnnService/inc",
                 "${workspaceFolder}/Test/inc",
                 "${workspaceFolder}/ThirdParty/**",
-                "/usr/include/**"
+                "${default}"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/g++",
             "cStandard": "c17",
-            "cppStandard": "c++17",
-            "intelliSenseMode": "gcc-x64",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "${default}",
             "compileCommands": "${workspaceFolder}/build/compile_commands.json"
+        },
+        {
+            "name": "Win32",
+            "includePath": ["${workspaceFolder}/AnnService", "${workspaceFolder}/Test", "${default}"],
+            "cppStandard": "c++20",
+            "intelliSenseMode": "${default}"
         }
     ],
     "version": 4

@@ -1,43 +1,65 @@
-## Requirements
+# Windows installation
 
-### swig >= 3.0
+[Documentation index](README.md) | [Support matrix](SupportMatrix.md)
 
-Steps to install SWIG: 
+Native Windows is a compatibility path, not the Linux CI baseline. TiKV, SPDK,
+Folly, io_uring, and distributed experiment recipes are not validated on native
+Windows. For the complete Linux workflow, use Ubuntu 24.04 under WSL2.
+The C++/Python [SDK quick start](QuickStart.md) is currently validated through
+that Linux path, not native MSVC or Windows Python.
 
-1. Download the latest SWIG binary from http://www.swig.org/download.html, if you need a specific version, windows binaries are located at https://sourceforge.net/projects/swig/files/swigwin/. Once downloaded, please unzip to a local folder (prefarably inside the SPTAG folder) 
-2. Add the path where it was unzipped to the environment PATH example: `C:\Sptag\swigwin-3.0.12\` in System properties
+## Toolchain
 
-### cmake >= 3.12.0
+- Visual Studio 2022 with Desktop development with C++, the Windows SDK,
+  and CMake tools; use a Developer PowerShell.
+- A C++20-capable MSVC toolchain.
+- CMake 3.28+ and SWIG 4.0.2+ on `PATH`.
+- Boost with system, thread, serialization, wserialization, regex, filesystem,
+  and unit_test_framework libraries built for the same MSVC toolset and x64.
+  The Linux baseline uses Boost 1.83; native Windows combinations require
+  separate validation.
+- Python development files only if building the Python wrapper.
+- Node.js 20+ to run the self-checking CLI example and documentation checker.
 
-1. If you have Visual Studio 2019 you already have the required tools to compile, please ensure you have the `Desktop Development with C++` selected to get all the tools, just ensure this option is enabled in the installation workloads
-2. If not, please download cmake
+Do not mix old precompiled Boost MSVC 14.1 binaries with a newer toolset.
+Use `BOOST_ROOT` to identify your own matching Boost installation if CMake
+does not discover it automatically.
 
-![Visual Studio](img/visualstudio.png)
+## Clone only the required dependency
 
-### boost == 1.67.0
+```powershell
+git clone --branch users/qiazh/doc https://github.com/microsoft/SPTAG.git
+Set-Location SPTAG
+git submodule update --init ThirdParty/zstd
 
-Boost's precompiled binaries are available at https://sourceforge.net/projects/boost/files/boost-binaries/1.67.0/ (to avoid compiling from scratch) 
-
-1. Select the lastest version for 1.67.0 (boost_1_67_0-msvc-14.1-64.exe)
-2. Launch the installation
-3. Add the folder path to PATH environment variable, for instance `C:\Sptag\boost_1_67_0\`
-
-On the off chance of needing to build boost, because you encountered this message during the Build step `Could NOT find Boost (missing: system thread serialization wserialization regex filesystem)`, try the following
-1. Locate and run `bootstrap.bat`, this creates a file called `b2.exe`
-2. Run the generated exe (in this case `b2.exe`), be patient this may take +1 hr
-3. Once complete, the built libraries will be located in `\stage\lib` (or something along the lines)
-
-## Build
-
-1. `git clone --recurse-submodules https://github.com/microsoft/SPTAG.git`
-2. If the repository was cloned without `--recurse-submodules`, run
-   `git submodule update --init --recursive` from the repository root.
-3. Go the folder location where you cloned the repo in the command prompt and execute the following commands:
+cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release `
+  -DFOLLY=OFF -DTBB=OFF -DSPDK=OFF -DROCKSDB=OFF -DTIKV=OFF -DGPU=OFF -DRABITQ=OFF
+cmake --build build --config Release --target indexbuilder indexsearcher SPTAGTest --parallel 2
 ```
-mkdir build
-cd build
-cmake -A x64 ..
-```
-4. From the build folder, open SPTAGLib.sln solution in Visual Studio and compile all projects
 
-5. [..]/build/release contains now all components needed, add this path to PYTHONPATH environment variable to reference the required modules
+The development-branch selection keeps this guide matched to its source.
+The baseline needs no SPDK submodules. Avoid a blanket recursive clone on
+Windows: the pinned nested xNVMe dependency contains directories called `aux`,
+a reserved Windows device name. If an existing recursive checkout fails
+there, use Linux/WSL to work with SPDK rather than disabling NTFS protections
+globally. Such a failure does not mean the baseline needs that dependency.
+
+## Verify
+
+Run from the repository root:
+
+```powershell
+node Tools\quickstart.mjs build\Release
+.\build\Release\SPTAGTest.exe --run_test=CommonHelperTest:IniReaderTest:ConcurrentHashMapTest --log_level=test_suite
+```
+
+Native Windows CMake artifacts are under `build\Release`, unlike Linux's
+source-root `Release`. An optional Python session can use:
+
+```powershell
+$env:PYTHONPATH = "$PWD\build\Release;$env:PYTHONPATH"
+```
+
+These commands document the intended native configuration; a successful Linux
+or WSL run is **not** native Windows certification. Report the exact MSVC,
+Boost, SWIG, and CMake versions when reporting a Windows build problem.

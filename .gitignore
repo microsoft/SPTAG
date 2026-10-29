@@ -61,6 +61,7 @@ dkms.conf
 /obj
 /x64
 /build
+/build-*/
 /ipch
 /packages
 /out/build/x64-Debug
@@ -465,3 +466,5 @@ FodyWeavers.xsd
 
 # SPTAG benchmark generated artifacts
 *perftest_*
+/benchmark-output/
+/quickstart-output/
