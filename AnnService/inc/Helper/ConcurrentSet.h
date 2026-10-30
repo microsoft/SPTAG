@@ -4,6 +4,9 @@
 #ifndef _SPTAG_HELPER_CONCURRENTSET_H_
 #define _SPTAG_HELPER_CONCURRENTSET_H_
 
+#include <mutex>
+#include <shared_mutex>
+
 #ifndef _MSC_VER
 #ifdef TBB
 #include <tbb/concurrent_unordered_map.h>
@@ -11,8 +14,6 @@
 #include <tbb/concurrent_unordered_set.h>
 #include <tbb/concurrent_priority_queue.h>
 #else
-#include <mutex>
-#include <shared_mutex>
 #include <unordered_set>
 #include <unordered_map>
 #include <queue>
@@ -228,31 +229,37 @@ namespace SPTAG
 #else
             template <typename K, typename V>
             class ConcurrentHashMap {
-                using iterator = typename ConcurrentMap<K, V>::iterator;
+                using const_iterator = typename ConcurrentMap<K, V>::const_iterator;
 
             public:
-                iterator find(const K& k) const
+                const_iterator find(const K& k) const
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.find(k);
                 }
 
-                iterator begin() const noexcept
+                const_iterator begin() const noexcept
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.begin();
                 }
 
-                iterator end() const noexcept
+                const_iterator end() const noexcept
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.end();
                 }
 
-                std::pair<iterator, bool> insert_or_assign(K&& k, V&& v) 
+                std::pair<const_iterator, bool> insert_or_assign(K&& k, V&& v) 
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.insert_or_assign(k, v);
+                    auto ret = m_data.insert(std::make_pair(k, std::forward<V>(v)));
+                    if (!ret.second)
+                    {
+                        ret.first->second = std::forward<V>(v);
+                        ret.second = true;
+                    }
+                    return ret;
                 }
 
                 bool assign_if_equal(K&& k, const V& expected, V&& desired)
@@ -285,7 +292,7 @@ namespace SPTAG
                 }
 
                 template<class P>
-                std::pair<iterator, bool> insert(P&& v)
+                std::pair<const_iterator, bool> insert(P&& v)
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.insert(v);
