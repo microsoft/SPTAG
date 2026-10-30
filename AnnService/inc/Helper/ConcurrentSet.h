@@ -233,52 +233,34 @@ namespace SPTAG
                 using const_iterator = typename ConcurrentMap<K, V>::const_iterator;
 
             public:
-                const_iterator find(const K& k) const
-                {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.find(k);
-                }
-
                 iterator find(const K &k)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.find(k);
                 }
 
                 iterator begin() noexcept
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.begin();
-                }
-
-                const_iterator begin() const noexcept
-                {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.begin();
                 }
 
                 iterator end() noexcept
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return m_data.end();
-                }
-
-                const_iterator end() const noexcept
-                {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.end();
                 }
 
                 std::pair<iterator, bool> insert_or_assign(K&& k, V&& v) 
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     m_data[k] = v;
                     return std::make_pair(m_data.find(k), true);
                 }
 
                 bool assign_if_equal(K&& k, const V& expected, V&& desired)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     auto iter = m_data.find(k);
                     if (iter != m_data.end() && iter->second == expected) {
                         iter->second = desired;
@@ -290,7 +272,7 @@ namespace SPTAG
                 template <typename Predicate>
                 bool assign_if(K&& k, V&& desired, Predicate&& predicate)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     auto iter = m_data.find(k);
                     if (iter != m_data.end() && predicate(iter->second)) {
                         iter->second = desired;
@@ -301,30 +283,30 @@ namespace SPTAG
 
                 size_t erase(const K& k)
                 {
-                    std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.unsafe_erase(k);
                 }
 
                 template<class P>
                 std::pair<iterator, bool> insert(P&& v)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.insert(v);
                 }
 
                 void clear()
                 {
-                    std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_lock);
                     m_data.clear();
                 }
                 
-                size_t size() const
+                size_t size()
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    std::shared_lock<std::shared_timed_mutex> lock(m_lock);
                     return m_data.size();
                 }
             private:
-                std::shared_timed_mutex* m_lock;
+                std::shared_timed_mutex m_lock;
                 ConcurrentMap<K, V> m_data;
             };
 #endif
