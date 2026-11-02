@@ -2530,10 +2530,10 @@ namespace SPTAG::SPANN {
                 for (int tid = 0; tid < m_opt->m_iSSDNumberOfThreads; tid++)
                 {
                     mythreads.emplace_back([&, tid]() {
-                        size_t i = 0;
+                        SizeType i = 0;
                         while (true)
                         {
-                            i = sent.fetch_add(1);
+                            i = (SizeType)sent.fetch_add(1);
                             if (i < m_opt->m_vectorSize)
                             {
                                 m_versionMap->SetVersion(i, m_versionMap->Default());
