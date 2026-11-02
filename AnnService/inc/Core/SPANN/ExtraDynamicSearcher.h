@@ -2493,23 +2493,66 @@ namespace SPTAG::SPANN {
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
 #ifdef TIKV
+            // Initialize TiKV version map
+            // if p_localToGlobal.R() > 0, initialize TiKV version map with all deleted except the entries in the p_localToGlobal mapping
+            // If p_localToGlobal.R() == 0, initialize TiKV version map with all default
             if (auto* tikvMap = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get())) {
                 tikvMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize,
                                     p_headIndex->m_iDataCapacity, &p_localToGlobal);
             }
-#endif
-
+#else
+        {
+            std::vector<std::thread> mythreads;
+            mythreads.reserve(m_opt->m_iSSDNumberOfThreads);
+            std::atomic_size_t sent(0);
             m_versionMap->DeleteAll();
             if (p_localToGlobal.R() > 0) {
-                for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
-                    SizeType globalID = *(p_localToGlobal[i]);
-                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, m_versionMap->Default());
+                for (int tid = 0; tid < m_opt->m_iSSDNumberOfThreads; tid++)
+                {
+                    mythreads.emplace_back([&, tid]() {
+                        size_t i = 0;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < p_localToGlobal.R())
+                            {
+                                SizeType globalID = *(p_localToGlobal[i]);
+                                m_versionMap->SetVersion(globalID, m_versionMap->Default());
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
                 }
             } else {
-                for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
-                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, m_versionMap->Default());
+                for (int tid = 0; tid < m_opt->m_iSSDNumberOfThreads; tid++)
+                {
+                    mythreads.emplace_back([&, tid]() {
+                        size_t i = 0;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < m_opt->m_vectorSize)
+                            {
+                                m_versionMap->SetVersion(i, m_versionMap->Default());
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
                 }
             }
+            for (auto &t : mythreads)
+            {
+                t.join();
+            }
+            mythreads.clear();
+        }
+#endif
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize p_localToGlobal(%lld) and versionMap (%lld)\n", (std::int64_t)p_localToGlobal.R(), (std::int64_t)m_versionMap->Count());
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
