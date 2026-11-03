@@ -1,0 +1,50 @@
+[
+  {
+    "name": "/qianxi-sift10m-tikv-layer1-build80-20261103-pd1",
+    "state": {
+      "Running": false,
+      "ExitCode": 0,
+      "OOMKilled": false
+    }
+  },
+  {
+    "name": "/qianxi-sift10m-tikv-layer1-build80-20261103-pd2",
+    "state": {
+      "Running": false,
+      "ExitCode": 0,
+      "OOMKilled": false
+    }
+  },
+  {
+    "name": "/qianxi-sift10m-tikv-layer1-build80-20261103-pd3",
+    "state": {
+      "Running": false,
+      "ExitCode": 0,
+      "OOMKilled": false
+    }
+  },
+  {
+    "name": "/qianxi-sift10m-tikv-layer1-build80-20261103-tikv1",
+    "state": {
+      "Running": false,
+      "ExitCode": 0,
+      "OOMKilled": false
+    }
+  },
+  {
+    "name": "/qianxi-sift10m-tikv-layer1-build80-20261103-tikv2",
+    "state": {
+      "Running": false,
+      "ExitCode": 0,
+      "OOMKilled": false
+    }
+  },
+  {
+    "name": "/qianxi-sift10m-tikv-layer1-build80-20261103-tikv3",
+    "state": {
+      "Running": false,
+      "ExitCode": 0,
+      "OOMKilled": false
+    }
+  }
+]
