@@ -1,0 +1,257 @@
+[1] 2026-11-03 08:37:52 Using AVX2 InstructionSet!
+[1] 2026-11-03 08:37:52 Setting DataBlockSize with value 1048576
+[1] 2026-11-03 08:37:52 Setting DataCapacity with value 2147483647
+[1] 2026-11-03 08:37:52 Setting DeletedIDs with value DeletedIDs.bin
+[1] 2026-11-03 08:37:52 Setting DeleteHeadVectors with value false
+[1] 2026-11-03 08:37:52 Setting Dim with value 128
+[1] 2026-11-03 08:37:52 Setting DistCalcMethod with value L2
+[1] 2026-11-03 08:37:52 Setting GenerateTruth with value false
+[1] 2026-11-03 08:37:52 Setting GlobalIDPath with value 
+[1] 2026-11-03 08:37:52 Setting HeadIndexFolder with value HeadIndex
+[1] 2026-11-03 08:37:52 Setting HeadVectorIDs with value SPTAGHeadVectorIDs.bin
+[1] 2026-11-03 08:37:52 Setting HeadVectors with value SPTAGHeadVectors.bin
+[1] 2026-11-03 08:37:52 Setting IndexAlgoType with value BKT
+[1] 2026-11-03 08:37:52 Setting IndexDirectory with value /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9
+[1] 2026-11-03 08:37:52 Setting QuantizerFilePath with value 
+[1] 2026-11-03 08:37:52 Setting QueryDelimiter with value |
+[1] 2026-11-03 08:37:52 Setting QueryPath with value 
+[1] 2026-11-03 08:37:52 Setting QuerySize with value -1
+[1] 2026-11-03 08:37:52 Setting QueryType with value Undefined
+[1] 2026-11-03 08:37:52 Setting SSDIndex with value SPTAGFullList.bin
+[1] 2026-11-03 08:37:52 Setting SSDIndexFileNum with value 1
+[1] 2026-11-03 08:37:52 Setting TruthPath with value 
+[1] 2026-11-03 08:37:52 Setting TruthType with value Undefined
+[1] 2026-11-03 08:37:52 Setting ValueType with value UInt8
+[1] 2026-11-03 08:37:52 Setting VectorDelimiter with value |
+[1] 2026-11-03 08:37:52 Setting VectorPath with value perftest_vector.bin.UInt8_9900000_128
+[1] 2026-11-03 08:37:52 Setting VectorSize with value 10000000
+[1] 2026-11-03 08:37:52 Setting VectorType with value DEFAULT
+[1] 2026-11-03 08:37:52 Setting WarmupDelimiter with value |
+[1] 2026-11-03 08:37:52 Setting WarmupPath with value 
+[1] 2026-11-03 08:37:52 Setting WarmupSize with value -1
+[1] 2026-11-03 08:37:52 Setting WarmupType with value Undefined
+[1] 2026-11-03 08:37:52 Setting AnalyzeOnly with value false
+[1] 2026-11-03 08:37:52 Setting BKTKmeansK with value 32
+[1] 2026-11-03 08:37:52 Setting BKTLambdaFactor with value -1.000000
+[1] 2026-11-03 08:37:52 Setting BKTLeafSize with value 8
+[1] 2026-11-03 08:37:52 Setting CalcStd with value false
+[1] 2026-11-03 08:37:52 Setting Count with value 0
+[1] 2026-11-03 08:37:52 Setting isExecute with value true
+[1] 2026-11-03 08:37:52 Setting NoOutput with value false
+[1] 2026-11-03 08:37:52 Setting NumberOfThreads with value 80
+[1] 2026-11-03 08:37:52 Setting ParallelBKTBuild with value true
+[1] 2026-11-03 08:37:52 Setting PrintSizeCount with value true
+[1] 2026-11-03 08:37:52 Setting Ratio with value 0.200000
+[1] 2026-11-03 08:37:52 Setting RecursiveCheckSmallCluster with value true
+[1] 2026-11-03 08:37:52 Setting SamplesNumber with value 1000
+[1] 2026-11-03 08:37:52 Setting SaveBKT with value false
+[1] 2026-11-03 08:37:52 Setting SelectDynamically with value true
+[1] 2026-11-03 08:37:52 Setting SelectHeadType with value BKT
+[1] 2026-11-03 08:37:52 Setting SelectThreshold with value 5
+[1] 2026-11-03 08:37:52 Setting SplitFactor with value 5
+[1] 2026-11-03 08:37:52 Setting SplitMaxTry with value 8
+[1] 2026-11-03 08:37:52 Setting SplitThreshold with value 10
+[1] 2026-11-03 08:37:52 Setting TreeNumber with value 1
+[1] 2026-11-03 08:37:52 Setting AddCEF with value 500
+[1] 2026-11-03 08:37:52 Setting AddCountForRebuild with value 10000
+[1] 2026-11-03 08:37:52 Setting BKTKmeansK with value 32
+[1] 2026-11-03 08:37:52 Setting BKTLambdaFactor with value 100.000000
+[1] 2026-11-03 08:37:52 Setting BKTLeafSize with value 8
+[1] 2026-11-03 08:37:52 Setting BKTNumber with value 1
+[1] 2026-11-03 08:37:52 Setting CEF with value 1000
+[1] 2026-11-03 08:37:52 Setting DataBlockSize with value 1048576
+[1] 2026-11-03 08:37:52 Setting DataCapacity with value 2147483647
+[1] 2026-11-03 08:37:52 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-03 08:37:52 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-03 08:37:52 Setting DistCalcMethod with value L2
+[1] 2026-11-03 08:37:52 Setting EnableBfs with value 0
+[1] 2026-11-03 08:37:52 Setting EnableRebuild with value 0
+[1] 2026-11-03 08:37:52 Setting GPUGraphType with value 2
+[1] 2026-11-03 08:37:52 Setting GPULeafSize with value 500
+[1] 2026-11-03 08:37:52 Setting GPURefineDepth with value 30
+[1] 2026-11-03 08:37:52 Setting GPURefineSteps with value 0
+[1] 2026-11-03 08:37:52 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-03 08:37:52 Setting GraphFilePath with value graph.bin
+[1] 2026-11-03 08:37:52 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-03 08:37:52 Setting HashTableExponent with value 4
+[1] 2026-11-03 08:37:52 Setting HeadNumGPUs with value 1
+[1] 2026-11-03 08:37:52 Setting isExecute with value true
+[1] 2026-11-03 08:37:52 Setting MaxCheck with value 8192
+[1] 2026-11-03 08:37:52 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-03 08:37:52 Setting MetaRecordSize with value 10
+[1] 2026-11-03 08:37:52 Setting NeighborhoodSize with value 32
+[1] 2026-11-03 08:37:52 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-03 08:37:52 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-03 08:37:52 Setting NumberOfThreads with value 80
+[1] 2026-11-03 08:37:52 Setting NumTopDimensionTpTreeSplit with value 5
+[1] 2026-11-03 08:37:52 Setting ParallelBKTBuild with value true
+[1] 2026-11-03 08:37:52 Setting ParallelTPTBuild with value true
+[1] 2026-11-03 08:37:52 Setting RefineIterations with value 2
+[1] 2026-11-03 08:37:52 Setting RNGFactor with value 1.000000
+[1] 2026-11-03 08:37:52 Setting Samples with value 1000
+[1] 2026-11-03 08:37:52 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-03 08:37:52 Setting TPTBalanceFactor with value 2
+[1] 2026-11-03 08:37:52 Setting TPTLeafSize with value 2000
+[1] 2026-11-03 08:37:52 Setting TPTNumber with value 32
+[1] 2026-11-03 08:37:52 Setting TreeFilePath with value tree.bin
+[1] 2026-11-03 08:37:52 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-03 08:37:52 Setting AllowZeroReplica with value false
+[1] 2026-11-03 08:37:52 Setting AppendThreadNum with value 48
+[1] 2026-11-03 08:37:52 Setting AsyncAppendQueueSize with value 0
+[1] 2026-11-03 08:37:52 Setting AsyncMergeInSearch with value false
+[1] 2026-11-03 08:37:52 Setting AsyncRpcMaxInflight with value 0
+[1] 2026-11-03 08:37:52 Setting Batch with value 1000
+[1] 2026-11-03 08:37:52 Setting Batches with value 1
+[1] 2026-11-03 08:37:52 Setting BufferLength with value 4
+[1] 2026-11-03 08:37:52 Setting BuildSsdIndex with value true
+[1] 2026-11-03 08:37:52 Setting CacheShards with value 1
+[1] 2026-11-03 08:37:52 Setting CacheSizeGB with value 0
+[1] 2026-11-03 08:37:52 Setting CalTruth with value true
+[1] 2026-11-03 08:37:52 Setting CenteringToZero with value false
+[1] 2026-11-03 08:37:52 Setting ChecksumCheck with value false
+[1] 2026-11-03 08:37:52 Setting ChecksumFile with value checksum
+[1] 2026-11-03 08:37:52 Setting ChecksumInRead with value false
+[1] 2026-11-03 08:37:52 Setting ConsistencyCheck with value false
+[1] 2026-11-03 08:37:52 Setting Days with value 0
+[1] 2026-11-03 08:37:52 Setting DebugBuildInternalResultNum with value 64
+[1] 2026-11-03 08:37:52 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-03 08:37:52 Setting DeleteQPS with value -1
+[1] 2026-11-03 08:37:52 Setting DictBufferCapacity with value 204800
+[1] 2026-11-03 08:37:52 Setting DisableCheckpoint with value false
+[1] 2026-11-03 08:37:52 Setting DisableReassign with value false
+[1] 2026-11-03 08:37:52 Setting DistributedVersionMap with value true
+[1] 2026-11-03 08:37:52 Setting EnableADC with value false
+[1] 2026-11-03 08:37:52 Setting EnableDataCompression with value false
+[1] 2026-11-03 08:37:52 Setting EnableDeltaEncoding with value false
+[1] 2026-11-03 08:37:52 Setting EnableDictTraining with value true
+[1] 2026-11-03 08:37:52 Setting EnablePostingListRearrange with value false
+[1] 2026-11-03 08:37:52 Setting EnableWAL with value false
+[1] 2026-11-03 08:37:52 Setting EndVectorNum with value -1
+[1] 2026-11-03 08:37:52 Setting ExcludeHead with value false
+[1] 2026-11-03 08:37:52 Setting FullDeletedIDFile with value fulldeleted
+[1] 2026-11-03 08:37:52 Setting FullVectorPath with value 
+[1] 2026-11-03 08:37:52 Setting GPUSSDLeafSize with value 200
+[1] 2026-11-03 08:37:52 Setting GPUSSDNumTrees with value 100
+[1] 2026-11-03 08:37:52 Setting GrowthFileSizeGB with value 10
+[1] 2026-11-03 08:37:52 Setting GrowthThreshold with value 0.050000
+[1] 2026-11-03 08:37:52 Setting HashTableExponent with value 4
+[1] 2026-11-03 08:37:52 Setting InPlace with value true
+[1] 2026-11-03 08:37:52 Setting InsertThreadNum with value 1
+[1] 2026-11-03 08:37:52 Setting InternalResultNum with value 64
+[1] 2026-11-03 08:37:52 Setting IOThreadsPerHandler with value 4
+[1] 2026-11-03 08:37:52 Setting IOTimeout with value 30
+[1] 2026-11-03 08:37:52 Setting isExecute with value true
+[1] 2026-11-03 08:37:52 Setting IterativeSearchHeadBatch with value 32
+[1] 2026-11-03 08:37:52 Setting KVFile with value rocksdb
+[1] 2026-11-03 08:37:52 Setting LatencyLimit with value 50.000000
+[1] 2026-11-03 08:37:52 Setting Layers with value 1
+[1] 2026-11-03 08:37:52 Setting LoadAllVectors with value false
+[1] 2026-11-03 08:37:52 Setting LogFile with value 
+[1] 2026-11-03 08:37:52 Setting MaxCheck with value 8192
+[1] 2026-11-03 08:37:52 Setting MaxDistRatio with value 10000.000000
+[1] 2026-11-03 08:37:52 Setting MaxFileSizeGB with value 300
+[1] 2026-11-03 08:37:52 Setting MaxID with value 1000000000
+[1] 2026-11-03 08:37:52 Setting MaxInternalResultNum with value -1
+[1] 2026-11-03 08:37:52 Setting MergeThreshold with value 10
+[1] 2026-11-03 08:37:52 Setting MinDictTrainingBufferSize with value 10240000
+[1] 2026-11-03 08:37:52 Setting MinInternalResultNum with value -1
+[1] 2026-11-03 08:37:52 Setting NumberOfThreads with value 80
+[1] 2026-11-03 08:37:52 Setting NumGPUs with value 1
+[1] 2026-11-03 08:37:52 Setting OneClusterCutMax with value true
+[1] 2026-11-03 08:37:52 Setting OnlySearchFinalBatch with value false
+[1] 2026-11-03 08:37:52 Setting OutOfPlace with value false
+[1] 2026-11-03 08:37:52 Setting OutputEmptyReplicaID with value false
+[1] 2026-11-03 08:37:52 Setting PersistentBufferPath with value 
+[1] 2026-11-03 08:37:52 Setting PostingCountCacheCapacity with value 100000
+[1] 2026-11-03 08:37:52 Setting PostingPageLimit with value 4
+[1] 2026-11-03 08:37:52 Setting PostingVectorLimit with value 118
+[1] 2026-11-03 08:37:52 Setting QpsLimit with value 0
+[1] 2026-11-03 08:37:52 Setting QueryCountLimit with value 2147483647
+[1] 2026-11-03 08:37:52 Setting ReassignK with value 64
+[1] 2026-11-03 08:37:52 Setting ReassignThreadNum with value 0
+[1] 2026-11-03 08:37:52 Setting RecallAnalysis with value false
+[1] 2026-11-03 08:37:52 Setting RecallTestSampleNumber with value 100
+[1] 2026-11-03 08:37:52 Setting Recovery with value false
+[1] 2026-11-03 08:37:52 Setting ReplicaCount with value 8
+[1] 2026-11-03 08:37:52 Setting Rerank with value 0
+[1] 2026-11-03 08:37:52 Setting ResultNum with value 10
+[1] 2026-11-03 08:37:52 Setting ResumeLayer with value -1
+[1] 2026-11-03 08:37:52 Setting RNGFactor with value 1.000000
+[1] 2026-11-03 08:37:52 Setting Sampling with value 4
+[1] 2026-11-03 08:37:52 Setting SearchCheckVersionMapOnlyLayer0 with value true
+[1] 2026-11-03 08:37:52 Setting SearchDuringUpdate with value true
+[1] 2026-11-03 08:37:52 Setting SearchInternalResultNum with value 64
+[1] 2026-11-03 08:37:52 Setting SearchPostingPageLimit with value 4
+[1] 2026-11-03 08:37:52 Setting SearchResult with value 
+[1] 2026-11-03 08:37:52 Setting SearchThreadNum with value 32
+[1] 2026-11-03 08:37:52 Setting SearchTimes with value 1
+[1] 2026-11-03 08:37:52 Setting ShareDB with value true
+[1] 2026-11-03 08:37:52 Setting ShowUpdateProgress with value true
+[1] 2026-11-03 08:37:52 Setting SpdkBatchSize with value 64
+[1] 2026-11-03 08:37:52 Setting SsdInfoFile with value ssdinfo
+[1] 2026-11-03 08:37:52 Setting SsdMappingFile with value ssdmapping
+[1] 2026-11-03 08:37:52 Setting StartFileSizeGB with value 1
+[1] 2026-11-03 08:37:52 Setting SteadyState with value true
+[1] 2026-11-03 08:37:52 Setting Step with value 0
+[1] 2026-11-03 08:37:52 Setting StepInternalResultNum with value -1
+[1] 2026-11-03 08:37:52 Setting Storage with value FILEIO
+[1] 2026-11-03 08:37:52 Setting StressTest with value false
+[1] 2026-11-03 08:37:52 Setting TiKVKeyPrefix with value spann
+[1] 2026-11-03 08:37:52 Setting TiKVPDAddresses with value 127.0.0.1:2379
+[1] 2026-11-03 08:37:52 Setting TmpDir with value tmpdir
+[1] 2026-11-03 08:37:52 Setting TruthFilePrefix with value 
+[1] 2026-11-03 08:37:52 Setting TruthResultNum with value -1
+[1] 2026-11-03 08:37:52 Setting Update with value true
+[1] 2026-11-03 08:37:52 Setting UpdateFilePrefix with value 
+[1] 2026-11-03 08:37:52 Setting UpdateMappingPrefix with value 
+[1] 2026-11-03 08:37:52 Setting UseDirectIO with value false
+[1] 2026-11-03 08:37:52 Setting UseMultiChunkPosting with value false
+[1] 2026-11-03 08:37:52 Setting VersionChunkSize with value 4096
+[1] 2026-11-03 08:37:52 Setting ZstdCompressLevel with value 0
+[1] 2026-11-03 08:37:52 Setting IndexDirectory with value /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9
+[1] 2026-11-03 08:37:52 Load Vector (1971666,128) Finish!
+[1] 2026-11-03 08:37:52 Load BKT (1,1967714) Finish!
+[1] 2026-11-03 08:37:52 Load RNG (1971666,32) Finish!
+[1] 2026-11-03 08:37:52 Load DeleteID (1971666,1) Finish!
+[1] 2026-11-03 08:37:52 Setting NumberOfThreads with value 80
+[1] 2026-11-03 08:37:52 Setting MaxCheck with value 8192
+[1] 2026-11-03 08:37:52 Setting HashTableExponent with value 4
+[1] 2026-11-03 08:37:52 Loading headID map
+[1] 2026-11-03 08:37:52 Load Data (1971666,1) Finish!
+[1] 2026-11-03 08:37:53 SPANNIndex:UseFileIO
+[1] 2026-11-03 08:37:53 Load mapping From /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0
+[1] 2026-11-03 08:37:53 Load block mapping (1971659,10) Finish!
+[1] 2026-11-03 08:37:53 Load block mapping successfully from /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0!
+[1] 2026-11-03 08:37:53 FileIO::BlockController::Initialize(ssdmapping_0, 64)
+[1] 2026-11-03 08:37:53 AsyncFileIO::Open a file
+[1] 2026-11-03 08:37:53 AsyncFileIO::InitializeFileIo: file has been created with enough space.
+[1] 2026-11-03 08:37:53 AsyncFileIO::InitializeFileIo: file /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0_postings opened, fd=12 threads=258 maxNumBlocks=64
+[1] 2026-11-03 08:37:53 FileIO::BlockController:Loading block pool from file:/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0_postings
+[1] 2026-11-03 08:37:53 FileIO::BlockController::Load blockpool from /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0_postings_blockpool
+[1] 2026-11-03 08:37:53 FileIO::BlockController::LoadBlockPool: reading 2019565 free blocks into pool (7.00 GB), total allocated: 5505024 blocks
+[1] 2026-11-03 08:37:54 FileIO::BlockController::LoadBlockPool: block pool initialized. Available: 2019565, Total allocated: 5505024
+[1] 2026-11-03 08:37:54 Setting index with posting page limit:4
+[1] 2026-11-03 08:37:54 Using local in-memory VersionMap (layer=0)
+[1] 2026-11-03 08:37:54 Posting size limit: 123, search limit: 50.000000, merge threshold: 10
+[1] 2026-11-03 08:37:54 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=true UseMultiChunkPosting=false PostingPageLimit=4
+[1] 2026-11-03 08:37:54 Loading storage
+[1] 2026-11-03 08:37:54 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-03 08:37:54 Load mapping From /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/DeletedIDs.bin_0
+[1] 2026-11-03 08:37:55 Load mapping (10000000, 1) Finish!
+[1] 2026-11-03 08:37:55 SPFresh: initialize thread pools, append: 48, reassign 0
+[1] 2026-11-03 08:37:55 SPFresh: finish initialization
+[1] 2026-11-03 08:37:55 Load MetaIndex(10000000) Meta(68888890) Offset(0)
+VERIFIED: saved index reload reports 10000000 samples; contained IDs exactly [0,10000000); all 100000 inserted metadata entries map bijectively within their batches.
+[1] 2026-11-03 08:37:56 Save mapping To /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0
+[1] 2026-11-03 08:37:57 Save block mapping (1971659, 10) Finish! Total: 1971659
+[1] 2026-11-03 08:37:57 FileIO:BlockController:ShutDown!
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Total allocated blocks: 5505024
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Remaining free blocks: 2019565
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Saving to file: /mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index_9/ssdmapping_0_postings_blockpool
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-03 08:37:57 FileIO::BlockController::Close file handler
+[1] 2026-11-03 08:38:01 AsyncFileReader: ShutDown!
+[1] 2026-11-03 08:38:01 AsyncFileReader: Destroying fd=12!

@@ -1,0 +1,414 @@
+{
+  "status": "benchmark_and_counts_verified",
+  "configuration": {
+    "vectorPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-folly-countfix-20261103/input/sift-first-10m.u8bin",
+    "queryPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-folly-countfix-20261103/input/query.10K.u8bin",
+    "truthPath": "perftest_batchtruth.L2.UInt8_9900000_128_10000_5_10000_0_10",
+    "indexPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103/fileio/index",
+    "quantizerPath": "",
+    "ValueType": "UInt8",
+    "dimension": 128,
+    "baseVectorCount": 9900000,
+    "insertVectorCount": 100000,
+    "DeleteVectorCount": 0,
+    "BatchNum": 10,
+    "topK": 5,
+    "numQueries": 10000,
+    "numSearchThreads": 32,
+    "numInsertThreads": 16,
+    "layers": 1,
+    "DistMethod": "L2"
+  },
+  "backend": "FILEIO",
+  "folly": true,
+  "query_rounds": [
+    {
+      "phase": 0,
+      "active_vectors": 9900000,
+      "round": 1,
+      "recall_at_5": 0.9586,
+      "mean_ms": 4.7129,
+      "p95_ms": 5.765,
+      "p99_ms": 8.169,
+      "qps": 6766.8521
+    },
+    {
+      "phase": 0,
+      "active_vectors": 9900000,
+      "round": 2,
+      "recall_at_5": 0.9586,
+      "mean_ms": 4.8178,
+      "p95_ms": 5.878,
+      "p99_ms": 6.266,
+      "qps": 6617.9458
+    },
+    {
+      "phase": 1,
+      "active_vectors": 9910000,
+      "round": 1,
+      "recall_at_5": 0.9584,
+      "mean_ms": 4.8585,
+      "p95_ms": 5.907,
+      "p99_ms": 9.639,
+      "qps": 6562.6792
+    },
+    {
+      "phase": 1,
+      "active_vectors": 9910000,
+      "round": 2,
+      "recall_at_5": 0.9584,
+      "mean_ms": 4.8305,
+      "p95_ms": 5.858,
+      "p99_ms": 6.821,
+      "qps": 6600.5469
+    },
+    {
+      "phase": 2,
+      "active_vectors": 9920000,
+      "round": 1,
+      "recall_at_5": 0.9584,
+      "mean_ms": 4.9138,
+      "p95_ms": 5.942,
+      "p99_ms": 7.7,
+      "qps": 6490.2109
+    },
+    {
+      "phase": 2,
+      "active_vectors": 9920000,
+      "round": 2,
+      "recall_at_5": 0.9584,
+      "mean_ms": 5.0569,
+      "p95_ms": 6.117,
+      "p99_ms": 7.452,
+      "qps": 6306.5776
+    },
+    {
+      "phase": 3,
+      "active_vectors": 9930000,
+      "round": 1,
+      "recall_at_5": 0.9583,
+      "mean_ms": 4.9774,
+      "p95_ms": 6.046,
+      "p99_ms": 6.405,
+      "qps": 6406.0967
+    },
+    {
+      "phase": 3,
+      "active_vectors": 9930000,
+      "round": 2,
+      "recall_at_5": 0.9583,
+      "mean_ms": 5.2925,
+      "p95_ms": 7.471,
+      "p99_ms": 12.271,
+      "qps": 6026.0967
+    },
+    {
+      "phase": 4,
+      "active_vectors": 9940000,
+      "round": 1,
+      "recall_at_5": 0.9583,
+      "mean_ms": 4.9855,
+      "p95_ms": 6.076,
+      "p99_ms": 10.083,
+      "qps": 6395.4976
+    },
+    {
+      "phase": 4,
+      "active_vectors": 9940000,
+      "round": 2,
+      "recall_at_5": 0.9583,
+      "mean_ms": 5.0612,
+      "p95_ms": 6.251,
+      "p99_ms": 9.847,
+      "qps": 6300.0854
+    },
+    {
+      "phase": 5,
+      "active_vectors": 9950000,
+      "round": 1,
+      "recall_at_5": 0.9582,
+      "mean_ms": 5.4923,
+      "p95_ms": 6.577,
+      "p99_ms": 10.577,
+      "qps": 5805.0938
+    },
+    {
+      "phase": 5,
+      "active_vectors": 9950000,
+      "round": 2,
+      "recall_at_5": 0.9582,
+      "mean_ms": 5.7041,
+      "p95_ms": 8.003,
+      "p99_ms": 12.032,
+      "qps": 5590.6899
+    },
+    {
+      "phase": 6,
+      "active_vectors": 9960000,
+      "round": 1,
+      "recall_at_5": 0.9582,
+      "mean_ms": 5.5752,
+      "p95_ms": 6.744,
+      "p99_ms": 7.265,
+      "qps": 5720.9839
+    },
+    {
+      "phase": 6,
+      "active_vectors": 9960000,
+      "round": 2,
+      "recall_at_5": 0.9582,
+      "mean_ms": 5.7588,
+      "p95_ms": 7.179,
+      "p99_ms": 11.808,
+      "qps": 5539.9668
+    },
+    {
+      "phase": 7,
+      "active_vectors": 9970000,
+      "round": 1,
+      "recall_at_5": 0.9582,
+      "mean_ms": 5.6707,
+      "p95_ms": 6.924,
+      "p99_ms": 11.878,
+      "qps": 5623.4048
+    },
+    {
+      "phase": 7,
+      "active_vectors": 9970000,
+      "round": 2,
+      "recall_at_5": 0.9582,
+      "mean_ms": 5.6604,
+      "p95_ms": 6.85,
+      "p99_ms": 8.552,
+      "qps": 5632.7397
+    },
+    {
+      "phase": 8,
+      "active_vectors": 9980000,
+      "round": 1,
+      "recall_at_5": 0.9583,
+      "mean_ms": 5.7596,
+      "p95_ms": 7.169,
+      "p99_ms": 11.84,
+      "qps": 5538.0093
+    },
+    {
+      "phase": 8,
+      "active_vectors": 9980000,
+      "round": 2,
+      "recall_at_5": 0.9583,
+      "mean_ms": 5.5084,
+      "p95_ms": 6.671,
+      "p99_ms": 8.514,
+      "qps": 5788.6987
+    },
+    {
+      "phase": 9,
+      "active_vectors": 9990000,
+      "round": 1,
+      "recall_at_5": 0.9584,
+      "mean_ms": 4.9577,
+      "p95_ms": 6.009,
+      "p99_ms": 7.711,
+      "qps": 6430.1816
+    },
+    {
+      "phase": 9,
+      "active_vectors": 9990000,
+      "round": 2,
+      "recall_at_5": 0.9584,
+      "mean_ms": 4.9812,
+      "p95_ms": 6.05,
+      "p99_ms": 6.406,
+      "qps": 6399.6929
+    },
+    {
+      "phase": 10,
+      "active_vectors": 10000000,
+      "round": 1,
+      "recall_at_5": 0.9584,
+      "mean_ms": 5.0028,
+      "p95_ms": 6.04,
+      "p99_ms": 7.566,
+      "qps": 6373.8315
+    },
+    {
+      "phase": 10,
+      "active_vectors": 10000000,
+      "round": 2,
+      "recall_at_5": 0.9584,
+      "mean_ms": 5.0277,
+      "p95_ms": 6.094,
+      "p99_ms": 8.875,
+      "qps": 6341.2988
+    }
+  ],
+  "insertions": [
+    {
+      "phase": 1,
+      "inserted": 10000,
+      "insert_seconds": 11.2554,
+      "insert_vectors_per_second": 888.463,
+      "load_seconds": 3.1402,
+      "clone_seconds": 44.4157,
+      "save_seconds": 2.9561
+    },
+    {
+      "phase": 2,
+      "inserted": 10000,
+      "insert_seconds": 2.1113,
+      "insert_vectors_per_second": 4736.3419,
+      "load_seconds": 2.8832,
+      "clone_seconds": 34.3293,
+      "save_seconds": 3.4308
+    },
+    {
+      "phase": 3,
+      "inserted": 10000,
+      "insert_seconds": 1.9385,
+      "insert_vectors_per_second": 5158.5347,
+      "load_seconds": 2.787,
+      "clone_seconds": 34.388,
+      "save_seconds": 3.1316
+    },
+    {
+      "phase": 4,
+      "inserted": 10000,
+      "insert_seconds": 2.0114,
+      "insert_vectors_per_second": 4971.7582,
+      "load_seconds": 3.0147,
+      "clone_seconds": 34.9371,
+      "save_seconds": 2.9445
+    },
+    {
+      "phase": 5,
+      "inserted": 10000,
+      "insert_seconds": 2.1496,
+      "insert_vectors_per_second": 4651.9761,
+      "load_seconds": 2.8435,
+      "clone_seconds": 33.999,
+      "save_seconds": 3.0125
+    },
+    {
+      "phase": 6,
+      "inserted": 10000,
+      "insert_seconds": 2.1232,
+      "insert_vectors_per_second": 4709.7964,
+      "load_seconds": 2.8612,
+      "clone_seconds": 34.2763,
+      "save_seconds": 2.9931
+    },
+    {
+      "phase": 7,
+      "inserted": 10000,
+      "insert_seconds": 2.1327,
+      "insert_vectors_per_second": 4688.9912,
+      "load_seconds": 3.075,
+      "clone_seconds": 34.2333,
+      "save_seconds": 3.1226
+    },
+    {
+      "phase": 8,
+      "inserted": 10000,
+      "insert_seconds": 2.1586,
+      "insert_vectors_per_second": 4632.6454,
+      "load_seconds": 2.8988,
+      "clone_seconds": 34.657,
+      "save_seconds": 3.0492
+    },
+    {
+      "phase": 9,
+      "inserted": 10000,
+      "insert_seconds": 2.0207,
+      "insert_vectors_per_second": 4948.6897,
+      "load_seconds": 3.1607,
+      "clone_seconds": 35.0865,
+      "save_seconds": 2.982
+    },
+    {
+      "phase": 10,
+      "inserted": 10000,
+      "insert_seconds": 1.9161,
+      "insert_vectors_per_second": 5219.0242,
+      "load_seconds": 2.9321,
+      "clone_seconds": 34.5032,
+      "save_seconds": 2.936
+    }
+  ],
+  "count_validation": {
+    "status": "verified",
+    "layer0_checkpoints": [
+      [
+        "1",
+        "9910000",
+        "0",
+        "9910000"
+      ],
+      [
+        "2",
+        "9920000",
+        "0",
+        "9920000"
+      ],
+      [
+        "3",
+        "9930000",
+        "0",
+        "9930000"
+      ],
+      [
+        "4",
+        "9940000",
+        "0",
+        "9940000"
+      ],
+      [
+        "5",
+        "9950000",
+        "0",
+        "9950000"
+      ],
+      [
+        "6",
+        "9960000",
+        "0",
+        "9960000"
+      ],
+      [
+        "7",
+        "9970000",
+        "0",
+        "9970000"
+      ],
+      [
+        "8",
+        "9980000",
+        "0",
+        "9980000"
+      ],
+      [
+        "9",
+        "9990000",
+        "0",
+        "9990000"
+      ],
+      [
+        "10",
+        "10000000",
+        "0",
+        "10000000"
+      ]
+    ],
+    "final_reloaded_samples": 10000000,
+    "contained_ids": 10000000,
+    "inserted_metadata_bijection": 100000,
+    "scope": "Logical membership and metadata validation, not an exhaustive physical-posting scan."
+  },
+  "fileio_initialization_fix": "Runtime local-VersionMap fallback; validated by 5 regression cases and an 80-worker 9K-to-10K FILEIO run.",
+  "limitations": [
+    "Shared host; previously running vLLM tasks were stopped with authorization before this run. See host-state-start.json; this is not a dedicated-host measurement.",
+    "Layer-0-only VersionMap flag is retained but applies only to the TiKV backend.",
+    "Known pre-existing DedupCandidateTest failures; see binary-build-provenance.json.",
+    "No new recall or latency acceptance threshold was imposed."
+  ]
+}
