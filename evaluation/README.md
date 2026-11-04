@@ -9,6 +9,8 @@ or existing data.
 
 | Record | Scope | Status |
 | --- | --- | --- |
+| [2026-11-03 SIFT10M TiKV single-layer results](2026-11-03-sift10m-tikv-layer1/README.md) | FOLLY=ON; 80 build, 16 insert, 48 maintenance, 32 search threads; matching FILEIO workload | Completed; 22 measured rounds and exact 10M reload/count validation passed |
+| [2026-11-03 SIFT10M FILEIO single-layer results](2026-11-03-sift10m-fileio-layer1/README.md) | FOLLY=ON; 80 build threads; 9.9M + ten 10K inserts; 10K queries/pass, 32 search threads | Completed; exact 10M final reload/count validation passed; measured source fixes are local-only |
 | [2026-10-28 SIFT1M results](2026-10-28-sift1m/README.md) | Complete FILEIO baseline and post-fix TiKV build/update runs; [setup and run instructions](2026-10-28-sift1m/Reproduce.md) | Ten batches and 1M final vectors per backend; different executable revisions; single host |
 | [2026-10-23 SIFT1M measurements](2026-10-23-sift1m/README.md) | Historical `12/12/8` FILEIO update measurements and TiKV queries | Partial measurements, superseded as the current entry point |
 | [Historical 1M observations](historical/TiKV-1M.md) | Three old runs, single-machine multi-process TiKV | Revision and raw-log provenance incomplete; heap-bug impact unknown |
@@ -19,8 +21,9 @@ or existing data.
 
 ## New results
 
-The latest report is the default starting point for current measured behavior,
-not a replacement for historical evidence at untested scales. General operating
+The latest [FILEIO single-layer report](2026-11-03-sift10m-fileio-layer1/README.md)
+records successful completion/count validation and measured-source limitations.
+The complete SIFT1M guide remains the setup entry point. General operating
 instructions live in `docs/Benchmarking.md`; dated configurations, small result
 tables, and diagnostic tools belong alongside their report in this directory.
 

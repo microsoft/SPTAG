@@ -1,0 +1,138 @@
+[
+    {
+        "Id": "sha256:4996a18bf689914db5820748342710b9a37ed0aaa7816aec4a1e09e5a6b9c401",
+        "RepoTags": [],
+        "RepoDigests": [
+            "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e"
+        ],
+        "Created": "2026-04-28T04:16:50.858262694Z",
+        "Author": "Release Engineering (SIG/Core)",
+        "Config": {
+            "ExposedPorts": {
+                "2379/tcp": {},
+                "2380/tcp": {}
+            },
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Entrypoint": [
+                "/pd-server"
+            ],
+            "WorkingDir": "/",
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "org.opencontainers.image.source": "https://github.com/tikv/pd.git",
+                "org.opencontainers.image.title": "pd",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Size": 660944730,
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/9f9882e0a8ac51550574096dcc1c1f8beb6133279741ff015a9110750ff001d8/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/d81f9b9050583baff0249654f87b5c9785a83f2ca23b61f6098abee436579d79/merged",
+                "UpperDir": "/var/lib/docker/overlay2/d81f9b9050583baff0249654f87b5c9785a83f2ca23b61f6098abee436579d79/diff",
+                "WorkDir": "/var/lib/docker/overlay2/d81f9b9050583baff0249654f87b5c9785a83f2ca23b61f6098abee436579d79/work"
+            },
+            "Name": "overlay2"
+        },
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:c4a784d06d4716e97bc1a4a3ee384fb48a0aa25382cc7987993e79d985706845",
+                "sha256:97357033803987af8db35e99cb99cac26bd354c342c7f45ce6f02afd8b491c8c",
+                "sha256:451850ec35b6c4db56547622392a72f8d9908ff4c2805eb30c7c6da0dce83a8d",
+                "sha256:62edf24ec3ec64e6e00d4b55e99ee6f0aa30b8aa051bf5817fe5330ba34cf173",
+                "sha256:11745dcfc37321f4373ac7e008e6be33b5ada3d4eb03fcb5bf7e1fb54f65365a",
+                "sha256:5f257e86240a03abc7d543f261736b2087bcbeb5d960dbea7e2e50f499ae8438"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "0001-01-01T00:00:00Z"
+        }
+    },
+    {
+        "Id": "sha256:a55a2a42f390f2e3a1b1c4c7cee637eff8bef8f86d8231d2fcf49d30cedc52f2",
+        "RepoTags": [],
+        "RepoDigests": [
+            "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a"
+        ],
+        "Created": "2026-05-06T01:08:14.765735252Z",
+        "Author": "Release Engineering (SIG/Core)",
+        "Config": {
+            "ExposedPorts": {
+                "20160/tcp": {}
+            },
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "TZ=/etc/localtime",
+                "TZDIR=/usr/share/zoneinfo",
+                "MALLOC_CONF=prof:true,prof_active:false"
+            ],
+            "Entrypoint": [
+                "/tikv-server"
+            ],
+            "WorkingDir": "/",
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "org.opencontainers.image.source": "https://github.com/tikv/tikv.git",
+                "org.opencontainers.image.title": "tikv",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Size": 1056567406,
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/8d3c95e1278f515c41a372c8122a040f6e37863c09ecd52c18b91a135475307c/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/1986e26a00e8156fbe7c85b5aad55c2eee3d0811cb6cb0ada6d48341ee6bd6f5/merged",
+                "UpperDir": "/var/lib/docker/overlay2/1986e26a00e8156fbe7c85b5aad55c2eee3d0811cb6cb0ada6d48341ee6bd6f5/diff",
+                "WorkDir": "/var/lib/docker/overlay2/1986e26a00e8156fbe7c85b5aad55c2eee3d0811cb6cb0ada6d48341ee6bd6f5/work"
+            },
+            "Name": "overlay2"
+        },
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:c4a784d06d4716e97bc1a4a3ee384fb48a0aa25382cc7987993e79d985706845",
+                "sha256:97357033803987af8db35e99cb99cac26bd354c342c7f45ce6f02afd8b491c8c",
+                "sha256:451850ec35b6c4db56547622392a72f8d9908ff4c2805eb30c7c6da0dce83a8d",
+                "sha256:62edf24ec3ec64e6e00d4b55e99ee6f0aa30b8aa051bf5817fe5330ba34cf173",
+                "sha256:2d43ce0244b235792b63e42f64aec8c36fbdea3d54d8ddbc351a3df8b46e67b9",
+                "sha256:e28ac3908ccd7306c837d274b5515c0a75af4448b86c4169d5670fabebeabc0a"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "0001-01-01T00:00:00Z"
+        }
+    }
+]

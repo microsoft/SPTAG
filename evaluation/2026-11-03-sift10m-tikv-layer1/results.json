@@ -1,0 +1,426 @@
+{
+  "status": "benchmark_and_counts_verified",
+  "configuration": {
+    "vectorPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-folly-countfix-20261103/input/sift-first-10m.u8bin",
+    "queryPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-folly-countfix-20261103/input/query.10K.u8bin",
+    "truthPath": "perftest_batchtruth.L2.UInt8_9900000_128_10000_5_10000_0_10",
+    "indexPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-20261103/tikv/index",
+    "quantizerPath": "",
+    "ValueType": "UInt8",
+    "dimension": 128,
+    "baseVectorCount": 9900000,
+    "insertVectorCount": 100000,
+    "DeleteVectorCount": 0,
+    "BatchNum": 10,
+    "topK": 5,
+    "numQueries": 10000,
+    "numSearchThreads": 32,
+    "numInsertThreads": 16,
+    "layers": 1,
+    "DistMethod": "L2"
+  },
+  "backend": "TIKVIO",
+  "folly": true,
+  "query_rounds": [
+    {
+      "phase": 0,
+      "active_vectors": 9900000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 50.5414,
+      "p95_ms": 61.41,
+      "p99_ms": 65.129,
+      "qps": 632.5823
+    },
+    {
+      "phase": 0,
+      "active_vectors": 9900000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 50.6766,
+      "p95_ms": 61.684,
+      "p99_ms": 65.615,
+      "qps": 630.8964
+    },
+    {
+      "phase": 1,
+      "active_vectors": 9910000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 44.6812,
+      "p95_ms": 55.035,
+      "p99_ms": 59.667,
+      "qps": 715.4053
+    },
+    {
+      "phase": 1,
+      "active_vectors": 9910000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 40.6036,
+      "p95_ms": 48.472,
+      "p99_ms": 50.658,
+      "qps": 787.2518
+    },
+    {
+      "phase": 2,
+      "active_vectors": 9920000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 41.3447,
+      "p95_ms": 49.686,
+      "p99_ms": 53.582,
+      "qps": 773.2332
+    },
+    {
+      "phase": 2,
+      "active_vectors": 9920000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 42.7994,
+      "p95_ms": 51.521,
+      "p99_ms": 55.937,
+      "qps": 746.903
+    },
+    {
+      "phase": 3,
+      "active_vectors": 9930000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 39.3979,
+      "p95_ms": 46.517,
+      "p99_ms": 49.726,
+      "qps": 811.4282
+    },
+    {
+      "phase": 3,
+      "active_vectors": 9930000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 40.084,
+      "p95_ms": 47.789,
+      "p99_ms": 50.678,
+      "qps": 797.4769
+    },
+    {
+      "phase": 4,
+      "active_vectors": 9940000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 38.7911,
+      "p95_ms": 45.475,
+      "p99_ms": 47.793,
+      "qps": 824.09
+    },
+    {
+      "phase": 4,
+      "active_vectors": 9940000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 40.9944,
+      "p95_ms": 49.867,
+      "p99_ms": 53.257,
+      "qps": 779.9046
+    },
+    {
+      "phase": 5,
+      "active_vectors": 9950000,
+      "round": 1,
+      "recall_at_5": 0.9579,
+      "mean_ms": 42.2495,
+      "p95_ms": 50.516,
+      "p99_ms": 55.085,
+      "qps": 756.6098
+    },
+    {
+      "phase": 5,
+      "active_vectors": 9950000,
+      "round": 2,
+      "recall_at_5": 0.9579,
+      "mean_ms": 41.8205,
+      "p95_ms": 50.143,
+      "p99_ms": 53.72,
+      "qps": 764.3502
+    },
+    {
+      "phase": 6,
+      "active_vectors": 9960000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 42.4875,
+      "p95_ms": 51.751,
+      "p99_ms": 56.634,
+      "qps": 752.4596
+    },
+    {
+      "phase": 6,
+      "active_vectors": 9960000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 43.3995,
+      "p95_ms": 52.499,
+      "p99_ms": 57.373,
+      "qps": 736.6436
+    },
+    {
+      "phase": 7,
+      "active_vectors": 9970000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 40.6953,
+      "p95_ms": 49.822,
+      "p99_ms": 53.677,
+      "qps": 785.5035
+    },
+    {
+      "phase": 7,
+      "active_vectors": 9970000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 42.083,
+      "p95_ms": 51.855,
+      "p99_ms": 58.633,
+      "qps": 759.6604
+    },
+    {
+      "phase": 8,
+      "active_vectors": 9980000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 38.994,
+      "p95_ms": 46.128,
+      "p99_ms": 50.522,
+      "qps": 819.8151
+    },
+    {
+      "phase": 8,
+      "active_vectors": 9980000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 38.7441,
+      "p95_ms": 46.062,
+      "p99_ms": 49.195,
+      "qps": 825.1101
+    },
+    {
+      "phase": 9,
+      "active_vectors": 9990000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 38.2814,
+      "p95_ms": 44.699,
+      "p99_ms": 48.893,
+      "qps": 835.054
+    },
+    {
+      "phase": 9,
+      "active_vectors": 9990000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 38.5583,
+      "p95_ms": 45.83,
+      "p99_ms": 49.617,
+      "qps": 829.0792
+    },
+    {
+      "phase": 10,
+      "active_vectors": 10000000,
+      "round": 1,
+      "recall_at_5": 0.958,
+      "mean_ms": 43.4473,
+      "p95_ms": 53.345,
+      "p99_ms": 56.751,
+      "qps": 735.7241
+    },
+    {
+      "phase": 10,
+      "active_vectors": 10000000,
+      "round": 2,
+      "recall_at_5": 0.958,
+      "mean_ms": 42.4577,
+      "p95_ms": 51.315,
+      "p99_ms": 53.544,
+      "qps": 752.8906
+    }
+  ],
+  "insertions": [
+    {
+      "phase": 1,
+      "inserted": 10000,
+      "insert_seconds": 296.5614,
+      "insert_vectors_per_second": 33.7198,
+      "load_seconds": 1.1733,
+      "clone_seconds": 3.4327,
+      "save_seconds": 1.6822
+    },
+    {
+      "phase": 2,
+      "inserted": 10000,
+      "insert_seconds": 95.5254,
+      "insert_vectors_per_second": 104.6842,
+      "load_seconds": 1.1581,
+      "clone_seconds": 3.4675,
+      "save_seconds": 1.7905
+    },
+    {
+      "phase": 3,
+      "inserted": 10000,
+      "insert_seconds": 78.2376,
+      "insert_vectors_per_second": 127.8158,
+      "load_seconds": 1.1996,
+      "clone_seconds": 3.3142,
+      "save_seconds": 1.7471
+    },
+    {
+      "phase": 4,
+      "inserted": 10000,
+      "insert_seconds": 60.6569,
+      "insert_vectors_per_second": 164.8616,
+      "load_seconds": 1.4547,
+      "clone_seconds": 3.8866,
+      "save_seconds": 1.5295
+    },
+    {
+      "phase": 5,
+      "inserted": 10000,
+      "insert_seconds": 41.9825,
+      "insert_vectors_per_second": 238.1943,
+      "load_seconds": 1.1727,
+      "clone_seconds": 3.3718,
+      "save_seconds": 1.7381
+    },
+    {
+      "phase": 6,
+      "inserted": 10000,
+      "insert_seconds": 29.8384,
+      "insert_vectors_per_second": 335.1382,
+      "load_seconds": 1.2335,
+      "clone_seconds": 3.5123,
+      "save_seconds": 1.7585
+    },
+    {
+      "phase": 7,
+      "inserted": 10000,
+      "insert_seconds": 24.9982,
+      "insert_vectors_per_second": 400.0289,
+      "load_seconds": 1.1864,
+      "clone_seconds": 3.4804,
+      "save_seconds": 1.7718
+    },
+    {
+      "phase": 8,
+      "inserted": 10000,
+      "insert_seconds": 23.8611,
+      "insert_vectors_per_second": 419.0914,
+      "load_seconds": 1.2929,
+      "clone_seconds": 3.2066,
+      "save_seconds": 1.7505
+    },
+    {
+      "phase": 9,
+      "inserted": 10000,
+      "insert_seconds": 37.9343,
+      "insert_vectors_per_second": 263.6136,
+      "load_seconds": 1.2765,
+      "clone_seconds": 3.5484,
+      "save_seconds": 1.733
+    },
+    {
+      "phase": 10,
+      "inserted": 10000,
+      "insert_seconds": 23.8742,
+      "insert_vectors_per_second": 418.8628,
+      "load_seconds": 1.3275,
+      "clone_seconds": 3.8495,
+      "save_seconds": 1.7733
+    }
+  ],
+  "count_validation": {
+    "status": "verified",
+    "layer0_checkpoints": [
+      [
+        "1",
+        "9910000",
+        "0",
+        "9910000"
+      ],
+      [
+        "2",
+        "9920000",
+        "0",
+        "9920000"
+      ],
+      [
+        "3",
+        "9930000",
+        "0",
+        "9930000"
+      ],
+      [
+        "4",
+        "9940000",
+        "0",
+        "9940000"
+      ],
+      [
+        "5",
+        "9950000",
+        "0",
+        "9950000"
+      ],
+      [
+        "6",
+        "9960000",
+        "0",
+        "9960000"
+      ],
+      [
+        "7",
+        "9970000",
+        "0",
+        "9970000"
+      ],
+      [
+        "8",
+        "9980000",
+        "0",
+        "9980000"
+      ],
+      [
+        "9",
+        "9990000",
+        "0",
+        "9990000"
+      ],
+      [
+        "10",
+        "10000000",
+        "0",
+        "10000000"
+      ]
+    ],
+    "final_reloaded_samples": 10000000,
+    "contained_ids": 10000000,
+    "inserted_metadata_bijection": 100000,
+    "scope": "Logical membership and metadata validation, not an exhaustive physical-posting scan."
+  },
+  "fileio_reference": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103",
+  "fileio_completion_gate": {
+    "status": "verified",
+    "predecessor": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-20261103",
+    "observed_utc": "2026-11-03T08:38:05Z",
+    "summary_sha256": "602d6b99c3ce51c80ac7bfd7d071143346ee38711387b6678a10244818d129c7",
+    "count_validation_sha256": "afb9b3d92fd1f85c00863a8d6abcb4aea2fe72b67a4453142bd7cf1650f36e2a",
+    "fileio_query_rounds": 22,
+    "fileio_final_samples": 10000000
+  },
+  "transient_region_error_log_lines": 1135,
+  "grpc_error_log_lines": 0,
+  "limitations": [
+    "Shared host; FILEIO and TiKV run sequentially, not concurrently. Independently built head indexes have no fixed random seed.",
+    "SearchCheckVersionMapOnlyLayer0=true; distributed VersionMap enabled.",
+    "Three TiKV stores with replication factor 3, 16GB memory limit and 4GB block cache each.",
+    "Known pre-existing DedupCandidateTest failures; see binary-build-provenance.json.",
+    "No new recall or latency acceptance threshold was imposed."
+  ]
+}
