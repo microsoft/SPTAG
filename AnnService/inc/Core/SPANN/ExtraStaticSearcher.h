@@ -50,6 +50,13 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
+            ErrorCode Clear()
+            {
+                std::vector<Edge> batch_selection;
+                m_selections.swap(batch_selection);
+                return ErrorCode::Success;
+            }
+
             ErrorCode LoadBatch(size_t start, size_t end)
             {
                 auto f_in = f_createIO();
