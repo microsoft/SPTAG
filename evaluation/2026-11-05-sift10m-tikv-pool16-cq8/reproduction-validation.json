@@ -1,0 +1,44 @@
+{
+  "checked_utc": "2026-11-06T02:57:08Z",
+  "source_commit": "95bcb20f48f7864072f9443ec91027875382b722",
+  "isolated_committed_source_build": "passed; reused already-built pinned Folly and pinned zstd source",
+  "isolated_source_focused_regressions_passed": 6,
+  "documented_pinned_local_clone_checkout": "passed; measured source hashes match",
+  "publication_merge": {
+    "commit": "b64862912208817f82518db8e8336df7909e13c9",
+    "preserved_remote_commit": "0d69bb53d3e441679781c7ccee489409f0483a00",
+    "focused_regressions_passed": 6,
+    "measured_in_this_report": false
+  },
+  "matching_regenerated_protobuf_files": 20,
+  "newly_compiled_helpers": [
+    "check_count",
+    "exact_truth"
+  ],
+  "package_unit_and_integration_tests_passed": 11,
+  "truth_generator_reference": "all11 small phases and7 queries checked against independent integer brute force, including ties",
+  "real_portable_prepare": "passed exact first10M/query/truth hashes using rebuilt source executable and rebuilt checker",
+  "portable_prepare_manifest": {
+    "prefix": "sptag16-publication-recipe-20261106",
+    "source_checkout": "95bcb20f48f7864072f9443ec91027875382b722",
+    "recipe_checkout": "b64862912208817f82518db8e8336df7909e13c9",
+    "source_root": "/mnt_ssd/qianxi/SPTAG/benchmark-output/tikv16-reproduction-check",
+    "recipe_root": "/mnt_ssd/qianxi/SPTAG/evaluation/2026-11-05-sift10m-tikv-pool16-cq8",
+    "recipe_source_commit": "95bcb20f48f7864072f9443ec91027875382b722",
+    "recipe_sha256": {
+      "reproduce.py": "edb756a08bb1bcc7fb79fd9c4159b952779f646733079a5547091054baa081fb",
+      "deployment.py": "da272062ba10cba0c30731446a8dcbc397ee8e357857b2d962cc6c121197cb38",
+      "benchmark.ini": "547d686bb52759ce044ef2471556606badb9180186e6ddeafdc91b6deaba3ddd",
+      "tikv.toml": "1f6e59f33ed518568ffd49f053cc94f5973b31ced7ad67c21e80739a86976350"
+    },
+    "binary_sha256": "736c89f3de72e9a9feb4fc8954db2c12eb753e9960ceb1156d4ef16e5653062b",
+    "count_checker_sha256": "6a2dd4d910f451432cfdf4dee75984d39d0e34fad4189eb208b48871f775a054",
+    "created_utc": "2026-11-06T02:55:29Z"
+  },
+  "recipe_checkout_metadata": "Preparation preceded the report commit; recipe_sha256 captures the exact recipe files",
+  "offline_acceptance_cli": "passed against original saved indexloader and copied raw output/count log; all22 query records and all10 insertion records exactly match",
+  "deployment_validation": "all six generated container image/argument lists match the actual completed deployment; ownership refusal tested",
+  "new_full_10m_run_of_portable_wrapper": false,
+  "new_clean_machine_dependency_install": false,
+  "recall_limitation": "Full-run Recall@5=0.9553 versus prior local0.9574; precision equivalence not established"
+}

@@ -1,0 +1,1411 @@
+[1] 2026-11-06 02:37:02 Using AVX2 InstructionSet!
+Running 6 test cases...
+	Suite: Main
+	Suite: TestDataGeneratorTest
+		Case: RecallUsesQueryAndBatchStrides
+	Suite: TiKVIOTest
+		Case: StubPoolUsesIndependentConnections
+		Case: AsyncReadsSurviveClientAddressReuse
+		Case: InsertedVIDsGrowCountAcrossReloads
+		Case: LocalSparseVIDKeepsExistingVersion
+		Case: FileIOBuildInitializesLocalVersionsWithTiKVEnabled
+[1] 2026-11-06 02:37:02 Recall 3@3 = 1.0000
+[1] 2026-11-06 02:37:02 Recall 3@3 = 0.6667
+[1] 2026-11-06 02:37:02 Recall 3@3 = 1.0000
+[1] 2026-11-06 02:37:02 Recall 3@3 = 0.6667
+[1] 2026-11-06 02:37:02 Recall 3@3 = 1.0000
+[1] 2026-11-06 02:37:02 Recall 3@3 = 0.6667
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:45159 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:45159
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 TiKVIO: Connected to PD at 127.0.0.1:44191 (leader unknown)
+[1] 2026-11-06 02:37:02 TiKVIO: Initialized with key prefix 'test'
+[1] 2026-11-06 02:37:02 TiKVIO: Async RPC completion queues=8
+[1] 2026-11-06 02:37:02 TiKVIO: Created 16 stubs for TiKV store at 127.0.0.1:44191
+[1] 2026-11-06 02:37:02 Setting IndexDirectory with value /tmp/sptag-count-db02-4bfd
+[1] 2026-11-06 02:37:02 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:02 Setting isExecute with value true
+[1] 2026-11-06 02:37:02 Setting SelectHeadType with value Random
+[1] 2026-11-06 02:37:02 Setting Ratio with value 1
+[1] 2026-11-06 02:37:02 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:02 Setting isExecute with value true
+[1] 2026-11-06 02:37:02 Setting isExecute with value true
+[1] 2026-11-06 02:37:02 Setting BuildSsdIndex with value true
+[1] 2026-11-06 02:37:02 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:02 Setting ShareDB with value false
+[1] 2026-11-06 02:37:02 Loading headIDFile for layer -1...
+[1] 2026-11-06 02:37:02 No headIDFile file:
+[1] 2026-11-06 02:37:02 Begin Select Head...
+[1] 2026-11-06 02:37:02 Begin initial data (10,2)...
+[1] 2026-11-06 02:37:02 Begin Adjust Parameters...
+[1] 2026-11-06 02:37:02 Setting of cluster number is less than head count, adjust it to 10
+[1] 2026-11-06 02:37:02 Start generating Random head.
+[1] 2026-11-06 02:37:02 Seleted Nodes: 10, about 100.00% of total.
+[1] 2026-11-06 02:37:02 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:02 select head time: 0.00s
+[1] 2026-11-06 02:37:02 Begin Build Head...
+[1] 2026-11-06 02:37:02 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:02 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:02 Load Vector(10,2)
+[1] 2026-11-06 02:37:02 Begin build index...
+[1] 2026-11-06 02:37:02 Start to build KDTree 1
+[1] 2026-11-06 02:37:02 1 KDTree built, 8 10
+[1] 2026-11-06 02:37:02 Build Tree time (s): 0
+[1] 2026-11-06 02:37:02 build RNG graph!
+[1] 2026-11-06 02:37:02 Refine 0 0%
+[1] 2026-11-06 02:37:02 Refine 0 20%
+[1] 2026-11-06 02:37:02 Refine 0 40%
+[1] 2026-11-06 02:37:02 Refine 0 60%
+[1] 2026-11-06 02:37:02 Refine 0 80%
+[1] 2026-11-06 02:37:02 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:02 Refine 1 0%
+[1] 2026-11-06 02:37:02 Refine 1 20%
+[1] 2026-11-06 02:37:02 Refine 1 40%
+[1] 2026-11-06 02:37:02 Refine 1 60%
+[1] 2026-11-06 02:37:02 Refine 1 80%
+[1] 2026-11-06 02:37:02 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:02 Build RNG Graph end!
+[1] 2026-11-06 02:37:02 Build Graph time (s): 0
+[1] 2026-11-06 02:37:02 SaveIndex(/tmp/sptag-count-db02-4bfd/HeadIndex) begin...ready:1 GetNumSamples():10 GetNumDeleted():0
+[1] 2026-11-06 02:37:02 Save Vector (10,2) Finish!
+[1] 2026-11-06 02:37:02 Save KDT (1,10) Finish!
+[1] 2026-11-06 02:37:02 Save RNG (10,32) Finish!
+[1] 2026-11-06 02:37:02 Save DeleteID (10,1) Finish!
+[1] 2026-11-06 02:37:02 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:02 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:02 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:02 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:02 Setting KDTNumber with value 1
+[1] 2026-11-06 02:37:02 Setting NumTopDimensionKDTSplit with value 5
+[1] 2026-11-06 02:37:02 Setting Samples with value 100
+[1] 2026-11-06 02:37:02 Setting IsOldVersion with value false
+[1] 2026-11-06 02:37:02 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:02 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:02 Setting NumTopDimensionTPTSplit with value 5
+[1] 2026-11-06 02:37:02 Setting NeighborhoodSize with value 32
+[1] 2026-11-06 02:37:02 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:02 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:02 Setting RefineIterations with value 2
+[1] 2026-11-06 02:37:02 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:02 Setting CEF with value 1000
+[1] 2026-11-06 02:37:02 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:02 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:02 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:02 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:02 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:02 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:02 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:02 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:02 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:02 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:02 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:02 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:02 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:02 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:02 Setting MaxCheck with value 8192
+[1] 2026-11-06 02:37:02 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:02 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:02 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:02 Setting HashTableExponent with value 2
+[1] 2026-11-06 02:37:02 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:02 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:02 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:02 Load Vector (10,2) Finish!
+[1] 2026-11-06 02:37:02 Load KDT (1,10) Finish!
+[1] 2026-11-06 02:37:02 Load RNG (10,32) Finish!
+[1] 2026-11-06 02:37:02 Load DeleteID (10,1) Finish!
+[1] 2026-11-06 02:37:02 select head time: 0.00s build head time: 0.00s
+[1] 2026-11-06 02:37:02 Begin Build SSDIndex...
+[1] 2026-11-06 02:37:02 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:02 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:02 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:02 Load Data (10,1) Finish!
+[1] 2026-11-06 02:37:02 Loaded 10 Vector IDs
+[1] 2026-11-06 02:37:02 Full vector count:10 Edge bytes:12 selection size:80, capacity size:80
+[1] 2026-11-06 02:37:02 Preparation done, start candidate searching.
+[1] 2026-11-06 02:37:02 Batch 0 vector(0,10) loaded with 10 vectors (80) HeadIndex acc @64:-nan.
+[1] 2026-11-06 02:37:02 Searching replicas ended. RNG failed count: 0
+[1] 2026-11-06 02:37:02 Batch 0 finished!
+[1] 2026-11-06 02:37:02 Searching replicas ended. Search Time: 0.00 mins
+[1] 2026-11-06 02:37:02 Time to sort selections:0.00 sec.
+[1] 2026-11-06 02:37:02 Build index with posting page limit:3
+[1] 2026-11-06 02:37:02 Posting size limit: 2048
+[1] 2026-11-06 02:37:02 Before Posting Cut:
+[1] 2026-11-06 02:37:02 Replica Count Dist: 0, 10
+[1] 2026-11-06 02:37:02 Replica Count Dist: 1, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 2, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 3, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 4, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 5, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 6, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 7, 0
+[1] 2026-11-06 02:37:02 Replica Count Dist: 8, 0
+[1] 2026-11-06 02:37:02 Time to perform posting cut:0.00 sec.
+[1] 2026-11-06 02:37:02 TotalPageNumbers: 0, IndexSize: 0
+[1] 2026-11-06 02:37:02 Start output...
+[1] 2026-11-06 02:37:02 SubIndex Size: 4096 bytes, 0 MBytes
+[1] 2026-11-06 02:37:02 Padded Size: 0, final total size: 0.
+[1] 2026-11-06 02:37:02 Output done...
+[1] 2026-11-06 02:37:02 Time to write results:0.00 sec.
+[1] 2026-11-06 02:37:02 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:02 Load index with posting page limit:3
+[1] 2026-11-06 02:37:02 AsyncFileIO::Open a file
+[1] 2026-11-06 02:37:02 AsyncFileIO::InitializeFileIo: file has been created with enough space.
+[1] 2026-11-06 02:37:02 AsyncFileIO::InitializeFileIo: file /tmp/sptag-count-db02-4bfd/SPTAGFullList.bin_0 opened, fd=5 threads=1 maxNumBlocks=64
+[1] 2026-11-06 02:37:02 Finish reading header info, list count 10, total doc count 10, dimension 2, list page offset 1.
+[1] 2026-11-06 02:37:02 Big page (>4K): list count 0, total element count 0.
+[1] 2026-11-06 02:37:02 Total Element Count: 0
+[1] 2026-11-06 02:37:02 Page Count Dist: 0 10
+[1] 2026-11-06 02:37:02 Current vector num: 10.
+[1] 2026-11-06 02:37:02 select head time: 0.00s build head time: 0.00s build ssd time: 0.00s
+[1] 2026-11-06 02:37:02 TiKVVersionMap::Initialize layer=0: per-VID mode, size=10, default=alive, deleted=0
+[1] 2026-11-06 02:37:02 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:02 Using distributed TiKV VersionMap (layer=0, per-VID keys, no local cache)
+[1] 2026-11-06 02:37:02 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:02 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:02 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:02 TiKVVersionMap: loaded per-VID metadata layer=0 count=10 deleted=0 default=255
+[1] 2026-11-06 02:37:02 Current vector num: 10.
+[1] 2026-11-06 02:37:02 Checkpoint: waiting for index update complete (layer 0)
+[1] 2026-11-06 02:37:02 Checkpoint: layer 0 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:02 Saving version map
+[1] 2026-11-06 02:37:02 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:02 Using distributed TiKV VersionMap (layer=0, per-VID keys, no local cache)
+[1] 2026-11-06 02:37:02 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:02 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:02 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:02 TiKVVersionMap: loaded per-VID metadata layer=0 count=12 deleted=0 default=255
+[1] 2026-11-06 02:37:02 Current vector num: 12.
+[1] 2026-11-06 02:37:02 Checkpoint: waiting for index update complete (layer 0)
+[1] 2026-11-06 02:37:02 Checkpoint: layer 0 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:02 Saving version map
+[1] 2026-11-06 02:37:02 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:02 Using distributed TiKV VersionMap (layer=0, per-VID keys, no local cache)
+[1] 2026-11-06 02:37:02 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:02 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:02 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:02 TiKVVersionMap: loaded per-VID metadata layer=0 count=14 deleted=0 default=255
+[1] 2026-11-06 02:37:02 Current vector num: 14.
+[1] 2026-11-06 02:37:02 Checkpoint: waiting for index update complete (layer 0)
+[1] 2026-11-06 02:37:02 Checkpoint: layer 0 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:02 Saving version map
+[1] 2026-11-06 02:37:02 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:02 Using distributed TiKV VersionMap (layer=0, per-VID keys, no local cache)
+[1] 2026-11-06 02:37:02 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:02 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:02 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:02 TiKVVersionMap: loaded per-VID metadata layer=0 count=14 deleted=0 default=255
+[1] 2026-11-06 02:37:02 Current vector num: 14.
+[1] 2026-11-06 02:37:02 AsyncFileReader: Destroying fd=5!
+[1] 2026-11-06 02:37:03 AsyncFileReader: ShutDown!
+[1] 2026-11-06 02:37:03 Setting IndexDirectory with value /tmp/sptag-count-0af2-ddc4
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting SelectHeadType with value Random
+[1] 2026-11-06 02:37:03 Setting Ratio with value 1
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting BuildSsdIndex with value true
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting ShareDB with value false
+[1] 2026-11-06 02:37:03 Loading headIDFile for layer -1...
+[1] 2026-11-06 02:37:03 No headIDFile file:
+[1] 2026-11-06 02:37:03 Begin Select Head...
+[1] 2026-11-06 02:37:03 Begin initial data (10,2)...
+[1] 2026-11-06 02:37:03 Begin Adjust Parameters...
+[1] 2026-11-06 02:37:03 Setting of cluster number is less than head count, adjust it to 10
+[1] 2026-11-06 02:37:03 Start generating Random head.
+[1] 2026-11-06 02:37:03 Seleted Nodes: 10, about 100.00% of total.
+[1] 2026-11-06 02:37:03 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:03 select head time: 0.00s
+[1] 2026-11-06 02:37:03 Begin Build Head...
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Load Vector(10,2)
+[1] 2026-11-06 02:37:03 Begin build index...
+[1] 2026-11-06 02:37:03 Start to build KDTree 1
+[1] 2026-11-06 02:37:03 1 KDTree built, 8 10
+[1] 2026-11-06 02:37:03 Build Tree time (s): 0
+[1] 2026-11-06 02:37:03 build RNG graph!
+[1] 2026-11-06 02:37:03 Refine 0 0%
+[1] 2026-11-06 02:37:03 Refine 0 20%
+[1] 2026-11-06 02:37:03 Refine 0 40%
+[1] 2026-11-06 02:37:03 Refine 0 60%
+[1] 2026-11-06 02:37:03 Refine 0 80%
+[1] 2026-11-06 02:37:03 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:03 Refine 1 0%
+[1] 2026-11-06 02:37:03 Refine 1 20%
+[1] 2026-11-06 02:37:03 Refine 1 40%
+[1] 2026-11-06 02:37:03 Refine 1 60%
+[1] 2026-11-06 02:37:03 Refine 1 80%
+[1] 2026-11-06 02:37:03 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:03 Build RNG Graph end!
+[1] 2026-11-06 02:37:03 Build Graph time (s): 0
+[1] 2026-11-06 02:37:03 SaveIndex(/tmp/sptag-count-0af2-ddc4/HeadIndex) begin...ready:1 GetNumSamples():10 GetNumDeleted():0
+[1] 2026-11-06 02:37:03 Save Vector (10,2) Finish!
+[1] 2026-11-06 02:37:03 Save KDT (1,10) Finish!
+[1] 2026-11-06 02:37:03 Save RNG (10,32) Finish!
+[1] 2026-11-06 02:37:03 Save DeleteID (10,1) Finish!
+[1] 2026-11-06 02:37:03 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:03 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:03 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:03 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:03 Setting KDTNumber with value 1
+[1] 2026-11-06 02:37:03 Setting NumTopDimensionKDTSplit with value 5
+[1] 2026-11-06 02:37:03 Setting Samples with value 100
+[1] 2026-11-06 02:37:03 Setting IsOldVersion with value false
+[1] 2026-11-06 02:37:03 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:03 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:03 Setting NumTopDimensionTPTSplit with value 5
+[1] 2026-11-06 02:37:03 Setting NeighborhoodSize with value 32
+[1] 2026-11-06 02:37:03 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:03 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:03 Setting RefineIterations with value 2
+[1] 2026-11-06 02:37:03 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:03 Setting CEF with value 1000
+[1] 2026-11-06 02:37:03 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:03 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:03 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:03 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:03 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:03 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:03 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:03 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:03 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:03 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:03 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 8192
+[1] 2026-11-06 02:37:03 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:03 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:03 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:03 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:03 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:03 Load Vector (10,2) Finish!
+[1] 2026-11-06 02:37:03 Load KDT (1,10) Finish!
+[1] 2026-11-06 02:37:03 Load RNG (10,32) Finish!
+[1] 2026-11-06 02:37:03 Load DeleteID (10,1) Finish!
+[1] 2026-11-06 02:37:03 select head time: 0.00s build head time: 0.00s
+[1] 2026-11-06 02:37:03 Begin Build SSDIndex...
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Load Data (10,1) Finish!
+[1] 2026-11-06 02:37:03 Loaded 10 Vector IDs
+[1] 2026-11-06 02:37:03 Full vector count:10 Edge bytes:12 selection size:80, capacity size:80
+[1] 2026-11-06 02:37:03 Preparation done, start candidate searching.
+[1] 2026-11-06 02:37:03 Batch 0 vector(0,10) loaded with 10 vectors (80) HeadIndex acc @64:-nan.
+[1] 2026-11-06 02:37:03 Searching replicas ended. RNG failed count: 0
+[1] 2026-11-06 02:37:03 Batch 0 finished!
+[1] 2026-11-06 02:37:03 Searching replicas ended. Search Time: 0.00 mins
+[1] 2026-11-06 02:37:03 Time to sort selections:0.00 sec.
+[1] 2026-11-06 02:37:03 Build index with posting page limit:3
+[1] 2026-11-06 02:37:03 Posting size limit: 2048
+[1] 2026-11-06 02:37:03 Before Posting Cut:
+[1] 2026-11-06 02:37:03 Replica Count Dist: 0, 10
+[1] 2026-11-06 02:37:03 Replica Count Dist: 1, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 2, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 3, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 4, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 5, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 6, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 7, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 8, 0
+[1] 2026-11-06 02:37:03 Time to perform posting cut:0.00 sec.
+[1] 2026-11-06 02:37:03 TotalPageNumbers: 0, IndexSize: 0
+[1] 2026-11-06 02:37:03 Start output...
+[1] 2026-11-06 02:37:03 SubIndex Size: 4096 bytes, 0 MBytes
+[1] 2026-11-06 02:37:03 Padded Size: 0, final total size: 0.
+[1] 2026-11-06 02:37:03 Output done...
+[1] 2026-11-06 02:37:03 Time to write results:0.00 sec.
+[1] 2026-11-06 02:37:03 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:03 Load index with posting page limit:3
+[1] 2026-11-06 02:37:03 AsyncFileIO::Open a file
+[1] 2026-11-06 02:37:03 AsyncFileIO::InitializeFileIo: file has been created with enough space.
+[1] 2026-11-06 02:37:03 AsyncFileIO::InitializeFileIo: file /tmp/sptag-count-0af2-ddc4/SPTAGFullList.bin_0 opened, fd=5 threads=1 maxNumBlocks=64
+[1] 2026-11-06 02:37:03 Finish reading header info, list count 10, total doc count 10, dimension 2, list page offset 1.
+[1] 2026-11-06 02:37:03 Big page (>4K): list count 0, total element count 0.
+[1] 2026-11-06 02:37:03 Total Element Count: 0
+[1] 2026-11-06 02:37:03 Page Count Dist: 0 10
+[1] 2026-11-06 02:37:03 Current vector num: 10.
+[1] 2026-11-06 02:37:03 select head time: 0.00s build head time: 0.00s build ssd time: 0.00s
+[1] 2026-11-06 02:37:03 TiKVVersionMap::Initialize layer=0: per-VID mode, size=10, default=alive, deleted=0
+[1] 2026-11-06 02:37:03 Save mapping (2, 1) Finish!
+[1] 2026-11-06 02:37:03 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:03 Using local in-memory VersionMap (layer=0)
+[1] 2026-11-06 02:37:03 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:03 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:03 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:03 Load mapping From /tmp/sptag-count-0af2-ddc4/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:03 Load mapping (2, 1) Finish!
+[1] 2026-11-06 02:37:03 Checkpoint: waiting for index update complete (layer 0)
+[1] 2026-11-06 02:37:03 Checkpoint: layer 0 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:03 Saving version map
+[1] 2026-11-06 02:37:03 Save mapping (2, 1) Finish!
+[1] 2026-11-06 02:37:03 Load mapping From /tmp/sptag-count-0af2-ddc4/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:03 Load mapping (2, 1) Finish!
+[1] 2026-11-06 02:37:03 AsyncFileReader: Destroying fd=5!
+[1] 2026-11-06 02:37:03 AsyncFileReader: ShutDown!
+[1] 2026-11-06 02:37:03 Setting IndexDirectory with value /tmp/sptag-fileio-b6dd-79bb
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting IndexAlgoType with value BKT
+[1] 2026-11-06 02:37:03 Setting ValueType with value UInt8
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting SelectHeadType with value Random
+[1] 2026-11-06 02:37:03 Setting Ratio with value 0.5
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting BuildSsdIndex with value true
+[1] 2026-11-06 02:37:03 Setting Storage with value FILEIO
+[1] 2026-11-06 02:37:03 Setting Layers with value 1
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting SearchThreadNum with value 1
+[1] 2026-11-06 02:37:03 Setting AppendThreadNum with value 1
+[1] 2026-11-06 02:37:03 Setting StartFileSizeGB with value 1
+[1] 2026-11-06 02:37:03 Setting Update with value true
+[1] 2026-11-06 02:37:03 Setting AsyncMergeInSearch with value false
+[1] 2026-11-06 02:37:03 Setting ExcludeHead with value false
+[1] 2026-11-06 02:37:03 Setting ReplicaCount with value 2
+[1] 2026-11-06 02:37:03 SPANNIndex:UseFileIO
+[1] 2026-11-06 02:37:03 Initialize block mapping successfully!
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Initialize(ssdmapping_0, 64)
+[1] 2026-11-06 02:37:03 AsyncFileIO: Create a file
+[1] 2026-11-06 02:37:03 AsyncFileIO::InitializeFileIo: file /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings opened, fd=5 threads=6 maxNumBlocks=64
+[1] 2026-11-06 02:37:03 FileIO::BlockController:Loading block pool from file:/tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings
+[1] 2026-11-06 02:37:03 FileIO::BlockController::LoadBlockPool: initializing fresh pool (no existing file found: /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings_blockpool)
+[1] 2026-11-06 02:37:03 FileIO::BlockController::LoadBlockPool: initialized with 262144 blocks (1.00 GB)
+[1] 2026-11-06 02:37:03 Loading headIDFile for layer -1...
+[1] 2026-11-06 02:37:03 No headIDFile file:
+[1] 2026-11-06 02:37:03 Begin Select Head...
+[1] 2026-11-06 02:37:03 Begin initial data (64,2)...
+[1] 2026-11-06 02:37:03 Begin Adjust Parameters...
+[1] 2026-11-06 02:37:03 Start generating Random head.
+[1] 2026-11-06 02:37:03 Seleted Nodes: 32, about 50.00% of total.
+[1] 2026-11-06 02:37:03 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:03 select head time: 0.00s
+[1] 2026-11-06 02:37:03 Begin Build Head...
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:03 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:03 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Load Vector(32,2)
+[1] 2026-11-06 02:37:03 Begin build index...
+[1] 2026-11-06 02:37:03 Using PARALLEL BKTree build with 1 threads.
+[1] 2026-11-06 02:37:03 Start to build BKTree 1 (parallel)
+[1] 2026-11-06 02:37:03 Processing level 0 with 1 nodes...
+[1] 2026-11-06 02:37:03 1 BKTree built (parallel), 34 32
+[1] 2026-11-06 02:37:03 Build Tree time (s): 0
+[1] 2026-11-06 02:37:03 build RNG graph!
+[1] 2026-11-06 02:37:03 Refine 0 0%
+[1] 2026-11-06 02:37:03 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:03 Build RNG Graph end!
+[1] 2026-11-06 02:37:03 Build Graph time (s): 0
+[1] 2026-11-06 02:37:03 SaveIndex(/tmp/sptag-fileio-b6dd-79bb/HeadIndex) begin...ready:1 GetNumSamples():32 GetNumDeleted():0
+[1] 2026-11-06 02:37:03 Save Vector (32,2) Finish!
+[1] 2026-11-06 02:37:03 Save BKT (1,34) Finish!
+[1] 2026-11-06 02:37:03 Save RNG (32,8) Finish!
+[1] 2026-11-06 02:37:03 Save DeleteID (32,1) Finish!
+[1] 2026-11-06 02:37:03 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:03 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:03 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:03 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:03 Setting EnableBfs with value 0
+[1] 2026-11-06 02:37:03 Setting BKTNumber with value 1
+[1] 2026-11-06 02:37:03 Setting BKTKmeansK with value 32
+[1] 2026-11-06 02:37:03 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:03 Setting Samples with value 1000
+[1] 2026-11-06 02:37:03 Setting BKTLambdaFactor with value 100.000000
+[1] 2026-11-06 02:37:03 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:03 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:03 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:03 Setting NumTopDimensionTpTreeSplit with value 5
+[1] 2026-11-06 02:37:03 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:03 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:03 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:03 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:03 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:03 Setting CEF with value 1000
+[1] 2026-11-06 02:37:03 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:03 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:03 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:03 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:03 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:03 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:03 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:03 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:03 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:03 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:03 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 8192
+[1] 2026-11-06 02:37:03 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:03 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:03 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:03 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:03 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:03 Load Vector (32,2) Finish!
+[1] 2026-11-06 02:37:03 Load BKT (1,34) Finish!
+[1] 2026-11-06 02:37:03 Load RNG (32,8) Finish!
+[1] 2026-11-06 02:37:03 Load DeleteID (32,1) Finish!
+[1] 2026-11-06 02:37:03 select head time: 0.00s build head time: 0.00s
+[1] 2026-11-06 02:37:03 Begin Build SSDIndex...
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:03 Using local in-memory VersionMap (layer=0)
+[1] 2026-11-06 02:37:03 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:03 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:03 Load Data (32,1) Finish!
+[1] 2026-11-06 02:37:03 Build SSD Index.
+[1] 2026-11-06 02:37:03 Full vector count:64 Edge bytes:12 selection size:128, capacity size:128
+[1] 2026-11-06 02:37:03 Preparation done, start candidate searching.
+[1] 2026-11-06 02:37:03 Batch 0 vector(0,64) loaded with 64 vectors (128) HeadIndex acc @64:1.000000.
+[1] 2026-11-06 02:37:03 Searching replicas ended. RNG failed count: 141
+[1] 2026-11-06 02:37:03 Batch 0 finished!
+[1] 2026-11-06 02:37:03 Searching replicas ended. Search Time: 0.00 mins
+[1] 2026-11-06 02:37:03 Time to sort selections:0.00 sec.
+[1] 2026-11-06 02:37:03 Posting size limit: 1755
+[1] 2026-11-06 02:37:03 Before Posting Cut:
+[1] 2026-11-06 02:37:03 Replica Count Dist: 0, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 1, 4
+[1] 2026-11-06 02:37:03 Replica Count Dist: 2, 60
+[1] 2026-11-06 02:37:03 After Posting Cut:
+[1] 2026-11-06 02:37:03 Replica Count Dist: 0, 0
+[1] 2026-11-06 02:37:03 Replica Count Dist: 1, 4
+[1] 2026-11-06 02:37:03 Replica Count Dist: 2, 60
+[1] 2026-11-06 02:37:03 Posting cut original:124 relax:124
+[1] 2026-11-06 02:37:03 Posting cut overflowHeadCount:0 droppedReplicaCount:0 zeroReplicaCount:0
+[1] 2026-11-06 02:37:03 Time to perform posting cut:0.00 sec.
+[1] 2026-11-06 02:37:03 SPFresh: initialize p_localToGlobal(0) and versionMap (64)
+[1] 2026-11-06 02:37:03 SPFresh: Writing values to DB
+[1] 2026-11-06 02:37:03 Save Data To /tmp/sptag-fileio-b6dd-79bb/SPTAGHeadVectorIDs.bin
+[1] 2026-11-06 02:37:03 Save Data (32,1) Finish!
+[1] 2026-11-06 02:37:03 SPFresh: save versionMap
+[1] 2026-11-06 02:37:03 Save mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:03 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:03 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:03 Load mapping From /tmp/sptag-fileio-b6dd-79bb/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:03 Load mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:03 SPFresh: initialize thread pools, append: 1, reassign 0
+[1] 2026-11-06 02:37:03 SPFresh: finish initialization
+[1] 2026-11-06 02:37:03 select head time: 0.00s build head time: 0.00s build ssd time: 0.00s
+[1] 2026-11-06 02:37:03 SaveIndex(/tmp/sptag-fileio-b6dd-79bb) begin...ready:1 GetNumSamples():64 GetNumDeleted():0
+[1] 2026-11-06 02:37:03 SaveIndexData: waiting for all background jobs to finish...
+[1] 2026-11-06 02:37:03 SaveIndexData: all background jobs finished (waited 0 s)
+[1] 2026-11-06 02:37:03 Save Vector (32,2) Finish!
+[1] 2026-11-06 02:37:03 Save BKT (1,34) Finish!
+[1] 2026-11-06 02:37:03 Save RNG (32,8) Finish!
+[1] 2026-11-06 02:37:03 Save DeleteID (32,1) Finish!
+[1] 2026-11-06 02:37:03 Save Data (32,1) Finish!
+[1] 2026-11-06 02:37:03 Checkpoint: waiting for index update complete (layer 0)
+[1] 2026-11-06 02:37:03 Checkpoint: layer 0 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:03 Saving version map
+[1] 2026-11-06 02:37:03 Save mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:03 FileIO: saving block mapping to /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0
+[1] 2026-11-06 02:37:03 Save mapping To /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0
+[1] 2026-11-06 02:37:03 Save block mapping (32, 8) Finish! Total: 32
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Total allocated blocks: 262144
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Remaining free blocks: 262112
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Saving to file: /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-06 02:37:03 Load mapping From /tmp/sptag-fileio-b6dd-79bb/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:03 Load mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:03 Save mapping To /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0
+[1] 2026-11-06 02:37:03 Save block mapping (32, 8) Finish! Total: 32
+[1] 2026-11-06 02:37:03 FileIO:BlockController:ShutDown!
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Total allocated blocks: 262144
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Remaining free blocks: 262112
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Saving to file: /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Close file handler
+[1] 2026-11-06 02:37:03 AsyncFileReader: ShutDown!
+[1] 2026-11-06 02:37:03 AsyncFileReader: Destroying fd=5!
+[1] 2026-11-06 02:37:03 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:03 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:03 Setting DeletedIDs with value DeletedIDs.bin
+[1] 2026-11-06 02:37:03 Setting DeleteHeadVectors with value false
+[1] 2026-11-06 02:37:03 Setting Dim with value 2
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting GenerateTruth with value false
+[1] 2026-11-06 02:37:03 Setting GlobalIDPath with value 
+[1] 2026-11-06 02:37:03 Setting HeadIndexFolder with value HeadIndex
+[1] 2026-11-06 02:37:03 Setting HeadVectorIDs with value SPTAGHeadVectorIDs.bin
+[1] 2026-11-06 02:37:03 Setting HeadVectors with value SPTAGHeadVectors.bin
+[1] 2026-11-06 02:37:03 Setting IndexAlgoType with value BKT
+[1] 2026-11-06 02:37:03 Setting IndexDirectory with value /tmp/sptag-fileio-b6dd-79bb
+[1] 2026-11-06 02:37:03 Setting QuantizerFilePath with value 
+[1] 2026-11-06 02:37:03 Setting QueryDelimiter with value |
+[1] 2026-11-06 02:37:03 Setting QueryPath with value 
+[1] 2026-11-06 02:37:03 Setting QuerySize with value -1
+[1] 2026-11-06 02:37:03 Setting QueryType with value Undefined
+[1] 2026-11-06 02:37:03 Setting SSDIndex with value SPTAGFullList.bin
+[1] 2026-11-06 02:37:03 Setting SSDIndexFileNum with value 1
+[1] 2026-11-06 02:37:03 Setting TruthPath with value 
+[1] 2026-11-06 02:37:03 Setting TruthType with value Undefined
+[1] 2026-11-06 02:37:03 Setting ValueType with value UInt8
+[1] 2026-11-06 02:37:03 Setting VectorDelimiter with value |
+[1] 2026-11-06 02:37:03 Setting VectorPath with value 
+[1] 2026-11-06 02:37:03 Setting VectorSize with value 64
+[1] 2026-11-06 02:37:03 Setting VectorType with value DEFAULT
+[1] 2026-11-06 02:37:03 Setting WarmupDelimiter with value |
+[1] 2026-11-06 02:37:03 Setting WarmupPath with value 
+[1] 2026-11-06 02:37:03 Setting WarmupSize with value -1
+[1] 2026-11-06 02:37:03 Setting WarmupType with value Undefined
+[1] 2026-11-06 02:37:03 Setting AnalyzeOnly with value false
+[1] 2026-11-06 02:37:03 Setting BKTKmeansK with value 32
+[1] 2026-11-06 02:37:03 Setting BKTLambdaFactor with value -1.000000
+[1] 2026-11-06 02:37:03 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:03 Setting CalcStd with value false
+[1] 2026-11-06 02:37:03 Setting Count with value 0
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting NoOutput with value false
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:03 Setting PrintSizeCount with value true
+[1] 2026-11-06 02:37:03 Setting Ratio with value 0.500000
+[1] 2026-11-06 02:37:03 Setting RecursiveCheckSmallCluster with value true
+[1] 2026-11-06 02:37:03 Setting SamplesNumber with value 1000
+[1] 2026-11-06 02:37:03 Setting SaveBKT with value false
+[1] 2026-11-06 02:37:03 Setting SelectDynamically with value true
+[1] 2026-11-06 02:37:03 Setting SelectHeadType with value Random
+[1] 2026-11-06 02:37:03 Setting SelectThreshold with value 6
+[1] 2026-11-06 02:37:03 Setting SplitFactor with value 5
+[1] 2026-11-06 02:37:03 Setting SplitMaxTry with value 8
+[1] 2026-11-06 02:37:03 Setting SplitThreshold with value 25
+[1] 2026-11-06 02:37:03 Setting TreeNumber with value 1
+[1] 2026-11-06 02:37:03 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:03 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:03 Setting BKTKmeansK with value 32
+[1] 2026-11-06 02:37:03 Setting BKTLambdaFactor with value 100.000000
+[1] 2026-11-06 02:37:03 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:03 Setting BKTNumber with value 1
+[1] 2026-11-06 02:37:03 Setting CEF with value 1000
+[1] 2026-11-06 02:37:03 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:03 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:03 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:03 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:03 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:03 Setting EnableBfs with value 0
+[1] 2026-11-06 02:37:03 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:03 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:03 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:03 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:03 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:03 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:03 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:03 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:03 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:03 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:03 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:03 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:03 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting NumTopDimensionTpTreeSplit with value 5
+[1] 2026-11-06 02:37:03 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:03 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:03 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:03 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:03 Setting Samples with value 1000
+[1] 2026-11-06 02:37:03 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:03 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:03 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:03 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:03 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:03 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:03 Setting AllowZeroReplica with value false
+[1] 2026-11-06 02:37:03 Setting AppendThreadNum with value 1
+[1] 2026-11-06 02:37:03 Setting AsyncAppendQueueSize with value 0
+[1] 2026-11-06 02:37:03 Setting AsyncMergeInSearch with value false
+[1] 2026-11-06 02:37:03 Setting AsyncRpcMaxInflight with value 0
+[1] 2026-11-06 02:37:03 Setting Batch with value 1000
+[1] 2026-11-06 02:37:03 Setting Batches with value 1
+[1] 2026-11-06 02:37:03 Setting BufferLength with value 3
+[1] 2026-11-06 02:37:03 Setting BuildSsdIndex with value true
+[1] 2026-11-06 02:37:03 Setting CacheShards with value 1
+[1] 2026-11-06 02:37:03 Setting CacheSizeGB with value 0
+[1] 2026-11-06 02:37:03 Setting CalTruth with value true
+[1] 2026-11-06 02:37:03 Setting CenteringToZero with value false
+[1] 2026-11-06 02:37:03 Setting ChecksumCheck with value false
+[1] 2026-11-06 02:37:03 Setting ChecksumFile with value checksum
+[1] 2026-11-06 02:37:03 Setting ChecksumInRead with value false
+[1] 2026-11-06 02:37:03 Setting ConsistencyCheck with value false
+[1] 2026-11-06 02:37:03 Setting Days with value 0
+[1] 2026-11-06 02:37:03 Setting DebugBuildInternalResultNum with value 64
+[1] 2026-11-06 02:37:03 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:03 Setting DeleteQPS with value -1
+[1] 2026-11-06 02:37:03 Setting DictBufferCapacity with value 204800
+[1] 2026-11-06 02:37:03 Setting DisableCheckpoint with value false
+[1] 2026-11-06 02:37:03 Setting DisableReassign with value false
+[1] 2026-11-06 02:37:03 Setting DistributedVersionMap with value true
+[1] 2026-11-06 02:37:03 Setting EnableADC with value false
+[1] 2026-11-06 02:37:03 Setting EnableDataCompression with value false
+[1] 2026-11-06 02:37:03 Setting EnableDeltaEncoding with value false
+[1] 2026-11-06 02:37:03 Setting EnableDictTraining with value true
+[1] 2026-11-06 02:37:03 Setting EnablePostingListRearrange with value false
+[1] 2026-11-06 02:37:03 Setting EnableWAL with value false
+[1] 2026-11-06 02:37:03 Setting EndVectorNum with value -1
+[1] 2026-11-06 02:37:03 Setting ExcludeHead with value false
+[1] 2026-11-06 02:37:03 Setting FullDeletedIDFile with value fulldeleted
+[1] 2026-11-06 02:37:03 Setting FullVectorPath with value 
+[1] 2026-11-06 02:37:03 Setting GPUSSDLeafSize with value 200
+[1] 2026-11-06 02:37:03 Setting GPUSSDNumTrees with value 100
+[1] 2026-11-06 02:37:03 Setting GrowthFileSizeGB with value 10
+[1] 2026-11-06 02:37:03 Setting GrowthThreshold with value 0.050000
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Setting InPlace with value true
+[1] 2026-11-06 02:37:03 Setting InsertThreadNum with value 1
+[1] 2026-11-06 02:37:03 Setting InternalResultNum with value 64
+[1] 2026-11-06 02:37:03 Setting IOThreadsPerHandler with value 4
+[1] 2026-11-06 02:37:03 Setting IOTimeout with value 30
+[1] 2026-11-06 02:37:03 Setting isExecute with value true
+[1] 2026-11-06 02:37:03 Setting IterativeSearchHeadBatch with value 32
+[1] 2026-11-06 02:37:03 Setting KVFile with value rocksdb
+[1] 2026-11-06 02:37:03 Setting LatencyLimit with value 10.000000
+[1] 2026-11-06 02:37:03 Setting Layers with value 1
+[1] 2026-11-06 02:37:03 Setting LoadAllVectors with value false
+[1] 2026-11-06 02:37:03 Setting LogFile with value 
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:03 Setting MaxDistRatio with value 10000.000000
+[1] 2026-11-06 02:37:03 Setting MaxFileSizeGB with value 300
+[1] 2026-11-06 02:37:03 Setting MaxID with value 1000000000
+[1] 2026-11-06 02:37:03 Setting MaxInternalResultNum with value -1
+[1] 2026-11-06 02:37:03 Setting MergeThreshold with value 10
+[1] 2026-11-06 02:37:03 Setting MinDictTrainingBufferSize with value 10240000
+[1] 2026-11-06 02:37:03 Setting MinInternalResultNum with value -1
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting NumGPUs with value 1
+[1] 2026-11-06 02:37:03 Setting OneClusterCutMax with value false
+[1] 2026-11-06 02:37:03 Setting OnlySearchFinalBatch with value false
+[1] 2026-11-06 02:37:03 Setting OutOfPlace with value false
+[1] 2026-11-06 02:37:03 Setting OutputEmptyReplicaID with value false
+[1] 2026-11-06 02:37:03 Setting PersistentBufferPath with value 
+[1] 2026-11-06 02:37:03 Setting PostingCountCacheCapacity with value 100000
+[1] 2026-11-06 02:37:03 Setting PostingPageLimit with value 3
+[1] 2026-11-06 02:37:03 Setting PostingVectorLimit with value 118
+[1] 2026-11-06 02:37:03 Setting QpsLimit with value 0
+[1] 2026-11-06 02:37:03 Setting QueryCountLimit with value 2147483647
+[1] 2026-11-06 02:37:03 Setting ReassignK with value 0
+[1] 2026-11-06 02:37:03 Setting ReassignThreadNum with value 0
+[1] 2026-11-06 02:37:03 Setting RecallAnalysis with value false
+[1] 2026-11-06 02:37:03 Setting RecallTestSampleNumber with value 100
+[1] 2026-11-06 02:37:03 Setting Recovery with value false
+[1] 2026-11-06 02:37:03 Setting ReplicaCount with value 2
+[1] 2026-11-06 02:37:03 Setting Rerank with value 0
+[1] 2026-11-06 02:37:03 Setting ResultNum with value 5
+[1] 2026-11-06 02:37:03 Setting ResumeLayer with value -1
+[1] 2026-11-06 02:37:03 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:03 Setting Sampling with value -1
+[1] 2026-11-06 02:37:03 Setting SearchCheckVersionMapOnlyLayer0 with value false
+[1] 2026-11-06 02:37:03 Setting SearchDuringUpdate with value false
+[1] 2026-11-06 02:37:03 Setting SearchInternalResultNum with value 64
+[1] 2026-11-06 02:37:03 Setting SearchPostingPageLimit with value 3
+[1] 2026-11-06 02:37:03 Setting SearchResult with value 
+[1] 2026-11-06 02:37:03 Setting SearchThreadNum with value 1
+[1] 2026-11-06 02:37:03 Setting SearchTimes with value 1
+[1] 2026-11-06 02:37:03 Setting ShareDB with value true
+[1] 2026-11-06 02:37:03 Setting ShowUpdateProgress with value true
+[1] 2026-11-06 02:37:03 Setting SpdkBatchSize with value 64
+[1] 2026-11-06 02:37:03 Setting SsdInfoFile with value ssdinfo
+[1] 2026-11-06 02:37:03 Setting SsdMappingFile with value ssdmapping
+[1] 2026-11-06 02:37:03 Setting StartFileSizeGB with value 1
+[1] 2026-11-06 02:37:03 Setting SteadyState with value false
+[1] 2026-11-06 02:37:03 Setting Step with value 0
+[1] 2026-11-06 02:37:03 Setting StepInternalResultNum with value -1
+[1] 2026-11-06 02:37:03 Setting Storage with value FILEIO
+[1] 2026-11-06 02:37:03 Setting StressTest with value false
+[1] 2026-11-06 02:37:03 Setting TiKVKeyPrefix with value spann
+[1] 2026-11-06 02:37:03 Setting TiKVPDAddresses with value 127.0.0.1:2379
+[1] 2026-11-06 02:37:03 Setting TmpDir with value .
+[1] 2026-11-06 02:37:03 Setting TruthFilePrefix with value 
+[1] 2026-11-06 02:37:03 Setting TruthResultNum with value -1
+[1] 2026-11-06 02:37:03 Setting Update with value true
+[1] 2026-11-06 02:37:03 Setting UpdateFilePrefix with value 
+[1] 2026-11-06 02:37:03 Setting UpdateMappingPrefix with value 
+[1] 2026-11-06 02:37:03 Setting UseDirectIO with value false
+[1] 2026-11-06 02:37:03 Setting UseMultiChunkPosting with value false
+[1] 2026-11-06 02:37:03 Setting VersionChunkSize with value 4096
+[1] 2026-11-06 02:37:03 Setting ZstdCompressLevel with value 0
+[1] 2026-11-06 02:37:03 Setting IndexDirectory with value /tmp/sptag-fileio-b6dd-79bb
+[1] 2026-11-06 02:37:03 Load Vector (32,2) Finish!
+[1] 2026-11-06 02:37:03 Load BKT (1,34) Finish!
+[1] 2026-11-06 02:37:03 Load RNG (32,8) Finish!
+[1] 2026-11-06 02:37:03 Load DeleteID (32,1) Finish!
+[1] 2026-11-06 02:37:03 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:03 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:03 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:03 Loading headID map
+[1] 2026-11-06 02:37:03 Load Data (32,1) Finish!
+[1] 2026-11-06 02:37:03 SPANNIndex:UseFileIO
+[1] 2026-11-06 02:37:03 Load mapping From /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0
+[1] 2026-11-06 02:37:03 Load block mapping (32,8) Finish!
+[1] 2026-11-06 02:37:03 Load block mapping successfully from /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0!
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Initialize(ssdmapping_0, 64)
+[1] 2026-11-06 02:37:03 AsyncFileIO::Open a file
+[1] 2026-11-06 02:37:03 AsyncFileIO::InitializeFileIo: file has been created with enough space.
+[1] 2026-11-06 02:37:03 AsyncFileIO::InitializeFileIo: file /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings opened, fd=10 threads=6 maxNumBlocks=64
+[1] 2026-11-06 02:37:03 FileIO::BlockController:Loading block pool from file:/tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings
+[1] 2026-11-06 02:37:03 FileIO::BlockController::Load blockpool from /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:03 FileIO::BlockController::LoadBlockPool: reading 262112 free blocks into pool (0.00 GB), total allocated: 262144 blocks
+[1] 2026-11-06 02:37:03 FileIO::BlockController::LoadBlockPool: block pool initialized. Available: 262112, Total allocated: 262144
+[1] 2026-11-06 02:37:03 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:03 Using local in-memory VersionMap (layer=0)
+[1] 2026-11-06 02:37:03 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:03 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:03 Loading storage
+[1] 2026-11-06 02:37:03 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:03 Load mapping From /tmp/sptag-fileio-b6dd-79bb/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:03 Load mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:03 SPFresh: initialize thread pools, append: 1, reassign 0
+[1] 2026-11-06 02:37:03 SPFresh: finish initialization
+[1] 2026-11-06 02:37:04 Save mapping To /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0
+[1] 2026-11-06 02:37:04 Save block mapping (32, 8) Finish! Total: 32
+[1] 2026-11-06 02:37:04 FileIO:BlockController:ShutDown!
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Total allocated blocks: 262144
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Remaining free blocks: 262112
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Saving to file: /tmp/sptag-fileio-b6dd-79bb/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Close file handler
+[1] 2026-11-06 02:37:04 AsyncFileReader: ShutDown!
+[1] 2026-11-06 02:37:04 AsyncFileReader: Destroying fd=10!
+[1] 2026-11-06 02:37:04 Setting IndexDirectory with value /tmp/sptag-fileio-12c2-3af4
+[1] 2026-11-06 02:37:04 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:04 Setting IndexAlgoType with value BKT
+[1] 2026-11-06 02:37:04 Setting ValueType with value UInt8
+[1] 2026-11-06 02:37:04 Setting isExecute with value true
+[1] 2026-11-06 02:37:04 Setting SelectHeadType with value Random
+[1] 2026-11-06 02:37:04 Setting Ratio with value 0.5
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Setting isExecute with value true
+[1] 2026-11-06 02:37:04 Setting isExecute with value true
+[1] 2026-11-06 02:37:04 Setting BuildSsdIndex with value true
+[1] 2026-11-06 02:37:04 Setting Storage with value FILEIO
+[1] 2026-11-06 02:37:04 Setting Layers with value 2
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Setting SearchThreadNum with value 1
+[1] 2026-11-06 02:37:04 Setting AppendThreadNum with value 1
+[1] 2026-11-06 02:37:04 Setting StartFileSizeGB with value 1
+[1] 2026-11-06 02:37:04 Setting Update with value true
+[1] 2026-11-06 02:37:04 Setting AsyncMergeInSearch with value false
+[1] 2026-11-06 02:37:04 Setting ExcludeHead with value false
+[1] 2026-11-06 02:37:04 Setting ReplicaCount with value 2
+[1] 2026-11-06 02:37:04 SPANNIndex:UseFileIO
+[1] 2026-11-06 02:37:04 Initialize block mapping successfully!
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Initialize(ssdmapping_0, 64)
+[1] 2026-11-06 02:37:04 AsyncFileIO: Create a file
+[1] 2026-11-06 02:37:04 AsyncFileIO::InitializeFileIo: file /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings opened, fd=5 threads=8 maxNumBlocks=64
+[1] 2026-11-06 02:37:04 FileIO::BlockController:Loading block pool from file:/tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings
+[1] 2026-11-06 02:37:04 FileIO::BlockController::LoadBlockPool: initializing fresh pool (no existing file found: /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings_blockpool)
+[1] 2026-11-06 02:37:04 FileIO::BlockController::LoadBlockPool: initialized with 262144 blocks (1.00 GB)
+[1] 2026-11-06 02:37:04 Loading headIDFile for layer -1...
+[1] 2026-11-06 02:37:04 No headIDFile file:
+[1] 2026-11-06 02:37:04 Begin Select Head...
+[1] 2026-11-06 02:37:04 Begin initial data (64,2)...
+[1] 2026-11-06 02:37:04 Begin Adjust Parameters...
+[1] 2026-11-06 02:37:04 Start generating Random head.
+[1] 2026-11-06 02:37:04 Seleted Nodes: 32, about 50.00% of total.
+[1] 2026-11-06 02:37:04 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:04 select head time: 0.00s
+[1] 2026-11-06 02:37:04 Begin Build Head...
+[1] 2026-11-06 02:37:04 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:04 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:04 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:04 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Load Vector(32,2)
+[1] 2026-11-06 02:37:04 Begin build index...
+[1] 2026-11-06 02:37:04 Using PARALLEL BKTree build with 1 threads.
+[1] 2026-11-06 02:37:04 Start to build BKTree 1 (parallel)
+[1] 2026-11-06 02:37:04 Processing level 0 with 1 nodes...
+[1] 2026-11-06 02:37:04 1 BKTree built (parallel), 34 32
+[1] 2026-11-06 02:37:04 Build Tree time (s): 0
+[1] 2026-11-06 02:37:04 build RNG graph!
+[1] 2026-11-06 02:37:04 Refine 0 0%
+[1] 2026-11-06 02:37:04 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:04 Build RNG Graph end!
+[1] 2026-11-06 02:37:04 Build Graph time (s): 0
+[1] 2026-11-06 02:37:04 SaveIndex(/tmp/sptag-fileio-12c2-3af4/HeadIndex_layer0) begin...ready:1 GetNumSamples():32 GetNumDeleted():0
+[1] 2026-11-06 02:37:04 Save Vector (32,2) Finish!
+[1] 2026-11-06 02:37:04 Save BKT (1,34) Finish!
+[1] 2026-11-06 02:37:04 Save RNG (32,8) Finish!
+[1] 2026-11-06 02:37:04 Save DeleteID (32,1) Finish!
+[1] 2026-11-06 02:37:04 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:04 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:04 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:04 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:04 Setting EnableBfs with value 0
+[1] 2026-11-06 02:37:04 Setting BKTNumber with value 1
+[1] 2026-11-06 02:37:04 Setting BKTKmeansK with value 32
+[1] 2026-11-06 02:37:04 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:04 Setting Samples with value 1000
+[1] 2026-11-06 02:37:04 Setting BKTLambdaFactor with value 100.000000
+[1] 2026-11-06 02:37:04 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:04 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:04 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:04 Setting NumTopDimensionTpTreeSplit with value 5
+[1] 2026-11-06 02:37:04 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:04 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:04 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:04 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:04 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:04 Setting CEF with value 1000
+[1] 2026-11-06 02:37:04 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:04 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:04 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:04 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:04 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:04 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:04 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:04 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:04 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:04 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:04 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:04 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:04 Setting MaxCheck with value 8192
+[1] 2026-11-06 02:37:04 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:04 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:04 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:04 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:04 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:04 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:04 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:04 Load Vector (32,2) Finish!
+[1] 2026-11-06 02:37:04 Load BKT (1,34) Finish!
+[1] 2026-11-06 02:37:04 Load RNG (32,8) Finish!
+[1] 2026-11-06 02:37:04 Load DeleteID (32,1) Finish!
+[1] 2026-11-06 02:37:04 select head time: 0.00s build head time: 0.00s
+[1] 2026-11-06 02:37:04 Begin Build SSDIndex...
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:04 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:04 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:04 Using local in-memory VersionMap (layer=0)
+[1] 2026-11-06 02:37:04 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:04 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:04 Load Data (32,1) Finish!
+[1] 2026-11-06 02:37:04 Build SSD Index.
+[1] 2026-11-06 02:37:04 Full vector count:64 Edge bytes:12 selection size:128, capacity size:128
+[1] 2026-11-06 02:37:04 Preparation done, start candidate searching.
+[1] 2026-11-06 02:37:04 Batch 0 vector(0,64) loaded with 64 vectors (128) HeadIndex acc @64:1.000000.
+[1] 2026-11-06 02:37:04 Searching replicas ended. RNG failed count: 141
+[1] 2026-11-06 02:37:04 Batch 0 finished!
+[1] 2026-11-06 02:37:04 Searching replicas ended. Search Time: 0.00 mins
+[1] 2026-11-06 02:37:04 Time to sort selections:0.00 sec.
+[1] 2026-11-06 02:37:04 Posting size limit: 1755
+[1] 2026-11-06 02:37:04 Before Posting Cut:
+[1] 2026-11-06 02:37:04 Replica Count Dist: 0, 0
+[1] 2026-11-06 02:37:04 Replica Count Dist: 1, 4
+[1] 2026-11-06 02:37:04 Replica Count Dist: 2, 60
+[1] 2026-11-06 02:37:04 After Posting Cut:
+[1] 2026-11-06 02:37:04 Replica Count Dist: 0, 0
+[1] 2026-11-06 02:37:04 Replica Count Dist: 1, 4
+[1] 2026-11-06 02:37:04 Replica Count Dist: 2, 60
+[1] 2026-11-06 02:37:04 Posting cut original:124 relax:124
+[1] 2026-11-06 02:37:04 Posting cut overflowHeadCount:0 droppedReplicaCount:0 zeroReplicaCount:0
+[1] 2026-11-06 02:37:04 Time to perform posting cut:0.00 sec.
+[1] 2026-11-06 02:37:04 SPFresh: initialize p_localToGlobal(0) and versionMap (64)
+[1] 2026-11-06 02:37:04 SPFresh: Writing values to DB
+[1] 2026-11-06 02:37:04 Save Data To /tmp/sptag-fileio-12c2-3af4/SPTAGHeadVectorIDs.bin_layer0
+[1] 2026-11-06 02:37:04 Save Data (32,1) Finish!
+[1] 2026-11-06 02:37:04 SPFresh: save versionMap
+[1] 2026-11-06 02:37:04 Save mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:04 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:04 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:04 Load mapping From /tmp/sptag-fileio-12c2-3af4/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:04 Load mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:04 SPFresh: initialize thread pools, append: 1, reassign 0
+[1] 2026-11-06 02:37:04 SPFresh: finish initialization
+[1] 2026-11-06 02:37:04 select head time: 0.00s build head time: 0.00s build ssd time: 0.00s
+[1] 2026-11-06 02:37:04 Copied localToGlobalID from /tmp/sptag-fileio-12c2-3af4/SPTAGHeadVectorIDs.bin_layer0 to /tmp/sptag-fileio-12c2-3af4/SPTAGHeadVectorIDs.bin for layer 1
+[1] 2026-11-06 02:37:04 Loading headIDFile for layer 0...
+[1] 2026-11-06 02:37:04 Load Data (32,1) Finish!
+[1] 2026-11-06 02:37:04 Load Vector(32,2)
+[1] 2026-11-06 02:37:04 Begin Select Head...
+[1] 2026-11-06 02:37:04 Load Vector(32,2)
+[1] 2026-11-06 02:37:04 Begin initial data (32,2)...
+[1] 2026-11-06 02:37:04 Begin Adjust Parameters...
+[1] 2026-11-06 02:37:04 Setting of cluster number is less than head count, adjust it to 16
+[1] 2026-11-06 02:37:04 Start generating Random head.
+[1] 2026-11-06 02:37:04 Seleted Nodes: 16, about 50.00% of total.
+[1] 2026-11-06 02:37:04 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:04 select head time: 0.00s
+[1] 2026-11-06 02:37:04 Begin Build Head...
+[1] 2026-11-06 02:37:04 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:04 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:04 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:04 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Load Vector(16,2)
+[1] 2026-11-06 02:37:04 Begin build index...
+[1] 2026-11-06 02:37:04 Using PARALLEL BKTree build with 1 threads.
+[1] 2026-11-06 02:37:04 Start to build BKTree 1 (parallel)
+[1] 2026-11-06 02:37:04 Processing level 0 with 1 nodes...
+[1] 2026-11-06 02:37:04 1 BKTree built (parallel), 18 16
+[1] 2026-11-06 02:37:04 Build Tree time (s): 0
+[1] 2026-11-06 02:37:04 build RNG graph!
+[1] 2026-11-06 02:37:04 Refine 0 0%
+[1] 2026-11-06 02:37:04 Refine RNG time (s): 0 Graph Acc: 1.000000
+[1] 2026-11-06 02:37:04 Build RNG Graph end!
+[1] 2026-11-06 02:37:04 Build Graph time (s): 0
+[1] 2026-11-06 02:37:04 SaveIndex(/tmp/sptag-fileio-12c2-3af4/HeadIndex) begin...ready:1 GetNumSamples():16 GetNumDeleted():0
+[1] 2026-11-06 02:37:04 Save Vector (16,2) Finish!
+[1] 2026-11-06 02:37:04 Save BKT (1,18) Finish!
+[1] 2026-11-06 02:37:04 Save RNG (16,8) Finish!
+[1] 2026-11-06 02:37:04 Save DeleteID (16,1) Finish!
+[1] 2026-11-06 02:37:04 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:04 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:04 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:04 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:04 Setting EnableBfs with value 0
+[1] 2026-11-06 02:37:04 Setting BKTNumber with value 1
+[1] 2026-11-06 02:37:04 Setting BKTKmeansK with value 32
+[1] 2026-11-06 02:37:04 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:04 Setting Samples with value 1000
+[1] 2026-11-06 02:37:04 Setting BKTLambdaFactor with value 100.000000
+[1] 2026-11-06 02:37:04 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:04 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:04 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:04 Setting NumTopDimensionTpTreeSplit with value 5
+[1] 2026-11-06 02:37:04 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:04 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:04 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:04 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:04 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:04 Setting CEF with value 1000
+[1] 2026-11-06 02:37:04 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:04 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:04 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:04 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:04 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:04 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:04 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:04 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:04 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:04 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:04 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:04 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:04 Setting MaxCheck with value 8192
+[1] 2026-11-06 02:37:04 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:04 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:04 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:04 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:04 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:04 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:04 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:04 Load Vector (16,2) Finish!
+[1] 2026-11-06 02:37:04 Load BKT (1,18) Finish!
+[1] 2026-11-06 02:37:04 Load RNG (16,8) Finish!
+[1] 2026-11-06 02:37:04 Load DeleteID (16,1) Finish!
+[1] 2026-11-06 02:37:04 select head time: 0.00s build head time: 0.00s
+[1] 2026-11-06 02:37:04 Begin Build SSDIndex...
+[1] 2026-11-06 02:37:04 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:04 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:04 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:04 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:04 Using local in-memory VersionMap (layer=1)
+[1] 2026-11-06 02:37:04 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:04 [CONFIG] layer=1 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:04 Load Data (16,1) Finish!
+[1] 2026-11-06 02:37:04 Load Vector(32,2)
+[1] 2026-11-06 02:37:04 Build SSD Index.
+[1] 2026-11-06 02:37:04 Full vector count:32 Edge bytes:12 selection size:64, capacity size:64
+[1] 2026-11-06 02:37:04 Preparation done, start candidate searching.
+[1] 2026-11-06 02:37:04 Load Vector(32,2)
+[1] 2026-11-06 02:37:04 Batch 0 vector(0,32) loaded with 32 vectors (64) HeadIndex acc @64:1.000000.
+[1] 2026-11-06 02:37:04 Searching replicas ended. RNG failed count: 79
+[1] 2026-11-06 02:37:04 Batch 0 finished!
+[1] 2026-11-06 02:37:04 Searching replicas ended. Search Time: 0.00 mins
+[1] 2026-11-06 02:37:04 Time to sort selections:0.00 sec.
+[1] 2026-11-06 02:37:04 Posting size limit: 1755
+[1] 2026-11-06 02:37:04 Before Posting Cut:
+[1] 2026-11-06 02:37:04 Replica Count Dist: 0, 0
+[1] 2026-11-06 02:37:04 Replica Count Dist: 1, 5
+[1] 2026-11-06 02:37:04 Replica Count Dist: 2, 27
+[1] 2026-11-06 02:37:04 After Posting Cut:
+[1] 2026-11-06 02:37:04 Replica Count Dist: 0, 0
+[1] 2026-11-06 02:37:04 Replica Count Dist: 1, 5
+[1] 2026-11-06 02:37:04 Replica Count Dist: 2, 27
+[1] 2026-11-06 02:37:04 Posting cut original:59 relax:59
+[1] 2026-11-06 02:37:04 Posting cut overflowHeadCount:0 droppedReplicaCount:0 zeroReplicaCount:0
+[1] 2026-11-06 02:37:04 Time to perform posting cut:0.00 sec.
+[1] 2026-11-06 02:37:04 Load Vector(32,2)
+[1] 2026-11-06 02:37:04 SPFresh: initialize p_localToGlobal(32) and versionMap (32)
+[1] 2026-11-06 02:37:04 SPFresh: Writing values to DB
+[1] 2026-11-06 02:37:04 Save Data To /tmp/sptag-fileio-12c2-3af4/SPTAGHeadVectorIDs.bin
+[1] 2026-11-06 02:37:04 Save Data (16,1) Finish!
+[1] 2026-11-06 02:37:04 SPFresh: save versionMap
+[1] 2026-11-06 02:37:04 Save mapping (32, 1) Finish!
+[1] 2026-11-06 02:37:04 Total used time: 0.00 minutes (about 0.00 hours).
+[1] 2026-11-06 02:37:04 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:04 Load mapping From /tmp/sptag-fileio-12c2-3af4/DeletedIDs.bin_1
+[1] 2026-11-06 02:37:04 Load mapping (32, 1) Finish!
+[1] 2026-11-06 02:37:04 SPFresh: initialize thread pools, append: 1, reassign 0
+[1] 2026-11-06 02:37:04 SPFresh: finish initialization
+[1] 2026-11-06 02:37:04 select head time: 0.00s build head time: 0.00s build ssd time: 0.00s
+[1] 2026-11-06 02:37:04 SaveIndex(/tmp/sptag-fileio-12c2-3af4) begin...ready:1 GetNumSamples():64 GetNumDeleted():0
+[1] 2026-11-06 02:37:04 SaveIndexData: waiting for all background jobs to finish...
+[1] 2026-11-06 02:37:04 SaveIndexData: all background jobs finished (waited 0 s)
+[1] 2026-11-06 02:37:04 Save Vector (16,2) Finish!
+[1] 2026-11-06 02:37:04 Save BKT (1,18) Finish!
+[1] 2026-11-06 02:37:04 Save RNG (16,8) Finish!
+[1] 2026-11-06 02:37:04 Save DeleteID (16,1) Finish!
+[1] 2026-11-06 02:37:04 Save Data (16,1) Finish!
+[1] 2026-11-06 02:37:04 Checkpoint: waiting for index update complete (layer 0)
+[1] 2026-11-06 02:37:04 Checkpoint: layer 0 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:04 Saving version map
+[1] 2026-11-06 02:37:04 Save mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:04 Checkpoint: waiting for index update complete (layer 1)
+[1] 2026-11-06 02:37:04 Checkpoint: layer 1 background jobs done (waited 0 s)
+[1] 2026-11-06 02:37:04 Saving version map
+[1] 2026-11-06 02:37:04 Save mapping (32, 1) Finish!
+[1] 2026-11-06 02:37:04 FileIO: saving block mapping to /tmp/sptag-fileio-12c2-3af4/ssdmapping_0
+[1] 2026-11-06 02:37:04 Save mapping To /tmp/sptag-fileio-12c2-3af4/ssdmapping_0
+[1] 2026-11-06 02:37:04 Save block mapping (48, 8) Finish! Total: 48
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Total allocated blocks: 262144
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Remaining free blocks: 262096
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Saving to file: /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-06 02:37:04 Load mapping From /tmp/sptag-fileio-12c2-3af4/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:04 Load mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:04 Load mapping From /tmp/sptag-fileio-12c2-3af4/DeletedIDs.bin_1
+[1] 2026-11-06 02:37:04 Load mapping (32, 1) Finish!
+[1] 2026-11-06 02:37:04 Save mapping To /tmp/sptag-fileio-12c2-3af4/ssdmapping_0
+[1] 2026-11-06 02:37:04 Save block mapping (48, 8) Finish! Total: 48
+[1] 2026-11-06 02:37:04 FileIO:BlockController:ShutDown!
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Total allocated blocks: 262144
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Remaining free blocks: 262096
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Saving to file: /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-06 02:37:04 FileIO::BlockController::Close file handler
+[1] 2026-11-06 02:37:05 AsyncFileReader: ShutDown!
+[1] 2026-11-06 02:37:05 AsyncFileReader: Destroying fd=5!
+[1] 2026-11-06 02:37:05 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:05 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:05 Setting DeletedIDs with value DeletedIDs.bin
+[1] 2026-11-06 02:37:05 Setting DeleteHeadVectors with value false
+[1] 2026-11-06 02:37:05 Setting Dim with value 2
+[1] 2026-11-06 02:37:05 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:05 Setting GenerateTruth with value false
+[1] 2026-11-06 02:37:05 Setting GlobalIDPath with value 
+[1] 2026-11-06 02:37:05 Setting HeadIndexFolder with value HeadIndex
+[1] 2026-11-06 02:37:05 Setting HeadVectorIDs with value SPTAGHeadVectorIDs.bin
+[1] 2026-11-06 02:37:05 Setting HeadVectors with value SPTAGHeadVectors.bin
+[1] 2026-11-06 02:37:05 Setting IndexAlgoType with value BKT
+[1] 2026-11-06 02:37:05 Setting IndexDirectory with value /tmp/sptag-fileio-12c2-3af4
+[1] 2026-11-06 02:37:05 Setting QuantizerFilePath with value 
+[1] 2026-11-06 02:37:05 Setting QueryDelimiter with value |
+[1] 2026-11-06 02:37:05 Setting QueryPath with value 
+[1] 2026-11-06 02:37:05 Setting QuerySize with value -1
+[1] 2026-11-06 02:37:05 Setting QueryType with value Undefined
+[1] 2026-11-06 02:37:05 Setting SSDIndex with value SPTAGFullList.bin
+[1] 2026-11-06 02:37:05 Setting SSDIndexFileNum with value 1
+[1] 2026-11-06 02:37:05 Setting TruthPath with value 
+[1] 2026-11-06 02:37:05 Setting TruthType with value Undefined
+[1] 2026-11-06 02:37:05 Setting ValueType with value UInt8
+[1] 2026-11-06 02:37:05 Setting VectorDelimiter with value |
+[1] 2026-11-06 02:37:05 Setting VectorPath with value 
+[1] 2026-11-06 02:37:05 Setting VectorSize with value 64
+[1] 2026-11-06 02:37:05 Setting VectorType with value DEFAULT
+[1] 2026-11-06 02:37:05 Setting WarmupDelimiter with value |
+[1] 2026-11-06 02:37:05 Setting WarmupPath with value 
+[1] 2026-11-06 02:37:05 Setting WarmupSize with value -1
+[1] 2026-11-06 02:37:05 Setting WarmupType with value Undefined
+[1] 2026-11-06 02:37:05 Setting AnalyzeOnly with value false
+[1] 2026-11-06 02:37:05 Setting BKTKmeansK with value 16
+[1] 2026-11-06 02:37:05 Setting BKTLambdaFactor with value -1.000000
+[1] 2026-11-06 02:37:05 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:05 Setting CalcStd with value false
+[1] 2026-11-06 02:37:05 Setting Count with value 0
+[1] 2026-11-06 02:37:05 Setting isExecute with value true
+[1] 2026-11-06 02:37:05 Setting NoOutput with value false
+[1] 2026-11-06 02:37:05 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:05 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:05 Setting PrintSizeCount with value true
+[1] 2026-11-06 02:37:05 Setting Ratio with value 0.500000
+[1] 2026-11-06 02:37:05 Setting RecursiveCheckSmallCluster with value true
+[1] 2026-11-06 02:37:05 Setting SamplesNumber with value 1000
+[1] 2026-11-06 02:37:05 Setting SaveBKT with value false
+[1] 2026-11-06 02:37:05 Setting SelectDynamically with value true
+[1] 2026-11-06 02:37:05 Setting SelectHeadType with value Random
+[1] 2026-11-06 02:37:05 Setting SelectThreshold with value 6
+[1] 2026-11-06 02:37:05 Setting SplitFactor with value 5
+[1] 2026-11-06 02:37:05 Setting SplitMaxTry with value 8
+[1] 2026-11-06 02:37:05 Setting SplitThreshold with value 25
+[1] 2026-11-06 02:37:05 Setting TreeNumber with value 1
+[1] 2026-11-06 02:37:05 Setting AddCEF with value 500
+[1] 2026-11-06 02:37:05 Setting AddCountForRebuild with value 1000
+[1] 2026-11-06 02:37:05 Setting BKTKmeansK with value 32
+[1] 2026-11-06 02:37:05 Setting BKTLambdaFactor with value 100.000000
+[1] 2026-11-06 02:37:05 Setting BKTLeafSize with value 8
+[1] 2026-11-06 02:37:05 Setting BKTNumber with value 1
+[1] 2026-11-06 02:37:05 Setting CEF with value 1000
+[1] 2026-11-06 02:37:05 Setting DataBlockSize with value 1048576
+[1] 2026-11-06 02:37:05 Setting DataCapacity with value 2147483647
+[1] 2026-11-06 02:37:05 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:05 Setting DeleteVectorFilePath with value deletes.bin
+[1] 2026-11-06 02:37:05 Setting DistCalcMethod with value L2
+[1] 2026-11-06 02:37:05 Setting EnableBfs with value 0
+[1] 2026-11-06 02:37:05 Setting EnableRebuild with value 0
+[1] 2026-11-06 02:37:05 Setting GPUGraphType with value 2
+[1] 2026-11-06 02:37:05 Setting GPULeafSize with value 500
+[1] 2026-11-06 02:37:05 Setting GPURefineDepth with value 30
+[1] 2026-11-06 02:37:05 Setting GPURefineSteps with value 0
+[1] 2026-11-06 02:37:05 Setting GraphCEFScale with value 2.000000
+[1] 2026-11-06 02:37:05 Setting GraphFilePath with value graph.bin
+[1] 2026-11-06 02:37:05 Setting GraphNeighborhoodScale with value 2.000000
+[1] 2026-11-06 02:37:05 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:05 Setting HeadNumGPUs with value 1
+[1] 2026-11-06 02:37:05 Setting isExecute with value true
+[1] 2026-11-06 02:37:05 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:05 Setting MaxCheckForRefineGraph with value 8192
+[1] 2026-11-06 02:37:05 Setting MetaRecordSize with value 10
+[1] 2026-11-06 02:37:05 Setting NeighborhoodSize with value 8
+[1] 2026-11-06 02:37:05 Setting NumberOfInitialDynamicPivots with value 50
+[1] 2026-11-06 02:37:05 Setting NumberOfOtherDynamicPivots with value 4
+[1] 2026-11-06 02:37:05 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:05 Setting NumTopDimensionTpTreeSplit with value 5
+[1] 2026-11-06 02:37:05 Setting ParallelBKTBuild with value true
+[1] 2026-11-06 02:37:05 Setting ParallelTPTBuild with value true
+[1] 2026-11-06 02:37:05 Setting RefineIterations with value 1
+[1] 2026-11-06 02:37:05 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:05 Setting Samples with value 1000
+[1] 2026-11-06 02:37:05 Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] 2026-11-06 02:37:05 Setting TPTBalanceFactor with value 2
+[1] 2026-11-06 02:37:05 Setting TPTLeafSize with value 2000
+[1] 2026-11-06 02:37:05 Setting TPTNumber with value 32
+[1] 2026-11-06 02:37:05 Setting TreeFilePath with value tree.bin
+[1] 2026-11-06 02:37:05 Setting VectorFilePath with value vectors.bin
+[1] 2026-11-06 02:37:05 Setting AllowZeroReplica with value false
+[1] 2026-11-06 02:37:05 Setting AppendThreadNum with value 1
+[1] 2026-11-06 02:37:05 Setting AsyncAppendQueueSize with value 0
+[1] 2026-11-06 02:37:05 Setting AsyncMergeInSearch with value false
+[1] 2026-11-06 02:37:05 Setting AsyncRpcMaxInflight with value 0
+[1] 2026-11-06 02:37:05 Setting Batch with value 1000
+[1] 2026-11-06 02:37:05 Setting Batches with value 1
+[1] 2026-11-06 02:37:05 Setting BufferLength with value 3
+[1] 2026-11-06 02:37:05 Setting BuildSsdIndex with value true
+[1] 2026-11-06 02:37:05 Setting CacheShards with value 1
+[1] 2026-11-06 02:37:05 Setting CacheSizeGB with value 0
+[1] 2026-11-06 02:37:05 Setting CalTruth with value true
+[1] 2026-11-06 02:37:05 Setting CenteringToZero with value false
+[1] 2026-11-06 02:37:05 Setting ChecksumCheck with value false
+[1] 2026-11-06 02:37:05 Setting ChecksumFile with value checksum
+[1] 2026-11-06 02:37:05 Setting ChecksumInRead with value false
+[1] 2026-11-06 02:37:05 Setting ConsistencyCheck with value false
+[1] 2026-11-06 02:37:05 Setting Days with value 0
+[1] 2026-11-06 02:37:05 Setting DebugBuildInternalResultNum with value 64
+[1] 2026-11-06 02:37:05 Setting DeletePercentageForRefine with value 0.400000
+[1] 2026-11-06 02:37:05 Setting DeleteQPS with value -1
+[1] 2026-11-06 02:37:05 Setting DictBufferCapacity with value 204800
+[1] 2026-11-06 02:37:05 Setting DisableCheckpoint with value false
+[1] 2026-11-06 02:37:05 Setting DisableReassign with value false
+[1] 2026-11-06 02:37:05 Setting DistributedVersionMap with value true
+[1] 2026-11-06 02:37:05 Setting EnableADC with value false
+[1] 2026-11-06 02:37:05 Setting EnableDataCompression with value false
+[1] 2026-11-06 02:37:05 Setting EnableDeltaEncoding with value false
+[1] 2026-11-06 02:37:05 Setting EnableDictTraining with value true
+[1] 2026-11-06 02:37:05 Setting EnablePostingListRearrange with value false
+[1] 2026-11-06 02:37:05 Setting EnableWAL with value false
+[1] 2026-11-06 02:37:05 Setting EndVectorNum with value -1
+[1] 2026-11-06 02:37:05 Setting ExcludeHead with value false
+[1] 2026-11-06 02:37:05 Setting FullDeletedIDFile with value fulldeleted
+[1] 2026-11-06 02:37:05 Setting FullVectorPath with value 
+[1] 2026-11-06 02:37:05 Setting GPUSSDLeafSize with value 200
+[1] 2026-11-06 02:37:05 Setting GPUSSDNumTrees with value 100
+[1] 2026-11-06 02:37:05 Setting GrowthFileSizeGB with value 10
+[1] 2026-11-06 02:37:05 Setting GrowthThreshold with value 0.050000
+[1] 2026-11-06 02:37:05 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:05 Setting InPlace with value true
+[1] 2026-11-06 02:37:05 Setting InsertThreadNum with value 1
+[1] 2026-11-06 02:37:05 Setting InternalResultNum with value 64
+[1] 2026-11-06 02:37:05 Setting IOThreadsPerHandler with value 4
+[1] 2026-11-06 02:37:05 Setting IOTimeout with value 30
+[1] 2026-11-06 02:37:05 Setting isExecute with value true
+[1] 2026-11-06 02:37:05 Setting IterativeSearchHeadBatch with value 32
+[1] 2026-11-06 02:37:05 Setting KVFile with value rocksdb
+[1] 2026-11-06 02:37:05 Setting LatencyLimit with value 10.000000
+[1] 2026-11-06 02:37:05 Setting Layers with value 2
+[1] 2026-11-06 02:37:05 Setting LoadAllVectors with value false
+[1] 2026-11-06 02:37:05 Setting LogFile with value 
+[1] 2026-11-06 02:37:05 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:05 Setting MaxDistRatio with value 10000.000000
+[1] 2026-11-06 02:37:05 Setting MaxFileSizeGB with value 300
+[1] 2026-11-06 02:37:05 Setting MaxID with value 1000000000
+[1] 2026-11-06 02:37:05 Setting MaxInternalResultNum with value -1
+[1] 2026-11-06 02:37:05 Setting MergeThreshold with value 10
+[1] 2026-11-06 02:37:05 Setting MinDictTrainingBufferSize with value 10240000
+[1] 2026-11-06 02:37:05 Setting MinInternalResultNum with value -1
+[1] 2026-11-06 02:37:05 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:05 Setting NumGPUs with value 1
+[1] 2026-11-06 02:37:05 Setting OneClusterCutMax with value false
+[1] 2026-11-06 02:37:05 Setting OnlySearchFinalBatch with value false
+[1] 2026-11-06 02:37:05 Setting OutOfPlace with value false
+[1] 2026-11-06 02:37:05 Setting OutputEmptyReplicaID with value false
+[1] 2026-11-06 02:37:05 Setting PersistentBufferPath with value 
+[1] 2026-11-06 02:37:05 Setting PostingCountCacheCapacity with value 100000
+[1] 2026-11-06 02:37:05 Setting PostingPageLimit with value 3
+[1] 2026-11-06 02:37:05 Setting PostingVectorLimit with value 118
+[1] 2026-11-06 02:37:05 Setting QpsLimit with value 0
+[1] 2026-11-06 02:37:05 Setting QueryCountLimit with value 2147483647
+[1] 2026-11-06 02:37:05 Setting ReassignK with value 0
+[1] 2026-11-06 02:37:05 Setting ReassignThreadNum with value 0
+[1] 2026-11-06 02:37:05 Setting RecallAnalysis with value false
+[1] 2026-11-06 02:37:05 Setting RecallTestSampleNumber with value 100
+[1] 2026-11-06 02:37:05 Setting Recovery with value false
+[1] 2026-11-06 02:37:05 Setting ReplicaCount with value 2
+[1] 2026-11-06 02:37:05 Setting Rerank with value 0
+[1] 2026-11-06 02:37:05 Setting ResultNum with value 5
+[1] 2026-11-06 02:37:05 Setting ResumeLayer with value -1
+[1] 2026-11-06 02:37:05 Setting RNGFactor with value 1.000000
+[1] 2026-11-06 02:37:05 Setting Sampling with value -1
+[1] 2026-11-06 02:37:05 Setting SearchCheckVersionMapOnlyLayer0 with value false
+[1] 2026-11-06 02:37:05 Setting SearchDuringUpdate with value false
+[1] 2026-11-06 02:37:05 Setting SearchInternalResultNum with value 64
+[1] 2026-11-06 02:37:05 Setting SearchPostingPageLimit with value 3
+[1] 2026-11-06 02:37:05 Setting SearchResult with value 
+[1] 2026-11-06 02:37:05 Setting SearchThreadNum with value 1
+[1] 2026-11-06 02:37:05 Setting SearchTimes with value 1
+[1] 2026-11-06 02:37:05 Setting ShareDB with value true
+[1] 2026-11-06 02:37:05 Setting ShowUpdateProgress with value true
+[1] 2026-11-06 02:37:05 Setting SpdkBatchSize with value 64
+[1] 2026-11-06 02:37:05 Setting SsdInfoFile with value ssdinfo
+[1] 2026-11-06 02:37:05 Setting SsdMappingFile with value ssdmapping
+[1] 2026-11-06 02:37:05 Setting StartFileSizeGB with value 1
+[1] 2026-11-06 02:37:05 Setting SteadyState with value false
+[1] 2026-11-06 02:37:05 Setting Step with value 0
+[1] 2026-11-06 02:37:05 Setting StepInternalResultNum with value -1
+[1] 2026-11-06 02:37:05 Setting Storage with value FILEIO
+[1] 2026-11-06 02:37:05 Setting StressTest with value false
+[1] 2026-11-06 02:37:05 Setting TiKVKeyPrefix with value spann
+[1] 2026-11-06 02:37:05 Setting TiKVPDAddresses with value 127.0.0.1:2379
+[1] 2026-11-06 02:37:05 Setting TmpDir with value .
+[1] 2026-11-06 02:37:05 Setting TruthFilePrefix with value 
+[1] 2026-11-06 02:37:05 Setting TruthResultNum with value -1
+[1] 2026-11-06 02:37:05 Setting Update with value true
+[1] 2026-11-06 02:37:05 Setting UpdateFilePrefix with value 
+[1] 2026-11-06 02:37:05 Setting UpdateMappingPrefix with value 
+[1] 2026-11-06 02:37:05 Setting UseDirectIO with value false
+[1] 2026-11-06 02:37:05 Setting UseMultiChunkPosting with value false
+[1] 2026-11-06 02:37:05 Setting VersionChunkSize with value 4096
+[1] 2026-11-06 02:37:05 Setting ZstdCompressLevel with value 0
+[1] 2026-11-06 02:37:05 Setting IndexDirectory with value /tmp/sptag-fileio-12c2-3af4
+[1] 2026-11-06 02:37:05 Load Vector (16,2) Finish!
+[1] 2026-11-06 02:37:05 Load BKT (1,18) Finish!
+[1] 2026-11-06 02:37:05 Load RNG (16,8) Finish!
+[1] 2026-11-06 02:37:05 Load DeleteID (16,1) Finish!
+[1] 2026-11-06 02:37:05 Setting NumberOfThreads with value 1
+[1] 2026-11-06 02:37:05 Setting MaxCheck with value 4096
+[1] 2026-11-06 02:37:05 Setting HashTableExponent with value 4
+[1] 2026-11-06 02:37:05 Loading headID map
+[1] 2026-11-06 02:37:05 Load Data (16,1) Finish!
+[1] 2026-11-06 02:37:05 SPANNIndex:UseFileIO
+[1] 2026-11-06 02:37:05 Load mapping From /tmp/sptag-fileio-12c2-3af4/ssdmapping_0
+[1] 2026-11-06 02:37:05 Load block mapping (48,8) Finish!
+[1] 2026-11-06 02:37:05 Load block mapping successfully from /tmp/sptag-fileio-12c2-3af4/ssdmapping_0!
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Initialize(ssdmapping_0, 64)
+[1] 2026-11-06 02:37:05 AsyncFileIO::Open a file
+[1] 2026-11-06 02:37:05 AsyncFileIO::InitializeFileIo: file has been created with enough space.
+[1] 2026-11-06 02:37:05 AsyncFileIO::InitializeFileIo: file /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings opened, fd=10 threads=8 maxNumBlocks=64
+[1] 2026-11-06 02:37:05 FileIO::BlockController:Loading block pool from file:/tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Load blockpool from /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:05 FileIO::BlockController::LoadBlockPool: reading 262096 free blocks into pool (0.00 GB), total allocated: 262144 blocks
+[1] 2026-11-06 02:37:05 FileIO::BlockController::LoadBlockPool: block pool initialized. Available: 262096, Total allocated: 262144
+[1] 2026-11-06 02:37:05 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:05 Using local in-memory VersionMap (layer=1)
+[1] 2026-11-06 02:37:05 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:05 [CONFIG] layer=1 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:05 Loading storage
+[1] 2026-11-06 02:37:05 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:05 Load mapping From /tmp/sptag-fileio-12c2-3af4/DeletedIDs.bin_1
+[1] 2026-11-06 02:37:05 Load mapping (32, 1) Finish!
+[1] 2026-11-06 02:37:05 SPFresh: initialize thread pools, append: 1, reassign 0
+[1] 2026-11-06 02:37:05 SPFresh: finish initialization
+[1] 2026-11-06 02:37:05 Setting index with posting page limit:3
+[1] 2026-11-06 02:37:05 Using local in-memory VersionMap (layer=0)
+[1] 2026-11-06 02:37:05 Posting size limit: 1755, search limit: 10.000000, merge threshold: 10
+[1] 2026-11-06 02:37:05 [CONFIG] layer=0 DistributedVersionMap=true SearchCheckVersionMapOnlyLayer0=false UseMultiChunkPosting=false PostingPageLimit=3
+[1] 2026-11-06 02:37:05 Loading storage
+[1] 2026-11-06 02:37:05 DataBlockSize: 1048576, Capacity: 2147483647
+[1] 2026-11-06 02:37:05 Load mapping From /tmp/sptag-fileio-12c2-3af4/DeletedIDs.bin_0
+[1] 2026-11-06 02:37:05 Load mapping (64, 1) Finish!
+[1] 2026-11-06 02:37:05 SPFresh: initialize thread pools, append: 1, reassign 0
+[1] 2026-11-06 02:37:05 SPFresh: finish initialization
+[1] 2026-11-06 02:37:05 Save mapping To /tmp/sptag-fileio-12c2-3af4/ssdmapping_0
+[1] 2026-11-06 02:37:05 Save block mapping (48, 8) Finish! Total: 48
+[1] 2026-11-06 02:37:05 FileIO:BlockController:ShutDown!
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Starting block pool save...
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Reload reserved blocks...
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Reloaded blocks: 0
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Total allocated blocks: 262144
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Remaining free blocks: 262096
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Saving to file: /tmp/sptag-fileio-12c2-3af4/ssdmapping_0_postings_blockpool
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Checkpoint - Save Finish!
+[1] 2026-11-06 02:37:05 FileIO::BlockController::Close file handler
+[1] 2026-11-06 02:37:06 AsyncFileReader: ShutDown!
+[1] 2026-11-06 02:37:06 AsyncFileReader: Destroying fd=10!
+
+[1;32;49m*** No errors detected
+[0;39;49m

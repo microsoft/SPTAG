@@ -1,0 +1,1433 @@
+[
+    {
+        "Id": "6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a",
+        "Created": "2026-11-05T07:09:46.798109086Z",
+        "Path": "/pd-server",
+        "Args": [
+            "--name=sift10m-pd1",
+            "--client-urls=http://127.0.0.1:33991",
+            "--advertise-client-urls=http://127.0.0.1:33991",
+            "--peer-urls=http://127.0.0.1:34001",
+            "--advertise-peer-urls=http://127.0.0.1:34001",
+            "--initial-cluster=sift10m-pd1=http://127.0.0.1:34001,sift10m-pd2=http://127.0.0.1:34002,sift10m-pd3=http://127.0.0.1:34003",
+            "--data-dir=/data/pd",
+            "--log-file=/data/pd.log"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-05T07:09:46.959097834Z",
+            "FinishedAt": "2026-11-05T07:59:37.731043578Z"
+        },
+        "Image": "sha256:4996a18bf689914db5820748342710b9a37ed0aaa7816aec4a1e09e5a6b9c401",
+        "ResolvConfPath": "/var/lib/docker/containers/6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a/hostname",
+        "HostsPath": "/var/lib/docker/containers/6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a/hosts",
+        "LogPath": "/var/lib/docker/containers/6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a/6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a-json.log",
+        "Name": "/qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105-pd1",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/pd1:/data"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "ID": "6edc85a71af348ffe20d9fba75ee9b8c7b2f250867a335985b0194ec823c867a",
+                "LowerDir": "/var/lib/docker/overlay2/6cf4627af3dd44c5dedaf38907d9fe722bc8d564427818fd7f9ab276092f9347-init/diff:/var/lib/docker/overlay2/d81f9b9050583baff0249654f87b5c9785a83f2ca23b61f6098abee436579d79/diff:/var/lib/docker/overlay2/9f9882e0a8ac51550574096dcc1c1f8beb6133279741ff015a9110750ff001d8/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/6cf4627af3dd44c5dedaf38907d9fe722bc8d564427818fd7f9ab276092f9347/merged",
+                "UpperDir": "/var/lib/docker/overlay2/6cf4627af3dd44c5dedaf38907d9fe722bc8d564427818fd7f9ab276092f9347/diff",
+                "WorkDir": "/var/lib/docker/overlay2/6cf4627af3dd44c5dedaf38907d9fe722bc8d564427818fd7f9ab276092f9347/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/pd1",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "msccl-dev-000000",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "2379/tcp": {},
+                "2380/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "--name=sift10m-pd1",
+                "--client-urls=http://127.0.0.1:33991",
+                "--advertise-client-urls=http://127.0.0.1:33991",
+                "--peer-urls=http://127.0.0.1:34001",
+                "--advertise-peer-urls=http://127.0.0.1:34001",
+                "--initial-cluster=sift10m-pd1=http://127.0.0.1:34001,sift10m-pd2=http://127.0.0.1:34002,sift10m-pd3=http://127.0.0.1:34003",
+                "--data-dir=/data/pd",
+                "--log-file=/data/pd.log"
+            ],
+            "Image": "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": [
+                "/pd-server"
+            ],
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "org.opencontainers.image.source": "https://github.com/tikv/pd.git",
+                "org.opencontainers.image.title": "pd",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "sptag.run": "qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "fbb029116e930d5f62029338f94dd0d76c7a76ab3472aedb2965dd0129ee0338",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    },
+    {
+        "Id": "a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77",
+        "Created": "2026-11-05T07:09:47.183188692Z",
+        "Path": "/pd-server",
+        "Args": [
+            "--name=sift10m-pd2",
+            "--client-urls=http://127.0.0.1:33992",
+            "--advertise-client-urls=http://127.0.0.1:33992",
+            "--peer-urls=http://127.0.0.1:34002",
+            "--advertise-peer-urls=http://127.0.0.1:34002",
+            "--initial-cluster=sift10m-pd1=http://127.0.0.1:34001,sift10m-pd2=http://127.0.0.1:34002,sift10m-pd3=http://127.0.0.1:34003",
+            "--data-dir=/data/pd",
+            "--log-file=/data/pd.log"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-05T07:09:47.331415362Z",
+            "FinishedAt": "2026-11-05T07:59:28.38754519Z"
+        },
+        "Image": "sha256:4996a18bf689914db5820748342710b9a37ed0aaa7816aec4a1e09e5a6b9c401",
+        "ResolvConfPath": "/var/lib/docker/containers/a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77/hostname",
+        "HostsPath": "/var/lib/docker/containers/a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77/hosts",
+        "LogPath": "/var/lib/docker/containers/a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77/a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77-json.log",
+        "Name": "/qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105-pd2",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/pd2:/data"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "ID": "a247edd7aa7fdd985ddba8ac7cbfe30181792aa5962c1f5fe02fa32383885f77",
+                "LowerDir": "/var/lib/docker/overlay2/68dca5ed06dca8cf00c32cd97900f55c080ad82a7ecf6df2a1b68fe5f3d433ae-init/diff:/var/lib/docker/overlay2/d81f9b9050583baff0249654f87b5c9785a83f2ca23b61f6098abee436579d79/diff:/var/lib/docker/overlay2/9f9882e0a8ac51550574096dcc1c1f8beb6133279741ff015a9110750ff001d8/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/68dca5ed06dca8cf00c32cd97900f55c080ad82a7ecf6df2a1b68fe5f3d433ae/merged",
+                "UpperDir": "/var/lib/docker/overlay2/68dca5ed06dca8cf00c32cd97900f55c080ad82a7ecf6df2a1b68fe5f3d433ae/diff",
+                "WorkDir": "/var/lib/docker/overlay2/68dca5ed06dca8cf00c32cd97900f55c080ad82a7ecf6df2a1b68fe5f3d433ae/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/pd2",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "msccl-dev-000000",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "2379/tcp": {},
+                "2380/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "--name=sift10m-pd2",
+                "--client-urls=http://127.0.0.1:33992",
+                "--advertise-client-urls=http://127.0.0.1:33992",
+                "--peer-urls=http://127.0.0.1:34002",
+                "--advertise-peer-urls=http://127.0.0.1:34002",
+                "--initial-cluster=sift10m-pd1=http://127.0.0.1:34001,sift10m-pd2=http://127.0.0.1:34002,sift10m-pd3=http://127.0.0.1:34003",
+                "--data-dir=/data/pd",
+                "--log-file=/data/pd.log"
+            ],
+            "Image": "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": [
+                "/pd-server"
+            ],
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "org.opencontainers.image.source": "https://github.com/tikv/pd.git",
+                "org.opencontainers.image.title": "pd",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "sptag.run": "qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "fbb029116e930d5f62029338f94dd0d76c7a76ab3472aedb2965dd0129ee0338",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    },
+    {
+        "Id": "76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb",
+        "Created": "2026-11-05T07:09:47.506663245Z",
+        "Path": "/pd-server",
+        "Args": [
+            "--name=sift10m-pd3",
+            "--client-urls=http://127.0.0.1:33993",
+            "--advertise-client-urls=http://127.0.0.1:33993",
+            "--peer-urls=http://127.0.0.1:34003",
+            "--advertise-peer-urls=http://127.0.0.1:34003",
+            "--initial-cluster=sift10m-pd1=http://127.0.0.1:34001,sift10m-pd2=http://127.0.0.1:34002,sift10m-pd3=http://127.0.0.1:34003",
+            "--data-dir=/data/pd",
+            "--log-file=/data/pd.log"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-05T07:09:47.637010167Z",
+            "FinishedAt": "2026-11-05T07:59:27.884621721Z"
+        },
+        "Image": "sha256:4996a18bf689914db5820748342710b9a37ed0aaa7816aec4a1e09e5a6b9c401",
+        "ResolvConfPath": "/var/lib/docker/containers/76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb/hostname",
+        "HostsPath": "/var/lib/docker/containers/76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb/hosts",
+        "LogPath": "/var/lib/docker/containers/76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb/76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb-json.log",
+        "Name": "/qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105-pd3",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/pd3:/data"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "ID": "76ab328f816644bc4bb4addb84412e73468b9db38a9e40fff0f746ee285740fb",
+                "LowerDir": "/var/lib/docker/overlay2/6f2068d53b5bd1e71678bcc6acf2df0a12473acbfa03eca64d42b55008fc1990-init/diff:/var/lib/docker/overlay2/d81f9b9050583baff0249654f87b5c9785a83f2ca23b61f6098abee436579d79/diff:/var/lib/docker/overlay2/9f9882e0a8ac51550574096dcc1c1f8beb6133279741ff015a9110750ff001d8/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/6f2068d53b5bd1e71678bcc6acf2df0a12473acbfa03eca64d42b55008fc1990/merged",
+                "UpperDir": "/var/lib/docker/overlay2/6f2068d53b5bd1e71678bcc6acf2df0a12473acbfa03eca64d42b55008fc1990/diff",
+                "WorkDir": "/var/lib/docker/overlay2/6f2068d53b5bd1e71678bcc6acf2df0a12473acbfa03eca64d42b55008fc1990/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/pd3",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "msccl-dev-000000",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "2379/tcp": {},
+                "2380/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "--name=sift10m-pd3",
+                "--client-urls=http://127.0.0.1:33993",
+                "--advertise-client-urls=http://127.0.0.1:33993",
+                "--peer-urls=http://127.0.0.1:34003",
+                "--advertise-peer-urls=http://127.0.0.1:34003",
+                "--initial-cluster=sift10m-pd1=http://127.0.0.1:34001,sift10m-pd2=http://127.0.0.1:34002,sift10m-pd3=http://127.0.0.1:34003",
+                "--data-dir=/data/pd",
+                "--log-file=/data/pd.log"
+            ],
+            "Image": "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": [
+                "/pd-server"
+            ],
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f941a7ec5bf87222f937c88de1368dd122acaf47",
+                "org.opencontainers.image.source": "https://github.com/tikv/pd.git",
+                "org.opencontainers.image.title": "pd",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "sptag.run": "qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "fbb029116e930d5f62029338f94dd0d76c7a76ab3472aedb2965dd0129ee0338",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    },
+    {
+        "Id": "9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa",
+        "Created": "2026-11-05T07:09:48.261930607Z",
+        "Path": "/tikv-server",
+        "Args": [
+            "--pd-endpoints=127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+            "--addr=127.0.0.1:30361",
+            "--advertise-addr=127.0.0.1:30361",
+            "--status-addr=127.0.0.1:30381",
+            "--data-dir=/data/tikv",
+            "--log-file=/data/tikv.log",
+            "--config=/config.toml"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-05T07:09:48.450795879Z",
+            "FinishedAt": "2026-11-05T07:59:26.471465981Z"
+        },
+        "Image": "sha256:a55a2a42f390f2e3a1b1c4c7cee637eff8bef8f86d8231d2fcf49d30cedc52f2",
+        "ResolvConfPath": "/var/lib/docker/containers/9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa/hostname",
+        "HostsPath": "/var/lib/docker/containers/9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa/hosts",
+        "LogPath": "/var/lib/docker/containers/9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa/9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa-json.log",
+        "Name": "/qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105-tikv1",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv1:/data",
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv.toml:/config.toml:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "ID": "9258ba787ede281c6fe1951c2dc94cae0ab6b188bffbc0c613c4dc95af8b28aa",
+                "LowerDir": "/var/lib/docker/overlay2/d24ad7d1cdb4a044774f88567800edb94987db8f3e4ab30c46a3a4aea62d6945-init/diff:/var/lib/docker/overlay2/1986e26a00e8156fbe7c85b5aad55c2eee3d0811cb6cb0ada6d48341ee6bd6f5/diff:/var/lib/docker/overlay2/8d3c95e1278f515c41a372c8122a040f6e37863c09ecd52c18b91a135475307c/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/d24ad7d1cdb4a044774f88567800edb94987db8f3e4ab30c46a3a4aea62d6945/merged",
+                "UpperDir": "/var/lib/docker/overlay2/d24ad7d1cdb4a044774f88567800edb94987db8f3e4ab30c46a3a4aea62d6945/diff",
+                "WorkDir": "/var/lib/docker/overlay2/d24ad7d1cdb4a044774f88567800edb94987db8f3e4ab30c46a3a4aea62d6945/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv.toml",
+                "Destination": "/config.toml",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv1",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "msccl-dev-000000",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "20160/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "TZ=/etc/localtime",
+                "TZDIR=/usr/share/zoneinfo",
+                "MALLOC_CONF=prof:true,prof_active:false"
+            ],
+            "Cmd": [
+                "--pd-endpoints=127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+                "--addr=127.0.0.1:30361",
+                "--advertise-addr=127.0.0.1:30361",
+                "--status-addr=127.0.0.1:30381",
+                "--data-dir=/data/tikv",
+                "--log-file=/data/tikv.log",
+                "--config=/config.toml"
+            ],
+            "Image": "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": [
+                "/tikv-server"
+            ],
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "org.opencontainers.image.source": "https://github.com/tikv/tikv.git",
+                "org.opencontainers.image.title": "tikv",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "sptag.run": "qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "fbb029116e930d5f62029338f94dd0d76c7a76ab3472aedb2965dd0129ee0338",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    },
+    {
+        "Id": "66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc",
+        "Created": "2026-11-05T07:09:48.68232866Z",
+        "Path": "/tikv-server",
+        "Args": [
+            "--pd-endpoints=127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+            "--addr=127.0.0.1:30362",
+            "--advertise-addr=127.0.0.1:30362",
+            "--status-addr=127.0.0.1:30382",
+            "--data-dir=/data/tikv",
+            "--log-file=/data/tikv.log",
+            "--config=/config.toml"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-05T07:09:48.895650686Z",
+            "FinishedAt": "2026-11-05T07:59:26.347259625Z"
+        },
+        "Image": "sha256:a55a2a42f390f2e3a1b1c4c7cee637eff8bef8f86d8231d2fcf49d30cedc52f2",
+        "ResolvConfPath": "/var/lib/docker/containers/66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc/hostname",
+        "HostsPath": "/var/lib/docker/containers/66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc/hosts",
+        "LogPath": "/var/lib/docker/containers/66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc/66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc-json.log",
+        "Name": "/qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105-tikv2",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv2:/data",
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv.toml:/config.toml:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "ID": "66ff0f414f2634b2d06547488372e5263614a942168fbfa7e8759c78048ca9fc",
+                "LowerDir": "/var/lib/docker/overlay2/6043d586b080fe8316b7926a9448e87c710f0eca773b4f1d8f05cf36837b7b15-init/diff:/var/lib/docker/overlay2/1986e26a00e8156fbe7c85b5aad55c2eee3d0811cb6cb0ada6d48341ee6bd6f5/diff:/var/lib/docker/overlay2/8d3c95e1278f515c41a372c8122a040f6e37863c09ecd52c18b91a135475307c/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/6043d586b080fe8316b7926a9448e87c710f0eca773b4f1d8f05cf36837b7b15/merged",
+                "UpperDir": "/var/lib/docker/overlay2/6043d586b080fe8316b7926a9448e87c710f0eca773b4f1d8f05cf36837b7b15/diff",
+                "WorkDir": "/var/lib/docker/overlay2/6043d586b080fe8316b7926a9448e87c710f0eca773b4f1d8f05cf36837b7b15/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv2",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv.toml",
+                "Destination": "/config.toml",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "msccl-dev-000000",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "20160/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "TZ=/etc/localtime",
+                "TZDIR=/usr/share/zoneinfo",
+                "MALLOC_CONF=prof:true,prof_active:false"
+            ],
+            "Cmd": [
+                "--pd-endpoints=127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+                "--addr=127.0.0.1:30362",
+                "--advertise-addr=127.0.0.1:30362",
+                "--status-addr=127.0.0.1:30382",
+                "--data-dir=/data/tikv",
+                "--log-file=/data/tikv.log",
+                "--config=/config.toml"
+            ],
+            "Image": "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": [
+                "/tikv-server"
+            ],
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "org.opencontainers.image.source": "https://github.com/tikv/tikv.git",
+                "org.opencontainers.image.title": "tikv",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "sptag.run": "qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "fbb029116e930d5f62029338f94dd0d76c7a76ab3472aedb2965dd0129ee0338",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    },
+    {
+        "Id": "0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4",
+        "Created": "2026-11-05T07:09:49.066089233Z",
+        "Path": "/tikv-server",
+        "Args": [
+            "--pd-endpoints=127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+            "--addr=127.0.0.1:30363",
+            "--advertise-addr=127.0.0.1:30363",
+            "--status-addr=127.0.0.1:30383",
+            "--data-dir=/data/tikv",
+            "--log-file=/data/tikv.log",
+            "--config=/config.toml"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-05T07:09:49.207753276Z",
+            "FinishedAt": "2026-11-05T07:59:26.206925357Z"
+        },
+        "Image": "sha256:a55a2a42f390f2e3a1b1c4c7cee637eff8bef8f86d8231d2fcf49d30cedc52f2",
+        "ResolvConfPath": "/var/lib/docker/containers/0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4/hostname",
+        "HostsPath": "/var/lib/docker/containers/0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4/hosts",
+        "LogPath": "/var/lib/docker/containers/0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4/0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4-json.log",
+        "Name": "/qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105-tikv3",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv3:/data",
+                "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv.toml:/config.toml:ro"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "host",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "ID": "0fd64e05766aa98884b2e962aad79ca08beb4f29c1ed8cb931355c7200fe26d4",
+                "LowerDir": "/var/lib/docker/overlay2/c50752ccea0b37bbe1fc6d58ed5789e299e4bef53b5d9658e3c5000216ee0ccc-init/diff:/var/lib/docker/overlay2/1986e26a00e8156fbe7c85b5aad55c2eee3d0811cb6cb0ada6d48341ee6bd6f5/diff:/var/lib/docker/overlay2/8d3c95e1278f515c41a372c8122a040f6e37863c09ecd52c18b91a135475307c/diff:/var/lib/docker/overlay2/1f61e0db8d6eb6c20af0d38ab352efbf84c2a9ffcab8fccbe79ea2432d8542bf/diff:/var/lib/docker/overlay2/d800bd6bc3605bf94d1c209480161fce025111028f170c7c3e2627cbc0851e25/diff:/var/lib/docker/overlay2/61f145b433502a715d2c29fdcc590d4522f86fa25521decd313a904f1eb2d837/diff:/var/lib/docker/overlay2/b71901182df2da84694808cb809d174be0661856baf7007baca87420d190e7fd/diff",
+                "MergedDir": "/var/lib/docker/overlay2/c50752ccea0b37bbe1fc6d58ed5789e299e4bef53b5d9658e3c5000216ee0ccc/merged",
+                "UpperDir": "/var/lib/docker/overlay2/c50752ccea0b37bbe1fc6d58ed5789e299e4bef53b5d9658e3c5000216ee0ccc/diff",
+                "WorkDir": "/var/lib/docker/overlay2/c50752ccea0b37bbe1fc6d58ed5789e299e4bef53b5d9658e3c5000216ee0ccc/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv.toml",
+                "Destination": "/config.toml",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/cluster/tikv3",
+                "Destination": "/data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "msccl-dev-000000",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "20160/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "container=oci",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "TZ=/etc/localtime",
+                "TZDIR=/usr/share/zoneinfo",
+                "MALLOC_CONF=prof:true,prof_active:false"
+            ],
+            "Cmd": [
+                "--pd-endpoints=127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+                "--addr=127.0.0.1:30363",
+                "--advertise-addr=127.0.0.1:30363",
+                "--status-addr=127.0.0.1:30383",
+                "--data-dir=/data/tikv",
+                "--log-file=/data/tikv.log",
+                "--config=/config.toml"
+            ],
+            "Image": "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a",
+            "Volumes": null,
+            "WorkingDir": "/",
+            "Entrypoint": [
+                "/tikv-server"
+            ],
+            "Labels": {
+                "io.buildah.version": "1.41.4",
+                "license": "BSD-3-Clause",
+                "name": "rockylinux",
+                "net.pingcap.tibuild.git-sha": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "net.pingcap.tibuild.new": "yes",
+                "org.opencontainers.image.authors": "Lukas Magauer, Neil Hanlon, Louis Abel",
+                "org.opencontainers.image.licenses": "Apache-2.0",
+                "org.opencontainers.image.ref.name": "master",
+                "org.opencontainers.image.revision": "f5b820a91a6403ba11bba1bbcb3e3cca3e0d88db",
+                "org.opencontainers.image.source": "https://github.com/tikv/tikv.git",
+                "org.opencontainers.image.title": "tikv",
+                "org.opencontainers.image.vendor": "Rocky Enterprise Software Foundation",
+                "org.opencontainers.image.version": "9",
+                "sptag.run": "qianxi-sift10m-tikv-layer1-build80-pool16-cq8-20261105",
+                "summary": "Rocky Linux Base image",
+                "vendor": "Rocky Enterprise Software Foundation",
+                "version": "9"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "host": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "fbb029116e930d5f62029338f94dd0d76c7a76ab3472aedb2965dd0129ee0338",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    }
+]

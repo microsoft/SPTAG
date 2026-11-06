@@ -1,0 +1,16 @@
+test_deployment_matches_recorded_container_commands (test_reproduce.ReproductionTests) ... ok
+test_exact_truth_matches_integer_bruteforce_including_ties (test_reproduce.ReproductionTests) ... ok
+test_extracts_exact_prefix_and_rejects_truncation (test_reproduce.ReproductionTests) ... ok
+test_prepare_rejects_unmeasured_source_before_creating_run (test_reproduce.ReproductionTests) ... ok
+test_recorded_results_match_all_published_rounds (test_reproduce.ReproductionTests) ... ok
+test_rejects_disabled_version_checks (test_reproduce.ReproductionTests) ... ok
+test_rejects_missing_round (test_reproduce.ReproductionTests) ... ok
+test_rejects_nonpositive_insertion_time (test_reproduce.ReproductionTests) ... ok
+test_rejects_read_failure (test_reproduce.ReproductionTests) ... ok
+test_rejects_wrong_count (test_reproduce.ReproductionTests) ... ok
+test_shutdown_refuses_foreign_container_labels (test_reproduce.ReproductionTests) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.339s
+
+OK

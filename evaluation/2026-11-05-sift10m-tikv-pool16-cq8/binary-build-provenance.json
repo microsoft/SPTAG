@@ -1,0 +1,31 @@
+{
+  "base_commit": "196d1e581489785ba23f88a760a6d6e09b5f909c",
+  "source_state": "base commit plus preserved uncommitted source.patch",
+  "source_patch_sha256": "1e58ff0852ab12682557c3e686ed1a856189e4feee5f247be6c25db35c55aafe",
+  "binary_sha256": "a38242ea9fac9ef9153af9c46ddd8389c57fc65da814d85cb2b13a72ac4c1323",
+  "count_checker_sha256": "60725cd58978ae86bfe0dc30973c334160c456b09ba17a21f7ee61b3a032ff3e",
+  "production_source_sha256": {
+    "AnnService/inc/Core/SPANN/ExtraTiKVController.h": "755304b13da630cb5d7931e4d67e9435327943429c6a1731d1dde3a26b94a589",
+    "AnnService/inc/Core/SPANN/ExtraDynamicSearcher.h": "a9484c6ea17f70e93f6405df9807e4042cf713502d420338b63a9fd60a22ae37"
+  },
+  "cmake_build_type": "Release",
+  "tikv_compiled": true,
+  "folly": true,
+  "connections_per_client_per_store": 16,
+  "completion_queues_per_client": 8,
+  "focused_tests": "Six cases passed on frozen executable; see focused-tests.log",
+  "transport_validation": "transport-validation.json",
+  "tikv_baseline": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool8-20261105",
+  "changes_from_tikv_baseline": [
+    "Sixteen independent gRPC connections instead of eight per client/store",
+    "Eight completion queues instead of four per client",
+    "Fresh index directory, isolated cluster data and unique TiKV key prefix"
+  ],
+  "retained_controls": "Layers=1, build80, insert16, append48, search32, MaxCheck8192, page/buffer4",
+  "version_checks": "DistributedVersionMap=true; SearchCheckVersionMapOnlyLayer0=true; no diagnostic-only overrides",
+  "protobuf_build_snapshot": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-folly-20261102/kvproto-build.tar",
+  "protobuf_tracked_sources_restored": true,
+  "count_validation_scope": "Logical membership and metadata bijection, not exhaustive physical payload scan",
+  "known_pre_existing_failure": "DedupCandidateTest failures are unrelated; no dedup changes were made",
+  "publication": "No automatic commit or push for this rerun"
+}

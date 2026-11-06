@@ -9,6 +9,7 @@ or existing data.
 
 | Record | Scope | Status |
 | --- | --- | --- |
+| [2026-11-05 SIFT10M TiKV 16-channel / 8-CQ results](2026-11-05-sift10m-tikv-pool16-cq8/README.md) | Fresh single-layer full run; committed source and standalone build/data/deployment/run/validation recipe | Completed; exact 10M reload/count passed; final Recall@5 95.53%, lower than prior run |
 | [2026-11-03 SIFT10M TiKV single-layer results](2026-11-03-sift10m-tikv-layer1/README.md) | FOLLY=ON; 80 build, 16 insert, 48 maintenance, 32 search threads; matching FILEIO workload | Completed; 22 measured rounds and exact 10M reload/count validation passed |
 | [2026-11-03 SIFT10M FILEIO single-layer results](2026-11-03-sift10m-fileio-layer1/README.md) | FOLLY=ON; 80 build threads; 9.9M + ten 10K inserts; 10K queries/pass, 32 search threads | Completed; exact 10M final reload/count validation passed; measured source fixes are local-only |
 | [2026-10-28 SIFT1M results](2026-10-28-sift1m/README.md) | Complete FILEIO baseline and post-fix TiKV build/update runs; [setup and run instructions](2026-10-28-sift1m/Reproduce.md) | Ten batches and 1M final vectors per backend; different executable revisions; single host |
@@ -21,8 +22,11 @@ or existing data.
 
 ## New results
 
-The latest [FILEIO single-layer report](2026-11-03-sift10m-fileio-layer1/README.md)
-records successful completion/count validation and measured-source limitations.
+The latest [TiKV 16/8 report](2026-11-05-sift10m-tikv-pool16-cq8/README.md)
+includes committed measured source and a standalone reproduction guide.
+It records a recall decrease and does not promise identical performance or precision.
+The [FILEIO single-layer report](2026-11-03-sift10m-fileio-layer1/README.md)
+records successful completion/count validation and its original measured-source limitations.
 The complete SIFT1M guide remains the setup entry point. General operating
 instructions live in `docs/Benchmarking.md`; dated configurations, small result
 tables, and diagnostic tools belong alongside their report in this directory.
