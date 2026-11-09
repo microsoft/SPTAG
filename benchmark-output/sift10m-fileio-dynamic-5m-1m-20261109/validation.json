@@ -1,6 +1,6 @@
 {
-  "status": "in_progress",
-  "source_commit": "fe5d4cd",
+  "status": "passed",
+  "source_commit": "18391e9",
   "regression": {
     "passed_cases": 24,
     "suites": [
@@ -10,13 +10,16 @@
       "TiKVIOTest",
       "IterativeScanTest"
     ],
-    "full_repository_suite": false
+    "full_repository_suite": false,
+    "external_checkpoint_integration_passed_cases": 1
   },
   "experiment": {
     "storage": "FILEIO",
     "dimension": 128,
     "value_type": "UInt8",
     "initial_vectors": 5000000,
+    "initial_head_vectors": 512683,
+    "initial_head_estimated_bytes": 152266923,
     "insert_vectors_per_batch": 1000000,
     "target_vectors": 10000000,
     "queries_per_evaluation": 1000,
@@ -24,7 +27,28 @@
     "replacement_target_bytes": 25165824,
     "timeout_per_attempt_seconds": 3600,
     "actual_timeout_verified": true,
-    "last_completed_checkpoint_vectors": 9000000,
+    "last_completed_checkpoint_vectors": 10000000,
+    "hourly_timeout_checkpoint_vectors": 9000000,
+    "final_attempt_elapsed_seconds": 1621.4,
+    "maximum_sampled_peak_rss_kib": 4623240,
+    "before_growth": [
+      {
+        "base_vectors": 6000000,
+        "posting_layers": 1,
+        "head_vectors": 648862,
+        "head_estimated_bytes": 192451794,
+        "concurrent_query_errors": 0,
+        "recall_5_at_5": 0.9648
+      },
+      {
+        "base_vectors": 7000000,
+        "posting_layers": 1,
+        "head_vectors": 705025,
+        "head_estimated_bytes": 208718685,
+        "concurrent_query_errors": 0,
+        "recall_5_at_5": 0.9638
+      }
+    ],
     "growth": {
       "base_vectors_at_publication": 7080922,
       "inserted_since_initial_build": 2080922,
@@ -60,13 +84,49 @@
         "recall_5_at_5": 0.9622,
         "mean_query_latency_ms": 12.3016,
         "insert_and_drain_seconds": 1183.9425
+      },
+      {
+        "base_vectors": 10000000,
+        "posting_layers": 2,
+        "head_vectors": 78489,
+        "head_estimated_bytes": 23220717,
+        "concurrent_queries": 193215,
+        "concurrent_query_errors": 0,
+        "resize_error_code": 0,
+        "recall_5_at_5": 0.9604,
+        "mean_query_latency_ms": 12.2116,
+        "p99_query_latency_ms": 15.187,
+        "insert_and_drain_seconds": 1230.15,
+        "clone_seconds": 237.7296,
+        "save_seconds": 4.5884
+      }
+    ],
+    "final_checkpoint_reload": {
+      "passed": true,
+      "actual_vectors": 10000000,
+      "posting_layers": 2,
+      "queries": 1000,
+      "recall_5_at_5": 0.96,
+      "minimum_required_recall": 0.95
+    },
+    "successful_attempts": [
+      {
+        "local_directory": "attempts/20261109T092850Z",
+        "completed_batch_numbers": [3, 4],
+        "outcome": "stopped by verified one-hour watchdog; restored completed 9M checkpoint"
+      },
+      {
+        "local_directory": "attempts/20261109T102857Z",
+        "completed_batch_numbers": [5],
+        "outcome": "exit code zero; complete output JSON validated"
       }
     ]
   },
   "limitations": [
-    "The 10M final batch is still running from the completed 9M checkpoint.",
     "Initial build and first two batches used the earlier implementation; subsequent attempts restored their completed checkpoints.",
     "Head memory values are estimates, not process RSS.",
+    "The post-growth insertion timings include substantial posting split/reassignment draining; this validates correctness, not a performance improvement.",
+    "Recall values at different dataset prefixes are not a controlled comparison against a no-growth 10M baseline.",
     "No real TiKV cluster or power-loss recovery validation."
   ]
 }
