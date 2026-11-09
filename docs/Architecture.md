@@ -133,6 +133,10 @@ BKT selection thresholds are recomputed from each candidate's requested count,
 rather than inherited from the old head; reducing the budget must also change
 the selection granularity. Candidate retries check the resize deadline between
 builds, but do not interrupt a build already in progress.
+The [FILEIO SIFT experiment runner](../benchmark-output/sift10m-fileio-dynamic-5m-1m-20261109/run_experiment.py)
+limits each attempt to one hour and preserves separate logs and measurements.
+Its configuration uses `Rebuild=false` and `Resume=-1` to resume from the latest
+completed checkpoint instead of discarding completed insertion batches.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;
