@@ -179,6 +179,26 @@ BOOST_AUTO_TEST_CASE(RepeatedGrowthAndUpdatesSurviveDirectoryCopy)
     BOOST_CHECK_NE(query.GetResult(0)->VID, 64);
 }
 
+BOOST_AUTO_TEST_CASE(BKTSelectionRecomputesThresholdsForMemoryBudget)
+{
+    FileLayerFixture fixture;
+    const auto original = fixture.BasePostings();
+    const auto target = fixture.index->GetHeadMemoryUsage() / 3;
+    fixture.Set("SelectHeadType", "BKT", "SelectHead");
+    fixture.Set("Ratio", "0.1", "SelectHead");
+    fixture.Set("SelectThreshold", "2", "SelectHead");
+    fixture.Set("SplitThreshold", "4", "SelectHead");
+    fixture.Set("SplitFactor", "2", "SelectHead");
+    fixture.Set("HeadMemoryTarget", std::to_string(target));
+    BOOST_REQUIRE(fixture.index->GrowTopLayer() == ErrorCode::Success);
+    BOOST_CHECK_LE(fixture.index->GetHeadMemoryUsage(), target);
+    BOOST_CHECK_LT(fixture.index->GetMemoryIndex()->GetNumSamples(), 64 / 3);
+    BOOST_CHECK(original == fixture.BasePostings());
+    fixture.Check();
+    fixture.Reload();
+    fixture.Check();
+}
+
 BOOST_AUTO_TEST_CASE(RejectedCandidateKeepsSavedIndexUsable)
 {
     FileLayerFixture fixture;

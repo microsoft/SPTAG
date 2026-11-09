@@ -385,12 +385,20 @@ template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
             VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true);
         std::shared_ptr<Helper::VectorSetReader> vectorReader = std::make_shared<Helper::MemoryVectorReader>(readerOptions, vectors);
         while (true) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer timed out constructing the replacement head.\n");
+                return ErrorCode::Fail;
+            }
             candidate.m_topIndex = VectorIndex::CreateInstance(m_topIndex->GetIndexAlgoType(), GetEnumValueType<T>());
             if (!candidate.m_topIndex) return ErrorCode::FailedParseValue;
             for (const auto& parameter : reader.GetParameters("BuildHead")) {
                 result = candidate.m_topIndex->SetParameter(parameter.first.c_str(), parameter.second.c_str());
                 if (result != ErrorCode::Success) return result;
             }
+            // Recompute BKT selection thresholds for each candidate's reduced representative budget.
+            candidate.m_options.m_selectThreshold = 0;
+            candidate.m_options.m_splitThreshold = 0;
+            candidate.m_options.m_splitFactor = 0;
             if (!candidate.SelectHeadInternal<T>(vectorReader)) return ErrorCode::Fail;
             auto headReader = Helper::VectorSetReader::CreateInstance(readerOptions);
             result = headReader->LoadFile(m_options.m_indexDirectory + FolderSep + candidate.m_options.m_headVectorFile);

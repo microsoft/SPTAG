@@ -129,6 +129,10 @@ target. `SelectHead.Ratio` guides the replacement representative fraction
 (for example, 0.1 targets about 10% of the old live head); the memory budget
 may require fewer representatives. It fails rather than truncating a routing vector when posting capacity
 or the minimum head size cannot satisfy the configured budgets.
+BKT selection thresholds are recomputed from each candidate's requested count,
+rather than inherited from the old head; reducing the budget must also change
+the selection granularity. Candidate retries check the resize deadline between
+builds, but do not interrupt a build already in progress.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;
