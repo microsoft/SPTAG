@@ -1,0 +1,72 @@
+{
+  "status": "in_progress",
+  "source_commit": "fe5d4cd",
+  "regression": {
+    "passed_cases": 24,
+    "suites": [
+      "FileIOLayerTest",
+      "DynamicLayerTest",
+      "SpannWorkspaceTest",
+      "TiKVIOTest",
+      "IterativeScanTest"
+    ],
+    "full_repository_suite": false
+  },
+  "experiment": {
+    "storage": "FILEIO",
+    "dimension": 128,
+    "value_type": "UInt8",
+    "initial_vectors": 5000000,
+    "insert_vectors_per_batch": 1000000,
+    "target_vectors": 10000000,
+    "queries_per_evaluation": 1000,
+    "high_watermark_bytes": 209715200,
+    "replacement_target_bytes": 25165824,
+    "timeout_per_attempt_seconds": 3600,
+    "actual_timeout_verified": true,
+    "last_completed_checkpoint_vectors": 9000000,
+    "growth": {
+      "base_vectors_at_publication": 7080922,
+      "inserted_since_initial_build": 2080922,
+      "posting_layers_before": 1,
+      "posting_layers_after": 2,
+      "old_live_head_vectors": 709036,
+      "new_head_vectors": 50892,
+      "old_head_estimated_bytes": 209927655,
+      "new_head_estimated_bytes": 21629172,
+      "capacity_fallback_vectors": 119
+    },
+    "completed_after_growth": [
+      {
+        "base_vectors": 8000000,
+        "posting_layers": 2,
+        "head_vectors": 64518,
+        "head_estimated_bytes": 27376998,
+        "concurrent_queries": 304381,
+        "concurrent_query_errors": 0,
+        "resize_error_code": 0,
+        "recall_5_at_5": 0.9622,
+        "mean_query_latency_ms": 12.3057,
+        "insert_and_drain_seconds": 1470.1544
+      },
+      {
+        "base_vectors": 9000000,
+        "posting_layers": 2,
+        "head_vectors": 71629,
+        "head_estimated_bytes": 21265617,
+        "concurrent_queries": 189915,
+        "concurrent_query_errors": 0,
+        "resize_error_code": 0,
+        "recall_5_at_5": 0.9622,
+        "mean_query_latency_ms": 12.3016,
+        "insert_and_drain_seconds": 1183.9425
+      }
+    ]
+  },
+  "limitations": [
+    "The 10M final batch is still running from the completed 9M checkpoint.",
+    "Initial build and first two batches used the earlier implementation; subsequent attempts restored their completed checkpoints.",
+    "Head memory values are estimates, not process RSS.",
+    "No real TiKV cluster or power-loss recovery validation."
+  ]
+}
