@@ -9,6 +9,10 @@ or existing data.
 
 | Record | Scope | Status |
 | --- | --- | --- |
+| [2026-11-09 SIFT10M FILEIO layer1 matched-binary run](2026-11-09-sift10m-fileio-layer1-matched/README.md) | Fresh run using the same measured95bcb20 executable/libraries/inputs as the other three profiles; [reproduce](2026-11-09-sift10m-fileio-layer1-matched/Reproduce.md) | Completed; 22 rounds, exact10M membership and100K metadata verified |
+| [2026-11-09 SIFT10M FILEIO layer2](2026-11-09-sift10m-fileio-layer2/README.md) | Same profile format, full query latency/QPS and insertion throughput; [reproduce](2026-11-09-sift10m-fileio-layer2/Reproduce.md) | Completed; exact10M verified after correcting the FILEIO telemetry validator |
+| [2026-11-09 SIFT10M TiKV layer1, pre-split128](2026-11-09-sift10m-tikv-layer1-presplit128/README.md) | 16 channels/8 CQ, 128 buckets per active key family, replica3; [reproduce](2026-11-09-sift10m-tikv-layer1-presplit128/Reproduce.md) | Completed; split/scatter readiness, all22 rounds and exact10M verified |
+| [2026-11-06 SIFT10M TiKV layer2, pre-split128](2026-11-06-sift10m-tikv-layer2-presplit128/README.md) | Same transport/deployment policy as pre-split layer1; [reproduce](2026-11-06-sift10m-tikv-layer2-presplit128/Reproduce.md) | Completed; both layer records, all22 rounds and exact10M verified |
 | [2026-11-05 SIFT10M TiKV 16-channel / 8-CQ results](2026-11-05-sift10m-tikv-pool16-cq8/README.md) | Fresh single-layer full run; committed source and standalone build/data/deployment/run/validation recipe | Completed; exact 10M reload/count passed; final Recall@5 95.53%, lower than prior run |
 | [2026-11-03 SIFT10M TiKV single-layer results](2026-11-03-sift10m-tikv-layer1/README.md) | FOLLY=ON; 80 build, 16 insert, 48 maintenance, 32 search threads; matching FILEIO workload | Completed; 22 measured rounds and exact 10M reload/count validation passed |
 | [2026-11-03 SIFT10M FILEIO single-layer results](2026-11-03-sift10m-fileio-layer1/README.md) | FOLLY=ON; 80 build threads; 9.9M + ten 10K inserts; 10K queries/pass, 32 search threads | Completed; exact 10M final reload/count validation passed; measured source fixes are local-only |
@@ -22,7 +26,20 @@ or existing data.
 
 ## New results
 
-The latest [TiKV 16/8 report](2026-11-05-sift10m-tikv-pool16-cq8/README.md)
+The four November6/9 FILEIO/TiKV layer profiles above are independent reports
+with the same chapter/metric format. Each includes phase-by-phase query
+latencies/QPS/recall, all insertion/barrier/clone/load/save timings, aggregate
+insertion throughput, exact measured and portable configurations, source/library
+provenance, raw results and its own reproduction instructions.
+All four share the measured95bcb20 executable/checker/runtime library bytes and
+native inputs/truth. TiKV uses pre-split128/scatter on each active key family;
+FILEIO uses local VersionMaps and no server deployment. They remain independent
+randomized builds on a shared host, not identical indexes or dedicated-host
+causal measurements. The older FILEIO1 result is preserved separately.
+The [shared tool validation record](2026-11-05-sift10m-tikv-pool16-cq8/layer-profile-validation.json)
+records all88 query rounds/40 insert batches and portable offline verification.
+
+The earlier [TiKV 16/8 report](2026-11-05-sift10m-tikv-pool16-cq8/README.md)
 includes committed measured source and a standalone reproduction guide.
 It records a recall decrease and does not promise identical performance or precision.
 The [FILEIO single-layer report](2026-11-03-sift10m-fileio-layer1/README.md)

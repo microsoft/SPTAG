@@ -1,0 +1,10 @@
+{
+  "user_approved": true,
+  "stopped_containers_verified": true,
+  "removed_only": [
+    "cluster/tikv1/tikv/space_placeholder_file",
+    "cluster/tikv2/tikv/space_placeholder_file",
+    "cluster/tikv3/tikv/space_placeholder_file"
+  ],
+  "database_index_inputs_logs_and_results_retained": true
+}

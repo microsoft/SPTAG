@@ -13,6 +13,7 @@ import subprocess
 import time
 
 from deployment import Cluster
+from presplit import prepare_cluster
 
 
 RECIPE = Path(__file__).resolve().parent
@@ -42,6 +43,10 @@ def write_json(path, data):
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def directory_name(storage):
+    return {"TIKVIO": "tikv", "FILEIO": "fileio"}[storage]
+
+
 def extract_vectors(source, output, count=10000000, dimension=128):
     with source.open("rb") as stream, output.open("xb") as target:
         rows, dim = struct.unpack("<II", stream.read(8))
@@ -57,8 +62,14 @@ def extract_vectors(source, output, count=10000000, dimension=128):
 
 
 def prepare(args):
+    require(args.presplit_regions == 0 or 3 <= args.presplit_regions <= 256,
+            "Presplit requires 3..256 buckets, or 0 to disable")
+    require(args.storage == "TIKVIO" or args.presplit_regions == 0, "Presplit is TiKV-only")
     require(re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.prefix), "Use a fresh lowercase prefix, at most 64 characters")
     root = args.run_root.resolve()
+    workdir = directory_name(args.storage)
+    hashes = {name: value for name, value in HASHES.items() if not name.startswith("tikv/")}
+    hashes[workdir + "/" + TRUTH] = HASHES["tikv/" + TRUTH]
     provenance = json.loads((RECIPE / "publication-provenance.json").read_text())
     source_root = args.source_root.resolve()
     source_commit = subprocess.check_output(
@@ -72,7 +83,7 @@ def prepare(args):
                     "AnnService", "Test", "CMakeLists.txt", "ThirdParty/kvproto/proto"],
                    check=True, stdout=subprocess.DEVNULL)
     root.mkdir(parents=True, exist_ok=False)
-    for name in ("input", "tikv", "bin"):
+    for name in ("input", workdir, "bin"):
         (root / name).mkdir()
     extract_vectors(args.base.resolve(), root / "input/sift-first-10m.u8bin")
     for source, target in ((args.queries, root / "input/query.10K.u8bin"),
@@ -84,13 +95,13 @@ def prepare(args):
             continue
         require(digest(root / name) == checksum, "Input/truth checksum mismatch: " + name)
     if args.truth is not None:
-        shutil.copy2(args.truth.resolve(), root / "tikv" / TRUTH)
+        shutil.copy2(args.truth.resolve(), root / workdir / TRUTH)
     else:
         require(args.truth_threads > 0, "Truth generation requires positive thread count")
         subprocess.run([str(args.truth_generator.resolve()), str(root / "input/sift-first-10m.u8bin"),
                         str(root / "input/query.10K.u8bin"), "9900000", "10000", "10",
-                        str(args.truth_threads), str(root / "tikv" / TRUTH)], check=True)
-    require(digest(root / "tikv" / TRUTH) == HASHES["tikv/" + TRUTH], "Exact truth checksum mismatch")
+                        str(args.truth_threads), str(root / workdir / TRUTH)], check=True)
+    require(digest(root / workdir / TRUTH) == HASHES["tikv/" + TRUTH], "Exact truth checksum mismatch")
     with (root / "focused-tests.log").open("x") as stream:
         subprocess.run([str(root / "bin/SPTAGTest"), "--run_test=TiKVIOTest,TestDataGeneratorTest",
                         "--log_level=message"], stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=180)
@@ -99,21 +110,30 @@ def prepare(args):
     (root / "runtime-ldd.txt").write_text(ldd)
     template = (RECIPE / "benchmark.ini").read_text()
     rendered = template.replace("@RUN_ROOT@", str(root)).replace("@PREFIX@", args.prefix)
+    rendered = rendered.replace("@LAYERS@", str(args.layers))
+    rendered = rendered.replace("@WORKDIR@", workdir).replace("@STORAGE@", args.storage)
+    rendered = rendered.replace("@DISTRIBUTED_VERSION_MAP@", str(args.storage == "TIKVIO").lower())
+    if args.storage == "FILEIO":
+        rendered = "".join(line for line in rendered.splitlines(keepends=True)
+                           if not line.startswith(("TiKVPDAddresses=", "TiKVKeyPrefix=")))
     require("@" not in rendered, "Unresolved configuration placeholder")
-    (root / "tikv/benchmark.ini").write_text(rendered)
+    (root / workdir / "benchmark.ini").write_text(rendered)
     shutil.copy2(RECIPE / "tikv.toml", root / "tikv.toml")
     recipe_commit = subprocess.check_output(
         ["git", "-C", str(RECIPE), "rev-parse", "HEAD"], text=True).strip()
-    files = [*HASHES, "bin/SPTAGTest", "bin/check_count", "tikv/benchmark.ini", "tikv.toml",
+    files = [*hashes, "bin/SPTAGTest", "bin/check_count", workdir + "/benchmark.ini", "tikv.toml",
              "focused-tests.log", "runtime-ldd.txt"]
     write_json(root / "checksums.json", {name: digest(root / name) for name in files})
     write_json(root / "run-manifest.json", {
         "prefix": args.prefix, "source_checkout": source_commit,
+        "layers": args.layers,
+        "storage": args.storage,
+        "presplit_regions": args.presplit_regions,
         "recipe_checkout": recipe_commit,
         "source_root": str(source_root), "recipe_root": str(RECIPE),
         "recipe_source_commit": (RECIPE / "source-commit.txt").read_text().strip(),
         "recipe_sha256": {name: digest(RECIPE / name) for name in
-                          ("reproduce.py", "deployment.py", "benchmark.ini", "tikv.toml")},
+                          ("reproduce.py", "deployment.py", "presplit.py", "benchmark.ini", "tikv.toml")},
         "binary_sha256": digest(root / "bin/SPTAGTest"),
         "count_checker_sha256": digest(root / "bin/check_count"),
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -121,19 +141,24 @@ def prepare(args):
     print("Prepared exact inputs and fresh configuration:", root, flush=True)
 
 
-def validate_measurements(data, log, saved, prefix):
+def validate_measurements(data, log, saved, prefix, layers=1, storage="TIKVIO"):
+    directory_name(storage)
+    tikv = storage == "TIKVIO"
     for key, value in {
         "ValueType": "UInt8", "dimension": 128, "baseVectorCount": 9900000,
         "insertVectorCount": 100000, "DeleteVectorCount": 0, "BatchNum": 10,
         "numQueries": 10000, "topK": 5, "numSearchThreads": 32, "numInsertThreads": 16,
-        "layers": 1, "DistMethod": "L2",
+        "layers": layers, "DistMethod": "L2",
     }.items():
         require(data["config"][key] == value, "Wrong output configuration: " + key)
-    for marker in ("SPANNIndex:UseTiKV", "Using distributed TiKV VersionMap (layer=0",
-                   "initialize p_localToGlobal(0) and versionMap (9900000)"):
+    runtime_markers = (("SPANNIndex:UseTiKV", "Using distributed TiKV VersionMap (layer=0")
+                       if tikv else ("SPANNIndex:UseFileIO", "Using local in-memory VersionMap (layer=0"))
+    for marker in (*runtime_markers, "initialize p_localToGlobal(0) and versionMap (9900000)"):
         require(marker in log, "Missing runtime evidence: " + marker)
-    for marker in ("SPANNIndex:UseFileIO", "Using random generation!", "AddIndex failed",
-                   "giving up", "read postings fail", "BatchGetVersions: MultiGet failed"):
+    forbidden = (("SPANNIndex:UseFileIO",) if tikv else
+                 ("SPANNIndex:UseTiKV", "Using distributed TiKV VersionMap"))
+    for marker in (*forbidden, "Using random generation!", "AddIndex failed", "giving up",
+                   "read postings fail", "BatchGetVersions: MultiGet failed"):
         require(marker not in log, "Benchmark failure marker: " + marker)
     results = data["results"]
     batches = results["benchmark1_insert"]
@@ -158,16 +183,28 @@ def validate_measurements(data, log, saved, prefix):
     for phase, count, deleted, mapping in counts:
         require(int(count) == int(mapping) == 9900000 + int(phase) * 10000 and int(deleted) == 0,
                 "Checkpoint logical membership mismatch")
+    if layers == 2:
+        marker = ("Using distributed TiKV VersionMap (layer=1" if tikv else
+                  "Using local in-memory VersionMap (layer=1")
+        require(marker in log, "Missing upper-layer VersionMap")
+        upper_counts = re.findall(
+            r"Checkpoint layer stats: batch (\d+)/10 layer=1 samples=(\d+) deleted=(\d+) headMapping=(\d+)",
+            log)
+        require([int(row[0]) for row in upper_counts] == list(range(1, 11)),
+                "Missing upper-layer checkpoint counts")
     metadata = [int(value) for value in re.findall(r"Save MetaIndex\((\d+)\)", log)]
     require(metadata and metadata[-1] == 10000000 and
             set(metadata) == {9900000 + i * 10000 for i in range(11)}, "Metadata phase counts differ")
     require(saved.getint("Base", "VectorSize") == 10000000, "Wrong final saved vector count")
-    for key, expected in {"Storage": "TIKVIO", "Layers": "1", "AppendThreadNum": "48",
-                          "TiKVKeyPrefix": prefix, "MaxCheck": "8192",
-                          "PostingPageLimit": "4", "SearchPostingPageLimit": "4", "BufferLength": "4"}.items():
+    parameters = {"Storage": storage, "Layers": str(layers), "AppendThreadNum": "48", "MaxCheck": "8192",
+                  "PostingPageLimit": "4", "SearchPostingPageLimit": "4", "BufferLength": "4"}
+    if tikv:
+        parameters["TiKVKeyPrefix"] = prefix
+    for key, expected in parameters.items():
         require(saved.get("BuildSSDIndex", key) == expected, "Wrong saved parameter: " + key)
-    for key in ("DistributedVersionMap", "SearchCheckVersionMapOnlyLayer0"):
-        require(saved.getboolean("BuildSSDIndex", key), "Version checking configuration changed")
+    require(saved.getboolean("BuildSSDIndex", "DistributedVersionMap") == tikv and
+            saved.getboolean("BuildSSDIndex", "SearchCheckVersionMapOnlyLayer0"),
+            "Version checking configuration changed")
     for section in ("SelectHead", "BuildHead", "BuildSSDIndex"):
         require(saved.getint(section, "NumberOfThreads") == 80, "Wrong saved build threads")
     require(saved.getint("BuildHead", "MaxCheck") == 8192, "Wrong saved head exploration budget")
@@ -177,6 +214,20 @@ def validate_measurements(data, log, saved, prefix):
         require(query["numQueries"] == recall["numQueries"] == 10000 and recall["k"] == 5,
                 "Wrong query/recall shape")
         require(0 <= recall["recallAtK"] <= 1, "Invalid recall value")
+        breakdown = query["latencyBreakdown"]["layers"]
+        require(set(breakdown) == {str(i) for i in range(layers)}, "Wrong measured posting-layer breakdown")
+        if not tikv:
+            # Pinned FILEIO checks Deleted inline; these counters measure TiKV batch checks only.
+            require(all(layer["postingCountMean"] > 0 and layer["listElementsMean"] > 0 and
+                        layer["versionCheckCountMean"] == 0 and layer["versionMapMs"]["mean"] == 0
+                        for layer in breakdown.values()), "Unexpected local FILEIO layer telemetry")
+        else:
+            require(breakdown["0"]["versionCheckCountMean"] > 0, "Layer-0 version checks were disabled")
+            if layers == 2:
+                require(breakdown["1"]["postingCountMean"] > 0 and
+                        breakdown["1"]["versionCheckCountMean"] == 0 and
+                        breakdown["1"]["versionMapMs"]["mean"] == 0,
+                        "Upper-layer search did not retain layer-0-only version checking")
         rows.append({"phase": phase, "round": round_id, "active_vectors": 9900000 + phase * 10000,
                      "recall_at_5": recall["recallAtK"], "qps": query["qps"],
                      "mean_ms": query["meanLatency"], "p95_ms": query["p95"], "p99_ms": query["p99"]})
@@ -185,12 +236,15 @@ def validate_measurements(data, log, saved, prefix):
 
 def validate(root, live=False):
     manifest = json.loads((root / "run-manifest.json").read_text())
-    directory = root / "tikv"
+    storage = manifest.get("storage", "TIKVIO")
+    directory = root / directory_name(storage)
     saved = configparser.ConfigParser()
     saved.read(directory / "index_9/indexloader.ini")
     require((directory / "index/checkpoint.txt").read_text().strip() == "9", "Wrong checkpoint marker")
     data = json.loads((directory / "output.json").read_text())
-    rows, insertions = validate_measurements(data, (directory / "run.log").read_text(), saved, manifest["prefix"])
+    layers = manifest.get("layers", 1)
+    rows, insertions = validate_measurements(
+        data, (directory / "run.log").read_text(), saved, manifest["prefix"], layers=layers, storage=storage)
     if live:
         with (root / "final-count-check.log").open("x") as stream:
             subprocess.run([str(root / "bin/check_count"), str(directory / "index_9")],
@@ -204,8 +258,10 @@ def validate(root, live=False):
             writer.writerows(records)
     write_json(root / "summary.json", {
         "status": "benchmark_and_counts_verified", "query_rounds": rows, "insertions": insertions,
-        "source_commit": manifest["recipe_source_commit"], "connections_per_client_per_store": 16,
-        "completion_queues_per_client": 8, "final_reloaded_samples": 10000000,
+        "source_commit": manifest["recipe_source_commit"], "storage": storage,
+        "connections_per_client_per_store": 16 if storage == "TIKVIO" else None,
+        "completion_queues_per_client": 8 if storage == "TIKVIO" else None, "final_reloaded_samples": 10000000,
+        "posting_layers": layers,
         "contained_ids": 10000000, "inserted_metadata_bijection": 100000,
         "count_validation_scope": "Logical membership and metadata, not exhaustive physical payload scan",
     })
@@ -218,25 +274,32 @@ def interrupted(signum, frame):
 
 def run(root):
     manifest = json.loads((root / "run-manifest.json").read_text())
+    storage = manifest.get("storage", "TIKVIO")
+    directory = root / directory_name(storage)
+    require(storage == "TIKVIO" or not manifest.get("presplit_regions", 0), "Presplit is TiKV-only")
     for name, checksum in json.loads((root / "checksums.json").read_text()).items():
         require(digest(root / name) == checksum, "Frozen input/binary/config changed: " + name)
     for name, checksum in manifest["recipe_sha256"].items():
         require(digest(RECIPE / name) == checksum, "Recipe changed after preparation: " + name)
-    require(shutil.disk_usage(root).free >= 500 * GIB, "Need at least 500 GiB free before cluster startup")
-    require(not (root / "cluster").exists() and not (root / "tikv/run.log").exists(),
+    require(shutil.disk_usage(root).free >= 500 * GIB, "Need at least 500 GiB free before experiment startup")
+    require(not (root / "cluster").exists() and not (directory / "run.log").exists(),
             "Refusing to reuse a previous run")
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
-    cluster = Cluster(root, manifest["prefix"])
+    cluster = Cluster(root, manifest["prefix"]) if storage == "TIKVIO" else None
     try:
-        cluster.start()
-        env = dict(os.environ, BENCHMARK_CONFIG=str(root / "tikv/benchmark.ini"),
-                   BENCHMARK_OUTPUT=str(root / "tikv/output.json"))
-        with (root / "tikv/run.log").open("x") as stream:
+        if cluster is not None:
+            cluster.start()
+        if manifest.get("presplit_regions", 0):
+            prepare_cluster(root, manifest["prefix"], manifest.get("layers", 1),
+                            10000000, manifest["presplit_regions"])
+        env = dict(os.environ, BENCHMARK_CONFIG=str(directory / "benchmark.ini"),
+                   BENCHMARK_OUTPUT=str(directory / "output.json"))
+        with (directory / "run.log").open("x") as stream:
             process = subprocess.Popen(
-                ["/usr/bin/time", "-v", "-o", str(root / "tikv/resources.txt"),
+                ["/usr/bin/time", "-v", "-o", str(directory / "resources.txt"),
                  str(root / "bin/SPTAGTest"), "--run_test=SPFreshTest/BenchmarkFromConfig", "--log_level=message"],
-                cwd=root / "tikv", env=env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+                cwd=directory, env=env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
             started = time.monotonic()
             try:
                 while process.poll() is None:
@@ -254,26 +317,30 @@ def run(root):
                     except subprocess.TimeoutExpired:
                         os.killpg(process.pid, signal.SIGKILL)
                         process.wait()
-                (root / "tikv/exit-code.txt").write_text(str(process.returncode) + "\n")
-        require(process.returncode == 0, "Benchmark failed; inspect tikv/run.log")
+                (directory / "exit-code.txt").write_text(str(process.returncode) + "\n")
+        require(process.returncode == 0, "Benchmark failed; inspect " + str(directory / "run.log"))
         write_json(root / "status.json", {"phase": "validating"})
         validate(root, live=True)
     except BaseException as error:
         write_json(root / "status.json", {"phase": "failed", "error": repr(error)})
         raise
     finally:
-        cluster.close()
+        if cluster is not None:
+            cluster.close()
     write_json(root / "status.json", {"phase": "complete"})
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Reproduce the full SIFT10M TiKV 16-connection/8-CQ experiment.")
+    parser = argparse.ArgumentParser(description="Run the full SIFT10M FILEIO or TiKV experiment.")
     parser.add_argument("command", choices=("prepare", "run", "validate"))
     parser.add_argument("--run-root", type=Path, required=True)
     for name in ("base", "queries", "truth", "binary", "checker"):
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--prefix")
     parser.add_argument("--source-root", type=Path, default=RECIPE.parent.parent)
+    parser.add_argument("--layers", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--storage", choices=("TIKVIO", "FILEIO"), default="TIKVIO")
+    parser.add_argument("--presplit-regions", type=int, default=0)
     parser.add_argument("--truth-generator", type=Path)
     parser.add_argument("--truth-threads", type=int, default=32)
     args = parser.parse_args()

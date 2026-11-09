@@ -1,0 +1,23 @@
+	Command being timed: "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer2-build80-20261109/bin/SPTAGTest --run_test=SPFreshTest/BenchmarkFromConfig --log_level=message"
+	User time (seconds): 80928.62
+	System time (seconds): 5267.94
+	Percent of CPU this job got: 2994%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 47:58.78
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 6718792
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 45570649
+	Voluntary context switches: 50014484
+	Involuntary context switches: 7121738
+	Swaps: 0
+	File system inputs: 1045701192
+	File system outputs: 540887144
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

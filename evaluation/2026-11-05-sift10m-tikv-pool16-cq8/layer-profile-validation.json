@@ -1,0 +1,52 @@
+{
+  "status": "all_four_profiles_verified",
+  "source_commit": "95bcb20f48f7864072f9443ec91027875382b722",
+  "same_measured_binary_checker_runtime_libraries": true,
+  "same_native_inputs_truth": true,
+  "same_core_workload_config_except_backend_and_layer": true,
+  "total_query_rounds": 88,
+  "total_insert_batches": 40,
+  "git_index_artifact_blobs_byte_verified": 180,
+  "staged_copy_report_verification": "All four offline validators passed using Git index contents",
+  "staged_copy_unit_tests_passed": 37,
+  "reports": {
+    "2026-11-09-sift10m-fileio-layer1-matched": {
+      "query_rounds": 22,
+      "insert_batches": 10,
+      "final_reloaded_samples": 10000000,
+      "inserted_metadata_bijection": 100000,
+      "offline_verification": "passed"
+    },
+    "2026-11-09-sift10m-fileio-layer2": {
+      "query_rounds": 22,
+      "insert_batches": 10,
+      "final_reloaded_samples": 10000000,
+      "inserted_metadata_bijection": 100000,
+      "offline_verification": "passed"
+    },
+    "2026-11-09-sift10m-tikv-layer1-presplit128": {
+      "query_rounds": 22,
+      "insert_batches": 10,
+      "final_reloaded_samples": 10000000,
+      "inserted_metadata_bijection": 100000,
+      "offline_verification": "passed"
+    },
+    "2026-11-06-sift10m-tikv-layer2-presplit128": {
+      "query_rounds": 22,
+      "insert_batches": 10,
+      "final_reloaded_samples": 10000000,
+      "inserted_metadata_bijection": 100000,
+      "offline_verification": "passed"
+    }
+  },
+  "portable_offline_verification": "Copied reports and five standard-library-only modules, no original repository/run-root paths, Docker or runtime libraries required",
+  "tampered_csv_rejected": true,
+  "markdown_file_links_verified": true,
+  "runner_publication_unit_tests": 37,
+  "unit_test_skips": 0,
+  "exact_truth_integer_bruteforce_and_tie_test": "passed",
+  "unit_test_log": "layer-profile-tests.log",
+  "clean_host_dependency_install_verified": false,
+  "new_full10m_run_with_newly_rebuilt_binary_verified": false,
+  "historical_publication_validation": "reproduction-validation.json remains the original11-test record; not overwritten"
+}

@@ -1,0 +1,22 @@
+{
+  "input/sift-first-10m.u8bin": "3f92342f582ebe3aa50751be105791e11894c4caac5b9d3321999457c56b054d",
+  "input/query.10K.u8bin": "eca755831fc9a8004e14886df48b81109a8ed3bfc6b632509c93c0460a30d552",
+  "tikv/perftest_batchtruth.L2.UInt8_9900000_128_10000_5_10000_0_10": "2cfad2347ac180705e701d43e9fd5a46cbc9e4cd4bd2695b8fe4959dfc287c1b",
+  "bin/SPTAGTest": "a38242ea9fac9ef9153af9c46ddd8389c57fc65da814d85cb2b13a72ac4c1323",
+  "bin/check_count": "60725cd58978ae86bfe0dc30973c334160c456b09ba17a21f7ee61b3a032ff3e",
+  "tikv/benchmark.ini": "2ff2792fa68226331d68a924d4fa26ef61f421d8759b076cff801dc8e4694fe9",
+  "tikv.toml": "1f6e59f33ed518568ffd49f053cc94f5973b31ced7ad67c21e80739a86976350",
+  "focused-tests.log": "2058c326853661b0d3a81b26de7c6a48bdd50816f642a1b0c2a56b7b0e039e09",
+  "runtime-ldd.txt": "4413125f1a7c42588d7e3f85174a785ddbc7cb3237cca2491bb728c28cba8d01",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109/comparison-config.json": "c7d4b679518acd2f7aed4acbbef2310083d15b7bc9c1f13bd9e337a6e27e2961",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109/baseline-layer2-presplit.ini": "ff6c895150a0d39d540d508de9c6088195bc5c451c3ab1c38308a8fc822ef9ac",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109/one-layer-plan-tests.json": "3ce036afaff51689269f2e9643fd259f19e319a53d0afdbca24bc0c0b982e6b0",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109/lib/libfolly.so.0.58.0-dev": "7ebe8a3196804514464f5265a9b0afb0bc4f0bbef676bfe9bb3af66727c4c3d7",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/benchmark.ini": "756c29706a9e92c3eb52f9cfa01a24dd64922957d455829f31cbf820a7b6e38a",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/publication-provenance.json": "a870c5ef7a4d36d210ccaf83084264c2254fa9e6cb314c7bbf634e2234d66570",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/tikv.toml": "1f6e59f33ed518568ffd49f053cc94f5973b31ced7ad67c21e80739a86976350",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/presplit.py": "953520d10367211d1956e761ac9a2d9ec5eed79424e08c21584627c2b92833f8",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/reproduce.py": "a65905b5e16d94f67d4a47301185b5f3a60b5bd681f587062a4abc58451bbbc6",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/deployment.py": "da272062ba10cba0c30731446a8dcbc397ee8e357857b2d962cc6c121197cb38",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-presplit128-20261109-recipe/source-commit.txt": "fae7aca973ef091bead37a744545a76e6cf8682e5a28b81274360c552f383db6"
+}

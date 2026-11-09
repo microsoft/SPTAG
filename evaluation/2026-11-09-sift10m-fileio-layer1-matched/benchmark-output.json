@@ -1,0 +1,875 @@
+{
+  "timestamp": "2026-11-09T03:35:46",
+  "config": {
+    "vectorPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/input/sift-first-10m.u8bin",
+    "queryPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/input/query.10K.u8bin",
+    "truthPath": "perftest_batchtruth.L2.UInt8_9900000_128_10000_5_10000_0_10",
+    "indexPath": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/fileio/index",
+    "quantizerPath": "",
+    "ValueType": "UInt8",
+    "dimension": 128,
+    "baseVectorCount": 9900000,
+    "insertVectorCount": 100000,
+    "DeleteVectorCount": 0,
+    "BatchNum": 10,
+    "topK": 5,
+    "numQueries": 10000,
+    "numSearchThreads": 32,
+    "numInsertThreads": 16,
+    "layers": 1,
+    "DistMethod": "L2"
+  },
+  "results": {
+    "build timeSeconds": 1199.6283,
+    "benchmark0_query_before_insert": {
+      "numQueries": 10000,
+      "meanLatency": 5.2271,
+      "p50": 5.2370,
+      "p90": 6.1990,
+      "p95": 6.6650,
+      "p99": 10.0840,
+      "minLatency": 1.9650,
+      "maxLatency": 28.4390,
+      "qps": 6098.5762,
+      "latencyBreakdown": {
+          "postingReadMs": {"mean": 1.4563, "p50": 1.4190, "p90": 1.7470, "p95": 1.8560, "p99": 2.1230},
+          "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+          "compMs": {"mean": 1.7650, "p50": 1.6850, "p90": 2.2980, "p95": 2.6340, "p99": 4.3340},
+          "setupMs": {"mean": 0.0750, "p50": 0.0670, "p90": 0.1160, "p95": 0.1370, "p99": 0.1890},
+        "layers": {
+          "0": {
+                  "postingReadMs": {"mean": 1.4563, "p50": 1.4190, "p90": 1.7470, "p95": 1.8560, "p99": 2.1230},
+                  "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                  "compMs": {"mean": 1.7650, "p50": 1.6850, "p90": 2.2980, "p95": 2.6340, "p99": 4.3340},
+                  "setupMs": {"mean": 0.0750, "p50": 0.0670, "p90": 0.1160, "p95": 0.1370, "p99": 0.1890},
+                  "totalMs": {"mean": 3.2565, "p50": 3.1790, "p90": 4.0010, "p95": 4.3960, "p99": 6.6760},
+            "postingCountMean": 64.0000,
+            "versionCheckCountMean": 0.0000,
+            "listElementsMean": 2461.9571
+          }
+        }
+      },
+      "recall": {
+        "recallAtK": 0.9577,
+        "k": 5,
+        "numQueries": 10000
+      }
+    },
+    "benchmark0b_query_before_insert_round2": {
+      "numQueries": 10000,
+      "meanLatency": 5.0683,
+      "p50": 5.0060,
+      "p90": 5.9130,
+      "p95": 7.2850,
+      "p99": 10.7910,
+      "minLatency": 1.9490,
+      "maxLatency": 21.2030,
+      "qps": 6287.6553,
+      "latencyBreakdown": {
+          "postingReadMs": {"mean": 1.4875, "p50": 1.3380, "p90": 1.6860, "p95": 1.9750, "p99": 5.4900},
+          "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+          "compMs": {"mean": 1.5748, "p50": 1.5900, "p90": 1.9850, "p95": 2.1300, "p99": 2.5900},
+          "setupMs": {"mean": 0.0790, "p50": 0.0660, "p90": 0.1080, "p95": 0.1210, "p99": 0.1740},
+        "layers": {
+          "0": {
+                  "postingReadMs": {"mean": 1.4875, "p50": 1.3380, "p90": 1.6860, "p95": 1.9750, "p99": 5.4900},
+                  "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                  "compMs": {"mean": 1.5748, "p50": 1.5900, "p90": 1.9850, "p95": 2.1300, "p99": 2.5900},
+                  "setupMs": {"mean": 0.0790, "p50": 0.0660, "p90": 0.1080, "p95": 0.1210, "p99": 0.1740},
+                  "totalMs": {"mean": 3.0974, "p50": 2.9920, "p90": 3.7270, "p95": 4.2950, "p99": 7.3090},
+            "postingCountMean": 64.0000,
+            "versionCheckCountMean": 0.0000,
+            "listElementsMean": 2461.9571
+          }
+        }
+      },
+      "recall": {
+        "recallAtK": 0.9577,
+        "k": 5,
+        "numQueries": 10000
+      }
+    },
+    "benchmark1_insert": {
+      "batch_1": {
+        "Load timeSeconds": 3.4442,
+        "Load vectorCount": 9900000,
+        "Clone timeSeconds": 56.1340,
+        "batch barrier waitSeconds": 0.1813,
+        "inserted": 10000,
+        "insert timeSeconds": 2.7376,
+        "insert throughput": 3652.7919,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.0255,
+          "p50": 5.1400,
+          "p90": 5.9100,
+          "p95": 6.1050,
+          "p99": 6.7190,
+          "minLatency": 1.9020,
+          "maxLatency": 17.3790,
+          "qps": 6344.3203,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.3981, "p50": 1.3890, "p90": 1.6830, "p95": 1.7610, "p99": 1.9500},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6977, "p50": 1.7280, "p90": 2.1580, "p95": 2.2730, "p99": 2.5050},
+              "setupMs": {"mean": 0.0787, "p50": 0.0710, "p90": 0.1240, "p95": 0.1460, "p99": 0.1880},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.3981, "p50": 1.3890, "p90": 1.6830, "p95": 1.7610, "p99": 1.9500},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6977, "p50": 1.7280, "p90": 2.1580, "p95": 2.2730, "p99": 2.5050},
+                      "setupMs": {"mean": 0.0787, "p50": 0.0710, "p90": 0.1240, "p95": 0.1460, "p99": 0.1880},
+                      "totalMs": {"mean": 3.1307, "p50": 3.1660, "p90": 3.8090, "p95": 3.9640, "p99": 4.2930},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2459.8587
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.0708,
+          "p50": 5.1790,
+          "p90": 5.9920,
+          "p95": 6.2640,
+          "p99": 7.6440,
+          "minLatency": 1.8690,
+          "maxLatency": 17.2090,
+          "qps": 6287.2163,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4212, "p50": 1.3910, "p90": 1.7120, "p95": 1.8100, "p99": 2.0870},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7451, "p50": 1.7630, "p90": 2.2190, "p95": 2.3650, "p99": 2.7400},
+              "setupMs": {"mean": 0.0819, "p50": 0.0750, "p90": 0.1260, "p95": 0.1480, "p99": 0.1970},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4212, "p50": 1.3910, "p90": 1.7120, "p95": 1.8100, "p99": 2.0870},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7451, "p50": 1.7630, "p90": 2.2190, "p95": 2.3650, "p99": 2.7400},
+                      "setupMs": {"mean": 0.0819, "p50": 0.0750, "p90": 0.1260, "p95": 0.1480, "p99": 0.1970},
+                      "totalMs": {"mean": 3.2010, "p50": 3.2020, "p90": 3.8950, "p95": 4.1090, "p99": 4.8300},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2459.8587
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 4.0119
+      },
+      "batch_2": {
+        "Load timeSeconds": 3.0877,
+        "Load vectorCount": 9910000,
+        "Clone timeSeconds": 40.1480,
+        "batch barrier waitSeconds": 0.1007,
+        "inserted": 10000,
+        "insert timeSeconds": 2.5671,
+        "insert throughput": 3895.4418,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.8475,
+          "p50": 5.9230,
+          "p90": 6.8350,
+          "p95": 7.2430,
+          "p99": 10.7840,
+          "minLatency": 1.8550,
+          "maxLatency": 22.4620,
+          "qps": 5453.8115,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4724, "p50": 1.4390, "p90": 1.7580, "p95": 1.8620, "p99": 2.3950},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.8217, "p50": 1.8150, "p90": 2.3340, "p95": 2.5090, "p99": 3.2650},
+              "setupMs": {"mean": 0.1053, "p50": 0.0980, "p90": 0.1600, "p95": 0.1880, "p99": 0.2620},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4724, "p50": 1.4390, "p90": 1.7580, "p95": 1.8620, "p99": 2.3950},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.8217, "p50": 1.8150, "p90": 2.3340, "p95": 2.5090, "p99": 3.2650},
+                      "setupMs": {"mean": 0.1053, "p50": 0.0980, "p90": 0.1600, "p95": 0.1880, "p99": 0.2620},
+                      "totalMs": {"mean": 3.3289, "p50": 3.3120, "p90": 4.0420, "p95": 4.3050, "p99": 5.6530},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2461.3671
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.6543,
+          "p50": 5.7270,
+          "p90": 6.5680,
+          "p95": 6.9850,
+          "p99": 10.4260,
+          "minLatency": 1.9710,
+          "maxLatency": 22.7630,
+          "qps": 5639.8208,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4693, "p50": 1.4270, "p90": 1.7460, "p95": 1.8560, "p99": 2.9550},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7653, "p50": 1.7520, "p90": 2.2530, "p95": 2.4370, "p99": 3.4050},
+              "setupMs": {"mean": 0.0879, "p50": 0.0830, "p90": 0.1260, "p95": 0.1500, "p99": 0.2030},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4693, "p50": 1.4270, "p90": 1.7460, "p95": 1.8560, "p99": 2.9550},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7653, "p50": 1.7520, "p90": 2.2530, "p95": 2.4370, "p99": 3.4050},
+                      "setupMs": {"mean": 0.0879, "p50": 0.0830, "p90": 0.1260, "p95": 0.1500, "p99": 0.2030},
+                      "totalMs": {"mean": 3.2696, "p50": 3.2390, "p90": 3.9770, "p95": 4.2520, "p99": 6.3980},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2461.3671
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.2633
+      },
+      "batch_3": {
+        "Load timeSeconds": 2.8713,
+        "Load vectorCount": 9920000,
+        "Clone timeSeconds": 42.2983,
+        "batch barrier waitSeconds": 0.1007,
+        "inserted": 10000,
+        "insert timeSeconds": 2.1157,
+        "insert throughput": 4726.4945,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.2058,
+          "p50": 5.2210,
+          "p90": 6.0920,
+          "p95": 6.5490,
+          "p99": 10.0870,
+          "minLatency": 1.8630,
+          "maxLatency": 23.4790,
+          "qps": 6127.3350,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.5246, "p50": 1.4280, "p90": 1.7890, "p95": 1.9590, "p99": 5.1710},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6447, "p50": 1.6440, "p90": 2.0940, "p95": 2.2460, "p99": 2.7580},
+              "setupMs": {"mean": 0.0838, "p50": 0.0750, "p90": 0.1210, "p95": 0.1370, "p99": 0.1860},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.5246, "p50": 1.4280, "p90": 1.7890, "p95": 1.9590, "p99": 5.1710},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6447, "p50": 1.6440, "p90": 2.0940, "p95": 2.2460, "p99": 2.7580},
+                      "setupMs": {"mean": 0.0838, "p50": 0.0750, "p90": 0.1210, "p95": 0.1370, "p99": 0.1860},
+                      "totalMs": {"mean": 3.2042, "p50": 3.1480, "p90": 3.8890, "p95": 4.2000, "p99": 7.0320},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2462.9471
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.0467,
+          "p50": 5.1670,
+          "p90": 5.9360,
+          "p95": 6.1380,
+          "p99": 6.8150,
+          "minLatency": 1.7940,
+          "maxLatency": 15.0690,
+          "qps": 6314.5386,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4120, "p50": 1.3950, "p90": 1.6940, "p95": 1.7900, "p99": 2.0240},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6569, "p50": 1.6820, "p90": 2.0960, "p95": 2.2280, "p99": 2.4910},
+              "setupMs": {"mean": 0.0806, "p50": 0.0730, "p90": 0.1230, "p95": 0.1410, "p99": 0.1910},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4120, "p50": 1.3950, "p90": 1.6940, "p95": 1.7900, "p99": 2.0240},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6569, "p50": 1.6820, "p90": 2.0960, "p95": 2.2280, "p99": 2.4910},
+                      "setupMs": {"mean": 0.0806, "p50": 0.0730, "p90": 0.1230, "p95": 0.1410, "p99": 0.1910},
+                      "totalMs": {"mean": 3.1038, "p50": 3.1260, "p90": 3.7640, "p95": 3.9390, "p99": 4.3420},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2462.9471
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.3479
+      },
+      "batch_4": {
+        "Load timeSeconds": 2.9817,
+        "Load vectorCount": 9930000,
+        "Clone timeSeconds": 39.5956,
+        "batch barrier waitSeconds": 0.0807,
+        "inserted": 10000,
+        "insert timeSeconds": 2.3473,
+        "insert throughput": 4260.2155,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.5552,
+          "p50": 5.7020,
+          "p90": 6.5720,
+          "p95": 6.8400,
+          "p99": 7.4860,
+          "minLatency": 1.8860,
+          "maxLatency": 18.0300,
+          "qps": 5741.3491,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4170, "p50": 1.3990, "p90": 1.7030, "p95": 1.7920, "p99": 2.0140},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7823, "p50": 1.8000, "p90": 2.3130, "p95": 2.4830, "p99": 2.7820},
+              "setupMs": {"mean": 0.0965, "p50": 0.0890, "p90": 0.1490, "p95": 0.1740, "p99": 0.2300},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4170, "p50": 1.3990, "p90": 1.7030, "p95": 1.7920, "p99": 2.0140},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7823, "p50": 1.8000, "p90": 2.3130, "p95": 2.4830, "p99": 2.7820},
+                      "setupMs": {"mean": 0.0965, "p50": 0.0890, "p90": 0.1490, "p95": 0.1740, "p99": 0.2300},
+                      "totalMs": {"mean": 3.2341, "p50": 3.2510, "p90": 3.9630, "p95": 4.1970, "p99": 4.6400},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2464.9141
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.7637,
+          "p50": 5.7810,
+          "p90": 6.7100,
+          "p95": 7.3060,
+          "p99": 11.7380,
+          "minLatency": 2.0130,
+          "maxLatency": 20.9970,
+          "qps": 5531.7139,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4817, "p50": 1.4160, "p90": 1.7380, "p95": 1.8630, "p99": 4.5640},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.8301, "p50": 1.8320, "p90": 2.3380, "p95": 2.5100, "p99": 3.1370},
+              "setupMs": {"mean": 0.1005, "p50": 0.0930, "p90": 0.1410, "p95": 0.1620, "p99": 0.2120},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4817, "p50": 1.4160, "p90": 1.7380, "p95": 1.8630, "p99": 4.5640},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.8301, "p50": 1.8320, "p90": 2.3380, "p95": 2.5100, "p99": 3.1370},
+                      "setupMs": {"mean": 0.1005, "p50": 0.0930, "p90": 0.1410, "p95": 0.1620, "p99": 0.2120},
+                      "totalMs": {"mean": 3.3469, "p50": 3.3170, "p90": 4.0660, "p95": 4.3760, "p99": 6.7850},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2464.9141
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.3480
+      },
+      "batch_5": {
+        "Load timeSeconds": 2.8469,
+        "Load vectorCount": 9940000,
+        "Clone timeSeconds": 41.6995,
+        "batch barrier waitSeconds": 0.0000,
+        "inserted": 10000,
+        "insert timeSeconds": 1.9475,
+        "insert throughput": 5134.7643,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.1017,
+          "p50": 5.2210,
+          "p90": 6.0400,
+          "p95": 6.2760,
+          "p99": 6.9000,
+          "minLatency": 1.8850,
+          "maxLatency": 14.4170,
+          "qps": 6249.2656,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4871, "p50": 1.4710, "p90": 1.7940, "p95": 1.9020, "p99": 2.1390},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6778, "p50": 1.6840, "p90": 2.1680, "p95": 2.3370, "p99": 2.6430},
+              "setupMs": {"mean": 0.0746, "p50": 0.0700, "p90": 0.1170, "p95": 0.1350, "p99": 0.1850},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4871, "p50": 1.4710, "p90": 1.7940, "p95": 1.9020, "p99": 2.1390},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6778, "p50": 1.6840, "p90": 2.1680, "p95": 2.3370, "p99": 2.6430},
+                      "setupMs": {"mean": 0.0746, "p50": 0.0700, "p90": 0.1170, "p95": 0.1350, "p99": 0.1850},
+                      "totalMs": {"mean": 3.1998, "p50": 3.2210, "p90": 3.9090, "p95": 4.1130, "p99": 4.5720},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2467.1559
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.0772,
+          "p50": 5.2000,
+          "p90": 5.9710,
+          "p95": 6.1930,
+          "p99": 7.1690,
+          "minLatency": 1.9070,
+          "maxLatency": 18.3760,
+          "qps": 6278.0786,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4785, "p50": 1.4570, "p90": 1.7740, "p95": 1.8620, "p99": 2.1160},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6601, "p50": 1.6690, "p90": 2.1150, "p95": 2.2830, "p99": 2.6830},
+              "setupMs": {"mean": 0.0750, "p50": 0.0690, "p90": 0.1150, "p95": 0.1340, "p99": 0.1850},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4785, "p50": 1.4570, "p90": 1.7740, "p95": 1.8620, "p99": 2.1160},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6601, "p50": 1.6690, "p90": 2.1150, "p95": 2.2830, "p99": 2.6830},
+                      "setupMs": {"mean": 0.0750, "p50": 0.0690, "p90": 0.1150, "p95": 0.1340, "p99": 0.1850},
+                      "totalMs": {"mean": 3.1737, "p50": 3.1830, "p90": 3.8530, "p95": 4.0600, "p99": 4.6610},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2467.1559
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.3648
+      },
+      "batch_6": {
+        "Load timeSeconds": 2.8146,
+        "Load vectorCount": 9950000,
+        "Clone timeSeconds": 40.1478,
+        "batch barrier waitSeconds": 0.0406,
+        "inserted": 10000,
+        "insert timeSeconds": 2.2175,
+        "insert throughput": 4509.5747,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.4993,
+          "p50": 5.6450,
+          "p90": 6.4650,
+          "p95": 6.7240,
+          "p99": 7.6900,
+          "minLatency": 1.9630,
+          "maxLatency": 21.0840,
+          "qps": 5798.4961,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4514, "p50": 1.4220, "p90": 1.7470, "p95": 1.8580, "p99": 2.2540},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7373, "p50": 1.7440, "p90": 2.2620, "p95": 2.4360, "p99": 2.7630},
+              "setupMs": {"mean": 0.0896, "p50": 0.0840, "p90": 0.1370, "p95": 0.1590, "p99": 0.2050},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4514, "p50": 1.4220, "p90": 1.7470, "p95": 1.8580, "p99": 2.2540},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7373, "p50": 1.7440, "p90": 2.2620, "p95": 2.4360, "p99": 2.7630},
+                      "setupMs": {"mean": 0.0896, "p50": 0.0840, "p90": 0.1370, "p95": 0.1590, "p99": 0.2050},
+                      "totalMs": {"mean": 3.2237, "p50": 3.2310, "p90": 3.9450, "p95": 4.1840, "p99": 4.7990},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2469.4687
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.6884,
+          "p50": 5.8110,
+          "p90": 6.6540,
+          "p95": 6.9240,
+          "p99": 8.6120,
+          "minLatency": 2.0650,
+          "maxLatency": 23.7470,
+          "qps": 5605.8555,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4506, "p50": 1.4330, "p90": 1.7500, "p95": 1.8430, "p99": 2.0880},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.8218, "p50": 1.8240, "p90": 2.3490, "p95": 2.5080, "p99": 2.8560},
+              "setupMs": {"mean": 0.1010, "p50": 0.0970, "p90": 0.1520, "p95": 0.1740, "p99": 0.2270},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4506, "p50": 1.4330, "p90": 1.7500, "p95": 1.8430, "p99": 2.0880},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.8218, "p50": 1.8240, "p90": 2.3490, "p95": 2.5080, "p99": 2.8560},
+                      "setupMs": {"mean": 0.1010, "p50": 0.0970, "p90": 0.1520, "p95": 0.1740, "p99": 0.2270},
+                      "totalMs": {"mean": 3.3074, "p50": 3.3300, "p90": 4.0310, "p95": 4.2550, "p99": 4.7620},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2469.4687
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.2696
+      },
+      "batch_7": {
+        "Load timeSeconds": 2.8204,
+        "Load vectorCount": 9960000,
+        "Clone timeSeconds": 43.9906,
+        "batch barrier waitSeconds": 0.0405,
+        "inserted": 10000,
+        "insert timeSeconds": 2.2769,
+        "insert throughput": 4391.9381,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.7136,
+          "p50": 5.7980,
+          "p90": 6.6480,
+          "p95": 6.9870,
+          "p99": 10.7250,
+          "minLatency": 2.0360,
+          "maxLatency": 29.3950,
+          "qps": 5580.4692,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.5055, "p50": 1.4640, "p90": 1.7880, "p95": 1.8900, "p99": 2.6870},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.9093, "p50": 1.8960, "p90": 2.4110, "p95": 2.5780, "p99": 3.6500},
+              "setupMs": {"mean": 0.0860, "p50": 0.0810, "p90": 0.1240, "p95": 0.1440, "p99": 0.1870},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.5055, "p50": 1.4640, "p90": 1.7880, "p95": 1.8900, "p99": 2.6870},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.9093, "p50": 1.8960, "p90": 2.4110, "p95": 2.5780, "p99": 3.6500},
+                      "setupMs": {"mean": 0.0860, "p50": 0.0810, "p90": 0.1240, "p95": 0.1440, "p99": 0.1870},
+                      "totalMs": {"mean": 3.4498, "p50": 3.4270, "p90": 4.1520, "p95": 4.4240, "p99": 6.7060},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2471.5452
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.6388,
+          "p50": 5.7810,
+          "p90": 6.6450,
+          "p95": 6.9110,
+          "p99": 8.2370,
+          "minLatency": 2.0040,
+          "maxLatency": 23.5080,
+          "qps": 5653.1445,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4704, "p50": 1.4540, "p90": 1.7800, "p95": 1.8670, "p99": 2.0470},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.9229, "p50": 1.9330, "p90": 2.4320, "p95": 2.6010, "p99": 3.1740},
+              "setupMs": {"mean": 0.0810, "p50": 0.0740, "p90": 0.1310, "p95": 0.1520, "p99": 0.2020},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4704, "p50": 1.4540, "p90": 1.7800, "p95": 1.8670, "p99": 2.0470},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.9229, "p50": 1.9330, "p90": 2.4320, "p95": 2.6010, "p99": 3.1740},
+                      "setupMs": {"mean": 0.0810, "p50": 0.0740, "p90": 0.1310, "p95": 0.1520, "p99": 0.2020},
+                      "totalMs": {"mean": 3.4283, "p50": 3.4480, "p90": 4.1630, "p95": 4.3820, "p99": 5.0280},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2471.5452
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9577,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.5665
+      },
+      "batch_8": {
+        "Load timeSeconds": 2.9509,
+        "Load vectorCount": 9970000,
+        "Clone timeSeconds": 41.2463,
+        "batch barrier waitSeconds": 0.0406,
+        "inserted": 10000,
+        "insert timeSeconds": 2.0211,
+        "insert throughput": 4947.7539,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.0795,
+          "p50": 5.2100,
+          "p90": 5.9880,
+          "p95": 6.2130,
+          "p99": 6.7550,
+          "minLatency": 1.7780,
+          "maxLatency": 15.1500,
+          "qps": 6273.2344,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4274, "p50": 1.4070, "p90": 1.7260, "p95": 1.8300, "p99": 2.0750},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6813, "p50": 1.6960, "p90": 2.1680, "p95": 2.3270, "p99": 2.6100},
+              "setupMs": {"mean": 0.0812, "p50": 0.0750, "p90": 0.1270, "p95": 0.1480, "p99": 0.1890},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4274, "p50": 1.4070, "p90": 1.7260, "p95": 1.8300, "p99": 2.0750},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6813, "p50": 1.6960, "p90": 2.1680, "p95": 2.3270, "p99": 2.6100},
+                      "setupMs": {"mean": 0.0812, "p50": 0.0750, "p90": 0.1270, "p95": 0.1480, "p99": 0.1890},
+                      "totalMs": {"mean": 3.1436, "p50": 3.1640, "p90": 3.8390, "p95": 4.0440, "p99": 4.5110},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2473.8408
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9578,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.1820,
+          "p50": 5.1700,
+          "p90": 6.0700,
+          "p95": 6.6880,
+          "p99": 10.6470,
+          "minLatency": 1.8850,
+          "maxLatency": 17.7720,
+          "qps": 6155.2324,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.5132, "p50": 1.3910, "p90": 1.7480, "p95": 1.9580, "p99": 5.2880},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6647, "p50": 1.6750, "p90": 2.1330, "p95": 2.2960, "p99": 2.6320},
+              "setupMs": {"mean": 0.0798, "p50": 0.0700, "p90": 0.1120, "p95": 0.1320, "p99": 0.1890},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.5132, "p50": 1.3910, "p90": 1.7480, "p95": 1.9580, "p99": 5.2880},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6647, "p50": 1.6750, "p90": 2.1330, "p95": 2.2960, "p99": 2.6320},
+                      "setupMs": {"mean": 0.0798, "p50": 0.0700, "p90": 0.1120, "p95": 0.1320, "p99": 0.1890},
+                      "totalMs": {"mean": 3.2132, "p50": 3.1410, "p90": 3.9110, "p95": 4.2960, "p99": 7.1220},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2473.8408
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9578,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.2100
+      },
+      "batch_9": {
+        "Load timeSeconds": 2.7345,
+        "Load vectorCount": 9980000,
+        "Clone timeSeconds": 39.7778,
+        "batch barrier waitSeconds": 0.0000,
+        "inserted": 10000,
+        "insert timeSeconds": 1.9149,
+        "insert throughput": 5222.2050,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 4.9705,
+          "p50": 5.1190,
+          "p90": 5.8560,
+          "p95": 6.0500,
+          "p99": 6.4760,
+          "minLatency": 1.8560,
+          "maxLatency": 14.2030,
+          "qps": 6413.5947,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4391, "p50": 1.4280, "p90": 1.7370, "p95": 1.8330, "p99": 2.0390},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.6318, "p50": 1.6440, "p90": 2.1140, "p95": 2.2690, "p99": 2.5580},
+              "setupMs": {"mean": 0.0807, "p50": 0.0740, "p90": 0.1260, "p95": 0.1430, "p99": 0.1880},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4391, "p50": 1.4280, "p90": 1.7370, "p95": 1.8330, "p99": 2.0390},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.6318, "p50": 1.6440, "p90": 2.1140, "p95": 2.2690, "p99": 2.5580},
+                      "setupMs": {"mean": 0.0807, "p50": 0.0740, "p90": 0.1260, "p95": 0.1430, "p99": 0.1880},
+                      "totalMs": {"mean": 3.1059, "p50": 3.1360, "p90": 3.7880, "p95": 3.9980, "p99": 4.4070},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2475.9339
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9576,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.1928,
+          "p50": 5.2330,
+          "p90": 6.0750,
+          "p95": 6.4380,
+          "p99": 9.9610,
+          "minLatency": 1.8510,
+          "maxLatency": 24.6890,
+          "qps": 6138.7505,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4765, "p50": 1.4460, "p90": 1.7670, "p95": 1.8690, "p99": 2.2080},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7330, "p50": 1.7220, "p90": 2.2110, "p95": 2.4090, "p99": 3.2700},
+              "setupMs": {"mean": 0.0845, "p50": 0.0750, "p90": 0.1260, "p95": 0.1460, "p99": 0.1900},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4765, "p50": 1.4460, "p90": 1.7670, "p95": 1.8690, "p99": 2.2080},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7330, "p50": 1.7220, "p90": 2.2110, "p95": 2.4090, "p99": 3.2700},
+                      "setupMs": {"mean": 0.0845, "p50": 0.0750, "p90": 0.1260, "p95": 0.1460, "p99": 0.1900},
+                      "totalMs": {"mean": 3.2445, "p50": 3.2280, "p90": 3.9450, "p95": 4.2040, "p99": 5.5850},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2475.9339
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9576,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.4119
+      },
+      "batch_10": {
+        "Load timeSeconds": 2.9462,
+        "Load vectorCount": 9990000,
+        "Clone timeSeconds": 40.0081,
+        "batch barrier waitSeconds": 0.0000,
+        "inserted": 10000,
+        "insert timeSeconds": 1.9440,
+        "insert throughput": 5144.0010,
+        "search":    {
+          "numQueries": 10000,
+          "meanLatency": 5.1592,
+          "p50": 5.2600,
+          "p90": 6.0480,
+          "p95": 6.2770,
+          "p99": 8.0770,
+          "minLatency": 1.9220,
+          "maxLatency": 20.0840,
+          "qps": 6175.2485,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4462, "p50": 1.4320, "p90": 1.7380, "p95": 1.8320, "p99": 2.0320},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7335, "p50": 1.7200, "p90": 2.1900, "p95": 2.3570, "p99": 3.2050},
+              "setupMs": {"mean": 0.0788, "p50": 0.0730, "p90": 0.1230, "p95": 0.1430, "p99": 0.1910},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4462, "p50": 1.4320, "p90": 1.7380, "p95": 1.8320, "p99": 2.0320},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7335, "p50": 1.7200, "p90": 2.1900, "p95": 2.3570, "p99": 3.2050},
+                      "setupMs": {"mean": 0.0788, "p50": 0.0730, "p90": 0.1230, "p95": 0.1430, "p99": 0.1910},
+                      "totalMs": {"mean": 3.2146, "p50": 3.2070, "p90": 3.8920, "p95": 4.1130, "p99": 5.3080},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2478.0991
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9576,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "search_round2":    {
+          "numQueries": 10000,
+          "meanLatency": 5.2555,
+          "p50": 5.3320,
+          "p90": 6.1230,
+          "p95": 6.3730,
+          "p99": 9.0260,
+          "minLatency": 1.9170,
+          "maxLatency": 26.0330,
+          "qps": 6066.3750,
+          "latencyBreakdown": {
+              "postingReadMs": {"mean": 1.4533, "p50": 1.4410, "p90": 1.7480, "p95": 1.8360, "p99": 2.0200},
+              "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+              "compMs": {"mean": 1.7448, "p50": 1.7450, "p90": 2.2150, "p95": 2.3790, "p99": 2.9900},
+              "setupMs": {"mean": 0.0862, "p50": 0.0790, "p90": 0.1290, "p95": 0.1490, "p99": 0.1920},
+            "layers": {
+              "0": {
+                      "postingReadMs": {"mean": 1.4533, "p50": 1.4410, "p90": 1.7480, "p95": 1.8360, "p99": 2.0200},
+                      "versionMapMs": {"mean": 0.0000, "p50": 0.0000, "p90": 0.0000, "p95": 0.0000, "p99": 0.0000},
+                      "compMs": {"mean": 1.7448, "p50": 1.7450, "p90": 2.2150, "p95": 2.3790, "p99": 2.9900},
+                      "setupMs": {"mean": 0.0862, "p50": 0.0790, "p90": 0.1290, "p95": 0.1490, "p99": 0.1920},
+                      "totalMs": {"mean": 3.2330, "p50": 3.2440, "p90": 3.9280, "p95": 4.1340, "p99": 4.9790},
+                "postingCountMean": 64.0000,
+                "versionCheckCountMean": 0.0000,
+                "listElementsMean": 2478.0991
+              }
+            }
+          },
+          "recall": {
+            "recallAtK": 0.9576,
+            "k": 5,
+            "numQueries": 10000
+          }
+        },
+        "save timeSeconds": 3.4375
+      }
+    }
+  }
+}

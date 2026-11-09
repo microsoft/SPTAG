@@ -1,0 +1,26 @@
+{
+  "source_commit": "95bcb20f48f7864072f9443ec91027875382b722",
+  "source_sha256": {
+    "AnnService/inc/Core/SPANN/ExtraDynamicSearcher.h": "a9484c6ea17f70e93f6405df9807e4042cf713502d420338b63a9fd60a22ae37",
+    "AnnService/inc/Core/SPANN/ExtraTiKVController.h": "755304b13da630cb5d7931e4d67e9435327943429c6a1731d1dde3a26b94a589",
+    "Test/src/TiKVIOTest.cpp": "2dad582b9f008def1eee323c03c01383890c6e4b6f985af7fa070b19717f3400"
+  },
+  "binary_sha256": "a38242ea9fac9ef9153af9c46ddd8389c57fc65da814d85cb2b13a72ac4c1323",
+  "checker_sha256": "60725cd58978ae86bfe0dc30973c334160c456b09ba17a21f7ee61b3a032ff3e",
+  "runtime_library_sha256": {
+    "libfolly.so.0.58.0-dev": "7ebe8a3196804514464f5265a9b0afb0bc4f0bbef676bfe9bb3af66727c4c3d7"
+  },
+  "dependencies": {
+    "folly_commit": "7088e27f4854c9088bcf35b980e54e89fa966e0f",
+    "zstd_commit": "e47e674cd09583ff0503f0f6defd6d23d8b718d3",
+    "measured_folly_library_sha256": "7ebe8a3196804514464f5265a9b0afb0bc4f0bbef676bfe9bb3af66727c4c3d7",
+    "build_type": "Release",
+    "FOLLY": true,
+    "TIKV": true,
+    "TBB": true,
+    "compiler": "GCC 11.4.0",
+    "protobuf": "3.12.4",
+    "grpc": "1.30.2"
+  },
+  "newly_rebuilt_binary_measured": false
+}

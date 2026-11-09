@@ -1,0 +1,13 @@
+{
+  "base_shape": [
+    10000000,
+    128
+  ],
+  "query_shape": [
+    10000,
+    128
+  ],
+  "native_base_sha256": "3f92342f582ebe3aa50751be105791e11894c4caac5b9d3321999457c56b054d",
+  "native_queries_sha256": "eca755831fc9a8004e14886df48b81109a8ed3bfc6b632509c93c0460a30d552",
+  "phase_truth_sha256": "2cfad2347ac180705e701d43e9fd5a46cbc9e4cd4bd2695b8fe4959dfc287c1b"
+}

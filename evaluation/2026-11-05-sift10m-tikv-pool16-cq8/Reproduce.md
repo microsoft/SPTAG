@@ -17,6 +17,10 @@ The runner requires at least 500GiB **free before cluster startup** and stops
 the benchmark below 250GiB free. Provision substantially more headroom on a
 shared host: server reservation, checkpoints and unrelated workloads consume space.
 Keep all generated data outside existing experiments.
+For `--storage FILEIO`, Docker and server memory are not required: skip Docker
+setup and image pulls. The client still uses the same TIKV-enabled build and
+its gRPC/Folly runtime dependencies. The 500GiB/250GiB disk guards apply to both
+backends.
 
 The tested environment used Ubuntu 22.04-era packages, GCC 11.4.0,
 CMake 3.31.12, Protobuf 3.12.4, gRPC 1.30.2 and Folly 0.58.0-dev.
@@ -102,6 +106,15 @@ build threads 80. Keep the checkout and Folly library available while running;
 the wrapper freezes executables but does not vendor all shared libraries.
 Known pre-existing `DedupCandidateTest` failures are not part of the six focused
 cases and were not fixed by this work.
+The separately published layer profiles use the same shared build workflow.
+Their own `Reproduce.md` files supply mandatory storage/layers/presplit settings;
+do not use this older report's default unsplit TiKV1 command for those profiles.
+Run both tool suites when validating the extended publication tools:
+
+```bash
+(cd "$RECIPE" && EXACT_TRUTH_BIN="$HELPERS/exact_truth" \
+  python3 -m unittest -v test_reproduce test_publish_report)
+```
 
 ## 3. Prepare native inputs and phase-specific exact truth
 
@@ -128,6 +141,32 @@ python3 "$RECIPE/reproduce.py" prepare --run-root "$RUN_ROOT" \
 
 Use a unique lowercase prefix, such as `sptag16-20261106t030000z`.
 The runner rejects invalid/reused run directories rather than falling back.
+The default is `--layers 1`, matching this report. To conduct a separate
+two-layer comparison, pass `--layers 2` at preparation with a new run directory
+and prefix. All other workload and transport settings remain unchanged.
+Validation then requires both layer breakdowns and checkpoint records, with
+version checks enabled on layer 0 and skipped on layer 1 during search.
+For a separate deployment optimization experiment, also pass
+`--presplit-regions 128`. Before building, the runner pre-splits the posting
+raw-byte keyspace and each layer's zero-padded VersionMap VID range, then
+scatters only this run's regions. It verifies all boundaries, three caught-up
+voting replicas without pending/down peers, and a leader-count difference
+of at most 20% of the bucket count in each key family, with no pending
+operators over three consecutive observations. Failure aborts the run rather
+than silently benchmarking an unbalanced cluster. This is not the deployment
+used by the original layer-1 report; pre-splitting is disabled by default.
+For a FILEIO comparison, use `--storage FILEIO --layers 2` and leave
+`--presplit-regions` at zero. The same executable is used with local VersionMaps,
+no PD/TiKV containers are started, and outputs reside in `fileio/`.
+FILEIO retains version checks on both posting layers: the layer-0-only switch
+applies to distributed TiKV queries, not local FILEIO.
+In the pinned source, FILEIO performs local `Deleted` checks inline in the
+posting scan, included in computation time. `versionCheckCountMean` and
+`versionMapMs` record TiKV batch checks only and remain zero for FILEIO;
+zero is not evidence that local checks were bypassed. FILEIO validation uses
+the pinned source, local-map runtime markers on each layer, saved configuration,
+nonempty per-layer scans, checkpoint membership and independent final reload
+instead of requiring positive TiKV-only counters.
 
 Preparation extracts exactly the first 10M base rows, hashes the base/query,
 generates all 11 exact truth phases, requires the recorded truth SHA256,
@@ -155,6 +194,8 @@ sudo -n docker pull pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad9
 python3 "$RECIPE/reproduce.py" run --run-root "$RUN_ROOT"
 ```
 
+For FILEIO, run only the Python command: no images, Docker daemon or cluster
+are used. Its workload files reside in `fileio/`, rather than `tikv/`.
 Use a persistent terminal/session manager for the long foreground command.
 The wrapper does not daemonize itself. Monitor `status.json` and
 `tikv/run.log` under the new run root.
@@ -189,6 +230,10 @@ VersionMap, native inputs, all ten batches and counts, saved effective settings,
 while the cluster is still available. It verifies exact `[0,10M)` membership
 and all 100K inserted metadata entries before stopping the cluster.
 Normal query-triggered maintenance and version checks remain enabled.
+For FILEIO, acceptance instead requires local VersionMap runtime markers on
+each posting layer and the pinned inline local-check implementation. Its TiKV
+batch-check metrics remain zero. The same final10M membership and100K metadata
+checker runs without any TiKV service.
 
 Expected outputs include `tikv/output.json`, `tikv/run.log`, `tikv/resources.txt`,
 `query-rounds.csv`, `insertions.csv`, `summary.json`, `final-count-check.log`,

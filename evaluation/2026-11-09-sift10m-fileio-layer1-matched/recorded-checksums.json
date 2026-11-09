@@ -1,0 +1,22 @@
+{
+  "input/sift-first-10m.u8bin": "3f92342f582ebe3aa50751be105791e11894c4caac5b9d3321999457c56b054d",
+  "input/query.10K.u8bin": "eca755831fc9a8004e14886df48b81109a8ed3bfc6b632509c93c0460a30d552",
+  "fileio/perftest_batchtruth.L2.UInt8_9900000_128_10000_5_10000_0_10": "2cfad2347ac180705e701d43e9fd5a46cbc9e4cd4bd2695b8fe4959dfc287c1b",
+  "bin/SPTAGTest": "a38242ea9fac9ef9153af9c46ddd8389c57fc65da814d85cb2b13a72ac4c1323",
+  "bin/check_count": "60725cd58978ae86bfe0dc30973c334160c456b09ba17a21f7ee61b3a032ff3e",
+  "fileio/benchmark.ini": "09b9515c7de8383d97d358bdccf776e58ae589cba7e9a5e2a53e39359fb4f6ad",
+  "tikv.toml": "1f6e59f33ed518568ffd49f053cc94f5973b31ced7ad67c21e80739a86976350",
+  "focused-tests.log": "5c2b926b2bbd7310e862466efc6a8a03b88bbccdf95df533fe68574590a8c004",
+  "runtime-ldd.txt": "aa72fd4b707231f0213b13a3e60549154d86f480d8318911de57e2f9f356c9f3",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/comparison-config.json": "36ea2462f0edf7be3ead40879fee23fbb60dcc132b07c11a15b48e4bc660b71f",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/recipe-tests.log": "548ac1138cc380aea93b9f7e3734413551b0d619fcfcc3165c413a51f522a958",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/baseline-fileio-layer2.ini": "9008178151cbc3c213139f58b212aaa33438341c804075959143b464cac18519",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/benchmark.ini": "4ce9716487e20206303bc089c87f4c184ac119b6aa5171eef03fb280bcab8644",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/publication-provenance.json": "a870c5ef7a4d36d210ccaf83084264c2254fa9e6cb314c7bbf634e2234d66570",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/tikv.toml": "1f6e59f33ed518568ffd49f053cc94f5973b31ced7ad67c21e80739a86976350",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/presplit.py": "953520d10367211d1956e761ac9a2d9ec5eed79424e08c21584627c2b92833f8",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/reproduce.py": "8f0b47cd5d127d4e8a3d61dfa743549dba7698cd7025ea3621cf12495dfad995",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/deployment.py": "da272062ba10cba0c30731446a8dcbc397ee8e357857b2d962cc6c121197cb38",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe/source-commit.txt": "fae7aca973ef091bead37a744545a76e6cf8682e5a28b81274360c552f383db6",
+  "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109/lib/libfolly.so.0.58.0-dev": "7ebe8a3196804514464f5265a9b0afb0bc4f0bbef676bfe9bb3af66727c4c3d7"
+}
