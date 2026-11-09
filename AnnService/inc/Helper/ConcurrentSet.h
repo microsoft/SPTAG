@@ -92,6 +92,14 @@ namespace SPTAG
 
                 ~ConcurrentMap() {}
 
+                void swap(ConcurrentMap& other)
+                {
+                    std::unique_lock<std::shared_timed_mutex> first(*m_lock, std::defer_lock);
+                    std::unique_lock<std::shared_timed_mutex> second(*other.m_lock, std::defer_lock);
+                    std::lock(first, second);
+                    m_data.swap(other.m_data);
+                }
+
                 iterator find(const K& k) const
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);

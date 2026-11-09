@@ -303,6 +303,23 @@ namespace SPTAG
 
             bool IsReady() const { return data != nullptr; }
 
+            void Swap(Dataset& other) noexcept
+            {
+                name.swap(other.name);
+                std::swap(rows, other.rows);
+                std::swap(cols, other.cols);
+                std::swap(data, other.data);
+                std::swap(ownData, other.ownData);
+                std::swap(incRows, other.incRows);
+                std::swap(maxRows, other.maxRows);
+                std::swap(rowsInBlock, other.rowsInBlock);
+                std::swap(rowsInBlockEx, other.rowsInBlockEx);
+                incBlocks.swap(other.incBlocks);
+                std::swap(colStart, other.colStart);
+                std::swap(mycols, other.mycols);
+                std::swap(defaultValue, other.defaultValue);
+            }
+
             void SetName(const std::string& name_) { name = name_; }
             void SetDefaultValue(uint8_t value) { defaultValue = value; }
             

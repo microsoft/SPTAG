@@ -27,10 +27,13 @@
 
 #include "IExtraSearcher.h"
 #include "Options.h"
+#include "LayerReadLock.h"
 
 #include <functional>
 #include <shared_mutex>
 #include <memory>
+#include <condition_variable>
+#include <thread>
 
 namespace SPTAG
 {
@@ -45,17 +48,39 @@ namespace SPTAG
     {
         template<typename T>
 	    class SPANNResultIterator;
+        template<typename T>
+        class ExtraDynamicSearcher;
 
         template<typename T>
         class Index;
         template<typename T>
         class Index : public VectorIndex
         {
+            friend class SPANNResultIterator<T>;
+            friend class ExtraDynamicSearcher<T>;
         private:
+            struct LayerSaveGuard : SaveOperationGuard
+            {
+                Index& index;
+                std::unique_lock<std::mutex> coordinator;
+                std::unique_lock<LayerMutex> mutations;
+                std::unique_ptr<LayerReadLock> mutationContext;
+                std::unique_lock<LayerMutex> topology;
+                std::unique_ptr<LayerReadLock> topologyContext;
+                explicit LayerSaveGuard(Index& owner)
+                    : index(owner), coordinator(owner.m_resizeMutex),
+                      mutations(owner.m_checkPointLock, std::defer_lock),
+                      topology(owner.m_layerMutex, std::defer_lock)
+                {
+                    index.m_resizingLayers = true;
+                }
+                ~LayerSaveGuard() override { index.m_resizingLayers = false; }
+            };
+            ErrorCode AcquireSaveGuard(std::unique_ptr<SaveOperationGuard>& guard) override;
             std::shared_ptr<VectorIndex> m_topIndex;
 	        COMMON::Dataset<SizeType> m_topLocalToGlobalID;
             Helper::Concurrent::ConcurrentMap<SizeType, SizeType> m_topGlobalToLocalID;
-            std::shared_timed_mutex m_topLocalToGlobalIDLock;
+            mutable std::shared_timed_mutex m_topLocalToGlobalIDLock;
             std::unordered_map<std::string, std::string> m_topParameters;
 
             std::shared_ptr<Helper::KeyValueIO> m_db;
@@ -63,13 +88,24 @@ namespace SPTAG
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
 
             Options m_options;
+            mutable LayerMutex m_layerMutex;
+            std::atomic_bool m_layerLockEnabled{false};
+            std::atomic_bool m_resizingLayers{false};
+            std::atomic_bool m_resizeRequested{false};
+            std::atomic_bool m_resizeWorkerBusy{false};
+            std::atomic<ErrorCode> m_layerResizeStatus{ErrorCode::Success};
+            std::mutex m_resizeMutex;
+            std::mutex m_resizeRequestMutex;
+            std::condition_variable m_resizeRequestCV;
+            std::thread m_resizeThread;
+            bool m_stopResizeThread = false;
 
             std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
 
             std::mutex m_dataAddLock;
             std::shared_timed_mutex m_dataDeleteLock;
-            std::shared_timed_mutex m_checkPointLock;
+            LayerMutex m_checkPointLock;
 
             std::atomic_uint64_t m_addIndexDiagCalls{0};
             std::atomic_uint64_t m_addIndexDiagVectors{0};
@@ -93,10 +129,12 @@ namespace SPTAG
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
-            ~Index() {}
+            ~Index();
 
             void SetQuantizerADC(bool p_enableADC) override
             {
+                LayerReadLock mutations(m_checkPointLock, m_layerLockEnabled);
+                LayerReadLock topology(m_layerMutex, m_layerLockEnabled);
                 m_options.m_enableADC = p_enableADC;
                 VectorIndex::SetQuantizerADC(p_enableADC);
                 if (m_topIndex) {
@@ -130,13 +168,13 @@ namespace SPTAG
                 }
             }
 
-            inline std::shared_ptr<VectorIndex> GetMemoryIndex() { return m_topIndex; }
-            inline std::shared_ptr<IExtraSearcher> GetDiskIndex(int layer = 0) { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]; else return nullptr; }
+            inline std::shared_ptr<VectorIndex> GetMemoryIndex() { LayerReadLock lock(m_layerMutex, m_layerLockEnabled); return m_topIndex; }
+            inline std::shared_ptr<IExtraSearcher> GetDiskIndex(int layer = 0) { LayerReadLock lock(m_layerMutex, m_layerLockEnabled); if (layer >= 0 && layer < m_extraSearchers.size()) return m_extraSearchers[layer]; else return nullptr; }
             inline Options* GetOptions() { return &m_options; }
 
             inline SizeType GetNumSamples() const { return GetNumSamples(0); }
-            inline SizeType GetNumSamples(int layer) const { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumSamples(); else return m_topIndex->GetNumSamples(); }
-            inline DimensionType GetFeatureDim() const { return m_topIndex->GetFeatureDim(); }
+            inline SizeType GetNumSamples(int layer) const { LayerReadLock lock(m_layerMutex, m_layerLockEnabled); if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumSamples(); else return m_topIndex->GetNumSamples(); }
+            inline DimensionType GetFeatureDim() const { LayerReadLock lock(m_layerMutex, m_layerLockEnabled); return m_topIndex->GetFeatureDim(); }
             inline SizeType GetValueSize() const { return m_options.m_dim * sizeof(T); }
 
             inline int GetCurrMaxCheck() const { return m_options.m_maxCheck; }
@@ -162,6 +200,7 @@ namespace SPTAG
             }
             inline bool ContainSample(const SizeType idx) const { return ContainSample(idx, 0); }
             inline bool ContainSample(const SizeType idx, int layer) const { 
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
                 if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->ContainSample(idx); 
                 else {
                     auto it = m_topGlobalToLocalID.find(idx);
@@ -172,6 +211,7 @@ namespace SPTAG
 
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
                 auto headIndexBufferSize = m_topIndex->BufferSize();
                 buffersize->insert(buffersize->end(), headIndexBufferSize->begin(), headIndexBufferSize->end());
@@ -181,6 +221,7 @@ namespace SPTAG
 
             std::shared_ptr<std::vector<std::string>> GetIndexFiles() const
             {
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
                 auto headfiles = m_topIndex->GetIndexFiles();
                 for (auto file : *headfiles) {
@@ -224,9 +265,10 @@ namespace SPTAG
 
             inline const void* GetSample(const SizeType idx) const { return nullptr; }
             inline SizeType GetNumDeleted() const { return GetNumDeleted(0); }
-            inline SizeType GetNumDeleted(int layer) const { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumDeleted(); else return m_topIndex->GetNumDeleted(); }
+            inline SizeType GetNumDeleted(int layer) const { LayerReadLock lock(m_layerMutex, m_layerLockEnabled); if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumDeleted(); else return m_topIndex->GetNumDeleted(); }
             inline bool NeedRefine() const
             {
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
                 return m_topIndex->NeedRefine();
                 //return GetNumDeleted(0) > (size_t)(GetNumSamples(0) * m_options.m_fDeletePercentageForRefine);
             }
@@ -234,6 +276,14 @@ namespace SPTAG
             ErrorCode SearchTree(QueryResult& p_query) const { return ErrorCode::Undefined; }
             ErrorCode AddHeadIndex(const void* p_data, SizeType VID, uint8_t version, DimensionType p_dimension, int tolayer, ExtraWorkSpace* extraWorkspace)
             {
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
+                if (m_layerLockEnabled && (VID < 0 || VID >= m_options.m_maxID || tolayer < 0 ||
+                    (tolayer < m_extraSearchers.size() &&
+                     tolayer > ((std::numeric_limits<SizeType>::max)() - VID) / m_options.m_maxID))) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head VID %lld cannot be represented in layer %d.\n",
+                        (std::int64_t)VID, tolayer);
+                    return ErrorCode::Key_OverFlow;
+                }
                 if (tolayer < m_extraSearchers.size()) {
                     std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, m_options.m_dim * sizeof(T), false),
                         GetEnumValueType<T>(), m_options.m_dim, 1));
@@ -243,6 +293,7 @@ namespace SPTAG
                 auto it = m_topGlobalToLocalID.find(VID);
                 if (it != m_topGlobalToLocalID.end()) {
                     m_topIndex->ResetIndex(it->second);
+                    RequestLayerResize();
                     return ErrorCode::Success;
                 }
 
@@ -260,10 +311,13 @@ namespace SPTAG
                     *(m_topLocalToGlobalID.At(begin)) = VID;
                     m_topGlobalToLocalID[VID] = begin;
                 }
-                return m_topIndex->AddIndexIdx(begin, end);
+                ret = m_topIndex->AddIndexIdx(begin, end);
+                if (ret == ErrorCode::Success) RequestLayerResize();
+                return ret;
             }
             
             ErrorCode GetHeadIndexMapping(int tolayer, std::vector<SizeType>& globalIDs) {
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
                 globalIDs.clear();
                 if (tolayer >= m_extraSearchers.size()) {
                     for (SizeType i = 0; i < m_topLocalToGlobalID.R(); i++) {
@@ -285,8 +339,8 @@ namespace SPTAG
                 return AddIndex(p_data, p_vectorNum, p_dimension, p_metadataSet, p_withMetaIndex, p_normalized, nullptr); 
             }
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, SizeType* VID);
-            ErrorCode DeleteIndex(const SizeType& p_id) { return DeleteIndex(p_id, 0); }
-            ErrorCode ResetIndex(const SizeType& p_id) { return ResetIndex(p_id, 0); }
+            ErrorCode DeleteIndex(const SizeType& p_id) { LayerReadLock gate(m_checkPointLock, m_layerLockEnabled); return DeleteIndex(p_id, 0); }
+            ErrorCode ResetIndex(const SizeType& p_id) { LayerReadLock gate(m_checkPointLock, m_layerLockEnabled); return ResetIndex(p_id, 0); }
             ErrorCode DeleteIndex(const SizeType& p_id, int layer);
             ErrorCode ResetIndex(const SizeType& p_id, int layer);
 
@@ -326,6 +380,12 @@ namespace SPTAG
             }
 
         private:
+            ErrorCode ValidateDynamicLayers() const;
+            void StartLayerResizeWorker();
+            void RequestLayerResize();
+            bool PostingMaintenanceFinished();
+            ErrorCode GrowTopLayerInternal();
+            std::string LayerStoragePrefix(int layer) const;
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);
             int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<int>& p_selected);
@@ -339,20 +399,19 @@ namespace SPTAG
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<Helper::ReaderOptions> &vectorOptions);
 
         public:
+            ErrorCode GrowTopLayer();
+            std::uint64_t GetHeadMemoryUsage() const;
+            ErrorCode GetLayerResizeStatus() const { return m_layerResizeStatus.load(); }
+            bool AllowSearchMaintenance() const { return !m_resizingLayers.load(); }
             void PrepareDB(std::shared_ptr<Helper::KeyValueIO>& db, int layer = 0);
             
             bool AllFinished() { 
-                if (m_options.m_storage != Storage::STATIC) {
-                    bool allDone = true;
-                    for (auto& searcher : m_extraSearchers) {
-                        if (searcher && !searcher->AllFinished()) allDone = false; 
-                    }
-                    return allDone;
-                }
-                return true;
+                if (m_resizeRequested || m_resizeWorkerBusy || m_resizingLayers) return false;
+                return PostingMaintenanceFinished();
             }
 
-            void GetDBStat() { 
+            void GetDBStat() {
+                LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current Vector Num: %d, Deleted: %d .\n", GetNumSamples(), GetNumDeleted());
                 if (m_options.m_storage != Storage::STATIC) {
                     for (auto& searcher : m_extraSearchers) {
@@ -360,7 +419,11 @@ namespace SPTAG
                     }
                 }
             }
-            
+
+        protected:
+            virtual std::shared_ptr<Helper::KeyValueIO> CreateTiKVLayerDB(const std::string& prefix);
+
+        public:
             void ForceCompaction() { 
                 if (m_options.m_storage == Storage::ROCKSDBIO) {
                     for (auto& searcher : m_extraSearchers) {
@@ -369,11 +432,12 @@ namespace SPTAG
                 }
             }
 
-            void StopMerge() { m_options.m_inPlace = true; }
+            void StopMerge() { SetParameter("InPlace", "true", "BuildSSDIndex"); }
 
-            void OpenMerge() { m_options.m_inPlace = false; }
+            void OpenMerge() { SetParameter("InPlace", "false", "BuildSSDIndex"); }
             
             ErrorCode Checkpoint() {
+                if (m_layerLockEnabled) return SaveIndex(m_options.m_indexDirectory);
                 /** Lock & wait until all jobs done **/
                 while (!AllFinished())
                 {
@@ -383,7 +447,8 @@ namespace SPTAG
                 /** Lock **/
                 if (m_options.m_persistentBufferPath == "") return ErrorCode::FailedCreateFile;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Locking Index\n");
-                std::unique_lock<std::shared_timed_mutex> lock(m_checkPointLock);
+                std::unique_lock<LayerMutex> lock(m_checkPointLock);
+                LayerReadLock topology(m_layerMutex, m_layerLockEnabled);
 
                 // Flush block pool states & block mapping states
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving storage states\n");

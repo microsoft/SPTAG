@@ -467,6 +467,10 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
     threads.reserve(insertThreads + searchThreads);
     int printstep = step / 50;
     std::atomic_size_t vectorsSent(start);
+    std::atomic_int activeInsertThreads(insertThreads);
+    std::atomic_size_t concurrentQueryCount(0);
+    std::atomic_size_t concurrentQueryErrors(0);
+    const bool dynamicLayers = p_index->GetParameter("EnableDynamicLayers", "BuildSSDIndex") == "true";
     auto func = [&]() {
         size_t index = start;
         while (true)
@@ -499,6 +503,7 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
             }
             else
             {
+                activeInsertThreads.fetch_sub(1);
                 return;
             }
         }
@@ -525,12 +530,26 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
             while ((qid = queriesSent.fetch_add(1)) < numQueries)
             {
                 auto t1 = std::chrono::high_resolution_clock::now();
-                p_index->SearchIndex(results[qid]);
+                if (p_index->SearchIndex(results[qid]) != ErrorCode::Success)
+                    concurrentQueryErrors.fetch_add(1);
+                concurrentQueryCount.fetch_add(1);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 latencies[qid] = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0f;
             }
             auto s2 = std::chrono::high_resolution_clock::now();
             duration[tid] = std::chrono::duration_cast<std::chrono::microseconds>(s2 - s1).count() / 1000.0f;
+            if (dynamicLayers) {
+                QueryResult sustained(queryset->GetVector(tid % numQueries), k, false);
+                size_t next = tid;
+                while (activeInsertThreads.load() > 0 || !p_index->AllFinished()) {
+                    sustained.Reset();
+                    sustained.SetTarget(queryset->GetVector(static_cast<SizeType>(next % numQueries)));
+                    if (p_index->SearchIndex(sustained) != ErrorCode::Success)
+                        concurrentQueryErrors.fetch_add(1);
+                    concurrentQueryCount.fetch_add(1);
+                    next += searchThreads;
+                }
+            }
         };
 
         for (int j = 0; j < searchThreads; j++)
@@ -541,6 +560,7 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
         {
             thread.join();
         }
+        BOOST_REQUIRE_EQUAL(concurrentQueryErrors.load(), 0);
 
         // Calculate statistics
         float mean = 0, minLat = (std::numeric_limits<float>::max)(), maxLat = 0;
@@ -571,6 +591,10 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
         *benchmarkData << "        \"minLatency\": " << minLat << ",\n";
         *benchmarkData << "        \"maxLatency\": " << maxLat << ",\n";
         *benchmarkData << "        \"qps\": " << qps << ",\n";
+        if (dynamicLayers) {
+            *benchmarkData << "        \"concurrentQueryCount\": " << concurrentQueryCount.load() << ",\n";
+            *benchmarkData << "        \"concurrentQueryErrors\": " << concurrentQueryErrors.load() << ",\n";
+        }
     } else {
         for (auto &thread : threads)
         {
@@ -593,6 +617,14 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
     if (benchmarkData != nullptr)
     {
         *benchmarkData << "        \"batch barrier waitSeconds\": " << barrierSeconds << ",\n";
+        if (p_index->GetParameter("EnableDynamicLayers", "BuildSSDIndex") == "true") {
+            *benchmarkData << "        \"postingLayerCount\": " << p_index->GetParameter("Layers", "BuildSSDIndex") << ",\n";
+            *benchmarkData << "        \"headMemoryEstimateBytes\": " << p_index->GetHeadMemoryUsage() << ",\n";
+            *benchmarkData << "        \"headVectorCount\": " << p_index->GetMemoryIndex()->GetNumSamples() << ",\n";
+            *benchmarkData << "        \"baseVectorCount\": " << p_index->GetNumSamples() << ",\n";
+            *benchmarkData << "        \"layerResizeErrorCode\": " << static_cast<int>(p_index->GetLayerResizeStatus()) << ",\n";
+            BOOST_REQUIRE(p_index->GetLayerResizeStatus() == ErrorCode::Success);
+        }
     }
 }
 
@@ -721,6 +753,11 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
 
     if (spannIndex != nullptr)
     {
+        if (spannIndex->GetParameter("EnableDynamicLayers", "BuildSSDIndex") == "true") {
+            benchmarkData << prefix << "      \"postingLayerCount\": " << spannIndex->GetParameter("Layers", "BuildSSDIndex") << ",\n";
+            benchmarkData << prefix << "      \"headMemoryEstimateBytes\": " << spannIndex->GetHeadMemoryUsage() << ",\n";
+            benchmarkData << prefix << "      \"headVectorCount\": " << spannIndex->GetMemoryIndex()->GetNumSamples() << ",\n";
+        }
         auto postingReadSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_diskReadLatency; });
         auto versionMapSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_versionMapLatency; });
         auto compSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_compLatency; });
@@ -824,6 +861,8 @@ void LogCheckpointLayerStats(const std::shared_ptr<VectorIndex>& index, int laye
         return;
     }
 
+    BOOST_REQUIRE(Helper::Convert::ConvertStringTo(
+        spannIndex->GetParameter("Layers", "BuildSSDIndex").c_str(), layers));
     for (int layer = 0; layer <= layers; layer++) {
         std::vector<SizeType> headMapping;
         ErrorCode mappingRet = spannIndex->GetHeadIndexMapping(layer, headMapping);

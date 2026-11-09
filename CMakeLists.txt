@@ -191,7 +191,8 @@ if (TIKV)
     endif()
 
     # Include generated kvproto C++ stubs
-    set(KVPROTO_GEN_DIR "${PROJECT_SOURCE_DIR}/ThirdParty/kvproto/generated")
+    set(KVPROTO_GEN_DIR "${PROJECT_SOURCE_DIR}/ThirdParty/kvproto/generated" CACHE PATH
+        "Directory containing kvproto C++ stubs generated with the selected protobuf/gRPC tools")
     if (EXISTS "${KVPROTO_GEN_DIR}/kvproto")
         include_directories(${KVPROTO_GEN_DIR})
         file(GLOB TiKV_PROTO_SOURCES "${KVPROTO_GEN_DIR}/kvproto/*.cc")

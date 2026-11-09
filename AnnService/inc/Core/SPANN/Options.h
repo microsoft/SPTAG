@@ -214,6 +214,12 @@ namespace SPTAG {
             int m_resumeLayer;
             SizeType m_maxID;
             bool m_shareDB;
+            bool m_enableDynamicLayers;
+            std::uint64_t m_headMemoryHighWatermark;
+            std::uint64_t m_headMemoryTarget;
+            int m_maxLayers;
+            int m_layerResizeTimeoutSeconds;
+            std::string m_layerStoragePrefixes;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
@@ -299,6 +305,17 @@ namespace SPTAG {
                     ;
                 }
                 else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildSSDIndex")) {
+                    const bool memoryParameter =
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryHighWatermark") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryTarget");
+                    const bool resizeParameter = memoryParameter ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayers") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "MaxLayers") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "LayerResizeTimeoutSeconds");
+                    if (memoryParameter && std::strchr(p_value, '-')) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid nonnegative memory parameter %s=%s.\n", p_param, p_value);
+                        return ErrorCode::FailedParseValue;
+                    }
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \
     if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
@@ -307,6 +324,11 @@ namespace SPTAG {
         if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \
             VarName = tmp; \
+        } \
+        else if (resizeParameter) \
+        { \
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid dynamic-layer parameter %s=%s.\n", RepresentStr, p_value); \
+            return ErrorCode::FailedParseValue; \
         } \
     }
 

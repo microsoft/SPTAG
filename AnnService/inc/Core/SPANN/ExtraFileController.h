@@ -520,7 +520,8 @@ namespace SPTAG::SPANN {
 
     public:
         FileIO(SPANN::Options& p_opt, int p_layer) {
-            m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile + "_" + std::to_string(p_layer);
+            m_mappingFile = p_opt.m_ssdMappingFile + "_" + std::to_string(p_layer);
+            m_mappingPath = p_opt.m_indexDirectory + FolderSep + m_mappingFile;
             m_layer = p_layer;
             m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + 1;
             m_bufferLimit = 1024;
@@ -536,7 +537,7 @@ namespace SPTAG::SPANN {
             if (p_opt.m_recovery) {
                 std::string recoverpath = p_opt.m_persistentBufferPath + FolderSep + p_opt.m_ssdMappingFile + "_" + std::to_string(p_layer);
                 if (fileexists(recoverpath.c_str())) {
-                    Load(recoverpath);
+                    if (Load(recoverpath) != ErrorCode::Success) return;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load block mapping successfully from %s!\n", recoverpath.c_str());
                 }
                 else {
@@ -546,7 +547,7 @@ namespace SPTAG::SPANN {
             }
             else {
                 if (fileexists(m_mappingPath.c_str())) {
-                    Load(m_mappingPath);
+                    if (Load(m_mappingPath) != ErrorCode::Success) return;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load block mapping successfully from %s!\n", m_mappingPath.c_str());
                 }
                 else {
@@ -1225,9 +1226,10 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode Checkpoint(std::string prefix) override {
-            std::string filename = prefix + FolderSep + m_mappingPath.substr(m_mappingPath.find_last_of(FolderSep) + 1);
+            std::string filename = prefix + FolderSep + m_mappingFile;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block mapping to %s\n", filename.c_str());
-            Save(filename);
+            auto status = Save(filename);
+            if (status != ErrorCode::Success) return status;
             return m_pBlockController.Checkpoint(filename + "_postings");
         }
 
@@ -1240,6 +1242,7 @@ namespace SPTAG::SPANN {
 
     private:
         std::string m_mappingPath;
+        std::string m_mappingFile;
         int m_layer;
         SizeType m_blockLimit;
         Helper::Concurrent::ConcurrentHashMap<SizeType, uintptr_t> m_pBlockMapping;

@@ -215,9 +215,17 @@ public:
 
     virtual std::string GetPriorityID(int queryID) const { return ""; }
     
+protected:
+    struct SaveOperationGuard
+    {
+        virtual ~SaveOperationGuard() = default;
+    };
+    virtual ErrorCode AcquireSaveGuard(std::unique_ptr<SaveOperationGuard>& guard) { return ErrorCode::Success; }
+
   private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
+protected:
     ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut);
 
 protected:

@@ -211,6 +211,37 @@ namespace SPTAG
             void SetLayer(int layer) { m_layer = layer; }
             void SetChunkSize(int) {}
 
+            ErrorCode InitializeRoutingLayer(SizeType size, const std::vector<SizeType>& globalIDs)
+            {
+                if (m_layer <= 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Routing version map requires a non-leaf layer.\n");
+                    return ErrorCode::Fail;
+                }
+                m_count = size;
+                m_deleted = size;
+                for (SizeType vid : globalIDs) {
+                    if (vid < 0 || vid >= size) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid routing VID %lld.\n", (std::int64_t)vid);
+                        return ErrorCode::VectorNotFound;
+                    }
+                    auto ret = PutByte(VersionKey(vid), 0x00);
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot initialize routing version for VID %lld: %d.\n",
+                            (std::int64_t)vid, static_cast<int>(ret));
+                        return ret;
+                    }
+                    --m_deleted;
+                }
+                auto ret = PutSizeType(CountKey(), size);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot persist routing vector count: %d.\n", static_cast<int>(ret));
+                    return ret;
+                }
+                m_lastPersistedCount = size;
+                m_metadataDirty.store(false, std::memory_order_release);
+                return ErrorCode::Success;
+            }
+
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
 
             void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr)

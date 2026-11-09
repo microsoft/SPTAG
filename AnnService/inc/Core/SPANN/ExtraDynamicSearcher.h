@@ -408,6 +408,90 @@ namespace SPTAG::SPANN {
         }
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
+        void RebindHeadIndex(SPANN::Index<ValueType>* index, Options& options)
+        {
+            m_headIndex = index;
+            m_opt = &options;
+        }
+        ErrorCode MaintenanceStatus() const { return m_asyncStatus.load(); }
+
+        ErrorCode BuildRoutingLayer(const std::shared_ptr<VectorSet>& vectors,
+                                    const std::vector<SizeType>& globalIDs, SizeType vectorCount)
+        {
+            std::vector<SizeType> heads;
+            auto ret = m_headIndex->GetHeadIndexMapping(m_layer + 1, heads);
+            if (ret != ErrorCode::Success) return ret;
+            std::unordered_map<SizeType, std::string> postings;
+            for (SizeType head : heads) postings.emplace(head, std::string());
+            const uint8_t version = 0;
+            const auto append = [&](std::string& posting, SizeType vid, const void* vector) {
+                size_t offset = posting.size();
+                posting.resize(offset + m_vectorInfoSize);
+                Serialize(&posting[offset], vid, version, vector);
+            };
+            for (size_t i = 0; i < globalIDs.size(); ++i) {
+                auto found = postings.find(globalIDs[i]);
+                if (found != postings.end()) append(found->second, globalIDs[i], vectors->GetVector(static_cast<SizeType>(i)));
+            }
+
+            ExtraWorkSpace workspace;
+            m_headIndex->InitWorkSpace(&workspace);
+            if (workspace.m_diskRequests.empty() || workspace.m_diskRequests[0].m_status < 0) return ErrorCode::Fail;
+            std::vector<BasicResult> selections(m_opt->m_replicaCount);
+            for (size_t i = 0; i < globalIDs.size(); ++i) {
+                if (postings.count(globalIDs[i])) continue;
+                int replicaCount = 0;
+                RNGSelection(&workspace, selections,
+                    static_cast<ValueType*>(vectors->GetVector(static_cast<SizeType>(i))), replicaCount);
+                int written = 0;
+                for (int j = 0; j < replicaCount; ++j) {
+                    auto found = postings.find(selections[j].VID);
+                    if (found == postings.end()) continue;
+                    if (found->second.size() / m_vectorInfoSize >= static_cast<size_t>(m_postingSizeLimit)) continue;
+                    append(found->second, globalIDs[i], vectors->GetVector(static_cast<SizeType>(i)));
+                    ++written;
+                }
+                if (written == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "Dynamic layer cannot place routing VID %lld without truncation; increase HeadMemoryTarget or PostingPageLimit.\n",
+                        (std::int64_t)globalIDs[i]);
+                    return ErrorCode::MemoryOverFlow;
+                }
+            }
+
+#ifdef TIKV
+            if (auto* versions = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get())) {
+                ret = versions->InitializeRoutingLayer(vectorCount, globalIDs);
+                if (ret != ErrorCode::Success) return ret;
+            } else
+#endif
+            {
+                for (SizeType vid : globalIDs) {
+                    uint8_t liveVersion = version;
+                    m_versionMap->SetVersion(vid, liveVersion);
+                }
+            }
+            for (auto& posting : postings) {
+                if (posting.second.empty()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic routing posting %lld has no centroid.\n",
+                        (std::int64_t)posting.first);
+                    return ErrorCode::Fail;
+                }
+                ret = db->Put(DBKey(posting.first), posting.second, MaxTimeout, &workspace.m_diskRequests);
+                if (ret != ErrorCode::Success) return ret;
+                std::string stored;
+                ret = db->Get(DBKey(posting.first), &stored, MaxTimeout, &workspace.m_diskRequests);
+                if (ret != ErrorCode::Success) return ret;
+                if (stored != posting.second) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic routing posting verification failed for %lld.\n",
+                        (std::int64_t)posting.first);
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+            ret = m_versionMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer));
+            if (ret != ErrorCode::Success) return ret;
+            return LoadIndex(*m_opt) ? ErrorCode::Success : ErrorCode::Fail;
+        }
 
         bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, const void* currentHeadVec, bool isInSplitHead)
         {
@@ -1790,16 +1874,24 @@ namespace SPTAG::SPANN {
 
         bool LoadIndex(Options& p_opt) override {
             m_opt = &p_opt;
+            const auto loadVersions = [&](const std::string& path) {
+                auto ret = m_versionMap->Load(path, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load layer %d version map %s: %d.\n",
+                        m_layer, path.c_str(), static_cast<int>(ret));
+                }
+                return ret == ErrorCode::Success;
+            };
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %lld, Capacity: %lld\n", (std::int64_t)(m_opt->m_datasetRowsInBlock), (std::int64_t)(m_opt->m_datasetCapacity));
             std::string versionmapPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
             if (m_opt->m_recovery) {
                 versionmapPath = m_opt->m_persistentBufferPath + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading version map\n");
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (!loadVersions(versionmapPath)) return false;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             }
             else if (m_opt->m_storage == Storage::ROCKSDBIO || m_opt->m_storage == Storage::TIKVIO) {
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (!loadVersions(versionmapPath)) return false;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
@@ -1872,7 +1964,7 @@ namespace SPTAG::SPANN {
                 if (ret != ErrorCode::Success)
                     return false;
 		    } else {
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (!loadVersions(versionmapPath)) return false;
             } 
 	    }
             if (m_opt->m_update) {
@@ -2001,7 +2093,7 @@ namespace SPTAG::SPANN {
                     queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
-                if (m_opt->m_asyncMergeInSearch && realNum <= m_mergeThreshold) MergeAsync(curPostingID); // TODO: Control merge
+                if (m_opt->m_asyncMergeInSearch && m_headIndex->AllowSearchMaintenance() && realNum <= m_mergeThreshold) MergeAsync(curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
@@ -3114,9 +3206,15 @@ namespace SPTAG::SPANN {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - waitStart).count();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Checkpoint: layer %d background jobs done (waited %lld s)\n", m_layer, (long long)elapsed);
             }
+            if (m_asyncStatus != ErrorCode::Success &&
+                (m_opt->m_enableDynamicLayers || !m_opt->m_layerStoragePrefixes.empty())) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot checkpoint dynamic layer %d after failed maintenance: %d.\n",
+                    m_layer, static_cast<int>(m_asyncStatus.load()));
+                return m_asyncStatus.load();
+            }
             if (m_asyncStatus != ErrorCode::Success) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Checkpoint: resetting transient async error (code=%d) for layer %d\n",
-                             (int)m_asyncStatus, m_layer);
+                             (int)m_asyncStatus.load(), m_layer);
                 m_asyncStatus = ErrorCode::Success;
             }
             std::string p_persistenMap = prefix + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
@@ -3126,7 +3224,8 @@ namespace SPTAG::SPANN {
             if ((ret = m_versionMap->Save(p_persistenMap)) != ErrorCode::Success)
                 return ret;
 
-            if (!m_opt->m_shareDB) {
+            if (!m_opt->m_shareDB ||
+                m_headIndex->LayerStoragePrefix(m_layer) != m_headIndex->LayerStoragePrefix(0)) {
                 if ((ret = db->Checkpoint(prefix)) != ErrorCode::Success)
                     return ret;
             }
@@ -3165,7 +3264,7 @@ namespace SPTAG::SPANN {
         std::chrono::microseconds m_hardLatencyLimit = std::chrono::microseconds(2000);
 
         int m_mergeThreshold = 10;
-        ErrorCode m_asyncStatus = ErrorCode::Success;
+        std::atomic<ErrorCode> m_asyncStatus{ErrorCode::Success};
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;
