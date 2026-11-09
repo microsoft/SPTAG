@@ -460,10 +460,13 @@ namespace SPTAG {
             void Clear(int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
                 const size_t requests = static_cast<size_t>(p_internalResultNum) *
                     (p_blockIO ? (p_maxPages >> PageSizeEx) : 1);
+                const bool pageSizeChanged = !m_pageBuffers.empty() &&
+                    p_maxPages != m_pageBuffers[0].GetPageSize();
                 if (m_pageBuffers.empty() || p_internalResultNum > m_pageBuffers.size() ||
-                    p_maxPages > m_pageBuffers[0].GetPageSize() || p_blockIO != m_blockIO ||
+                    pageSizeChanged || p_blockIO != m_blockIO ||
                     m_diskRequests.size() != requests) {
                     m_postingIDs.reserve(p_internalResultNum);
+                    if (pageSizeChanged) m_pageBuffers.clear();
                     m_pageBuffers.resize(p_internalResultNum);
                     for (int pi = 0; pi < p_internalResultNum; pi++) {
                         m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
