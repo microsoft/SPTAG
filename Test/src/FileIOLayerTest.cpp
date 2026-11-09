@@ -6,6 +6,9 @@
 #include "inc/Test.h"
 
 #include <boost/filesystem.hpp>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <thread>
 
 namespace
@@ -260,6 +263,68 @@ BOOST_AUTO_TEST_CASE(CachedWorkspaceRebindsToCurrentIndex)
     BOOST_CHECK_EQUAL(second.index->GetOptions()->GetIOThreadCount(), reserved);
     first.Check();
     second.Check();
+}
+
+BOOST_AUTO_TEST_CASE(Sift10MCheckpointReload, *boost::unit_test::disabled())
+{
+    const auto* directory = std::getenv("SPTAG_FILEIO_VERIFY_INDEX");
+    const auto* queryPath = std::getenv("SPTAG_FILEIO_VERIFY_QUERIES");
+    const auto* truthPath = std::getenv("SPTAG_FILEIO_VERIFY_TRUTH");
+    BOOST_REQUIRE(directory);
+    BOOST_REQUIRE(queryPath);
+    BOOST_REQUIRE(truthPath);
+    std::shared_ptr<VectorIndex> loaded;
+    BOOST_REQUIRE(VectorIndex::LoadIndex(directory, loaded) == ErrorCode::Success);
+    auto index = std::dynamic_pointer_cast<SPANN::Index<uint8_t>>(loaded);
+    BOOST_REQUIRE(index);
+    BOOST_REQUIRE_EQUAL(index->GetNumSamples(), 10000000);
+    BOOST_REQUIRE_EQUAL(index->GetFeatureDim(), 128);
+    BOOST_REQUIRE_EQUAL(index->GetParameter("Layers", "BuildSSDIndex"), "2");
+    BOOST_REQUIRE(index->GetLayerResizeStatus() == ErrorCode::Success);
+    constexpr int queryCount = 1000;
+    constexpr int k = 5;
+    std::ifstream queries(queryPath, std::ios::binary);
+    std::int32_t queryHeader[2] = {};
+    BOOST_REQUIRE(queries.read(reinterpret_cast<char*>(queryHeader), sizeof(queryHeader)));
+    BOOST_REQUIRE_GE(queryHeader[0], queryCount);
+    BOOST_REQUIRE_EQUAL(queryHeader[1], 128);
+    std::vector<uint8_t> vectors(queryCount * queryHeader[1]);
+    BOOST_REQUIRE(queries.read(reinterpret_cast<char*>(vectors.data()), vectors.size()));
+    std::ifstream truth(truthPath, std::ios::binary);
+    std::int32_t truthHeader[2] = {};
+    BOOST_REQUIRE(truth.read(reinterpret_cast<char*>(truthHeader), sizeof(truthHeader)));
+    BOOST_REQUIRE_EQUAL(truthHeader[0], 12000);
+    BOOST_REQUIRE_EQUAL(truthHeader[1], k);
+    constexpr int prefixes = 6;
+    std::vector<std::int32_t> ids(queryCount * k);
+    std::vector<float> distances(queryCount * k);
+    truth.seekg(sizeof(truthHeader) + (prefixes - 1) * queryCount * k * sizeof(std::int32_t));
+    BOOST_REQUIRE(truth.read(reinterpret_cast<char*>(ids.data()), ids.size() * sizeof(ids[0])));
+    truth.seekg(sizeof(truthHeader) + prefixes * queryCount * k * sizeof(std::int32_t) +
+        (prefixes - 1) * queryCount * k * sizeof(float));
+    BOOST_REQUIRE(truth.read(reinterpret_cast<char*>(distances.data()), distances.size() * sizeof(distances[0])));
+    int hits = 0;
+    for (int i = 0; i < queryCount; ++i) {
+        COMMON::QueryResultSet<uint8_t> query(vectors.data() + i * queryHeader[1], k);
+        BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
+        std::vector<bool> matched(k, false);
+        for (int j = 0; j < k; ++j) {
+            const auto* result = query.GetResult(j);
+            BOOST_REQUIRE_GE(result->VID, 0);
+            BOOST_REQUIRE_LT(result->VID, 10000000);
+            for (int expected = 0; expected < k; ++expected) {
+                if (!matched[expected] && (result->VID == ids[i * k + expected] ||
+                    std::abs(result->Dist - distances[i * k + expected]) < 0.001f)) {
+                    matched[expected] = true;
+                    ++hits;
+                    break;
+                }
+            }
+        }
+    }
+    const double recall = static_cast<double>(hits) / (queryCount * k);
+    BOOST_TEST_MESSAGE("Reloaded 10M FILEIO checkpoint: layers=2, recall5@5=" << recall);
+    BOOST_CHECK_GE(recall, 0.95);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
