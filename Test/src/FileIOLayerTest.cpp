@@ -220,6 +220,7 @@ BOOST_AUTO_TEST_CASE(FullRoutingChoicesUseNearbyCapacityWithoutTruncation)
     FileLayerFixture fixture(1, true, 1024);
     const auto original = fixture.BasePostings();
     const auto memory = fixture.index->GetHeadMemoryUsage();
+    fixture.Set("PostingVectorLimit", "0");
     fixture.Set("PostingPageLimit", "1");
     fixture.Set("SearchPostingPageLimit", "1");
     fixture.Set("ReplicaCount", "1");
