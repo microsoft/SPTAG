@@ -133,6 +133,12 @@ BKT selection thresholds are recomputed from each candidate's requested count,
 rather than inherited from the old head; reducing the budget must also change
 the selection granularity. Candidate retries check the resize deadline between
 builds, but do not interrupt a build already in progress.
+If all RNG-selected routing postings are full, construction searches progressively
+more nearby heads for an available posting instead of discarding the routing
+vector. Insufficient total capacity still fails without publishing the candidate.
+An automatic resize failure is latched: further insertions do not repeatedly
+rebuild the same failed candidate. After correcting the configuration, explicitly
+retry `GrowTopLayer()`; a successful manual retry clears the error status.
 The [FILEIO SIFT experiment runner](../benchmark-output/sift10m-fileio-dynamic-5m-1m-20261109/run_experiment.py)
 limits each attempt to one hour and preserves separate logs and measurements.
 Its configuration uses `Rebuild=false` and `Resume=-1` to resume from the latest

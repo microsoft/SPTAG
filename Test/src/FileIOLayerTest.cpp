@@ -18,8 +18,10 @@ namespace
             boost::filesystem::temp_directory_path() / boost::filesystem::unique_path("sptag-file-layer-%%%%-%%%%");
         std::shared_ptr<SPANN::Index<uint8_t>> index = std::make_shared<SPANN::Index<uint8_t>>();
         std::vector<uint8_t> vectors;
+        const int dimension;
 
-        explicit FileLayerFixture(int layers = 1, bool shared = true)
+        explicit FileLayerFixture(int layers = 1, bool shared = true, int dimensions = 2)
+            : dimension(dimensions)
         {
             boost::filesystem::create_directory(directory);
             Set("IndexDirectory", directory.string(), "Base");
@@ -55,12 +57,12 @@ namespace
             Set("HeadMemoryHighWatermark", "1000000");
             Set("HeadMemoryTarget", "2000");
             Set("LayerResizeTimeoutSeconds", "5");
-            vectors.resize(128);
+            vectors.resize(64 * dimension);
             for (int i = 0; i < 64; ++i) {
-                vectors[2 * i] = static_cast<uint8_t>(i);
-                vectors[2 * i + 1] = static_cast<uint8_t>(2 * i);
+                vectors[dimension * i] = static_cast<uint8_t>(i);
+                vectors[dimension * i + 1] = static_cast<uint8_t>(2 * i);
             }
-            BOOST_REQUIRE(index->BuildIndex(vectors.data(), 64, 2) == ErrorCode::Success);
+            BOOST_REQUIRE(index->BuildIndex(vectors.data(), 64, dimension) == ErrorCode::Success);
             Wait();
         }
 
@@ -86,7 +88,7 @@ namespace
         void Check()
         {
             for (int i = 0; i < 64; ++i) {
-                COMMON::QueryResultSet<uint8_t> query(vectors.data() + 2 * i, 1);
+                COMMON::QueryResultSet<uint8_t> query(vectors.data() + dimension * i, 1);
                 BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
                 BOOST_CHECK_EQUAL(query.GetResult(0)->VID, i);
                 BOOST_CHECK_EQUAL(query.GetResult(0)->Dist, 0);
@@ -208,6 +210,28 @@ BOOST_AUTO_TEST_CASE(RejectedCandidateKeepsSavedIndexUsable)
     BOOST_CHECK(fixture.index->GrowTopLayer() == ErrorCode::MemoryOverFlow);
     BOOST_CHECK(fixture.index->GetMemoryIndex() == oldHead);
     BOOST_CHECK_EQUAL(fixture.index->GetParameter("Layers", "BuildSSDIndex"), "1");
+    fixture.Check();
+    fixture.Reload();
+    fixture.Check();
+}
+
+BOOST_AUTO_TEST_CASE(FullRoutingChoicesUseNearbyCapacityWithoutTruncation)
+{
+    FileLayerFixture fixture(1, true, 1024);
+    const auto original = fixture.BasePostings();
+    const auto memory = fixture.index->GetHeadMemoryUsage();
+    fixture.Set("PostingPageLimit", "1");
+    fixture.Set("SearchPostingPageLimit", "1");
+    fixture.Set("ReplicaCount", "1");
+    fixture.Set("Ratio", "0.01", "SelectHead");
+    fixture.Set("HeadMemoryTarget", std::to_string(memory / 2));
+    const auto oldHead = fixture.index->GetMemoryIndex();
+    BOOST_REQUIRE(fixture.index->GrowTopLayer() == ErrorCode::MemoryOverFlow);
+    BOOST_CHECK(fixture.index->GetMemoryIndex() == oldHead);
+    fixture.Set("Ratio", "0.5", "SelectHead");
+    fixture.Set("HeadMemoryTarget", std::to_string(memory * 3 / 4));
+    BOOST_REQUIRE(fixture.index->GrowTopLayer() == ErrorCode::Success);
+    BOOST_CHECK(original == fixture.BasePostings());
     fixture.Check();
     fixture.Reload();
     fixture.Check();

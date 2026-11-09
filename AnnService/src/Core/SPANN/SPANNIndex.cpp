@@ -216,7 +216,7 @@ template <typename T> void Index<T>::StartLayerResizeWorker()
             bool shouldGrow = false;
             try {
                 LayerReadLock topology(m_layerMutex, m_layerLockEnabled);
-                if (m_bReady && m_options.m_enableDynamicLayers &&
+                if (m_bReady && m_options.m_enableDynamicLayers && m_layerResizeStatus == ErrorCode::Success &&
                     GetHeadMemoryUsage() >= m_options.m_headMemoryHighWatermark) {
                     shouldGrow = true;
                 }
@@ -234,7 +234,8 @@ template <typename T> void Index<T>::StartLayerResizeWorker()
 
 template <typename T> void Index<T>::RequestLayerResize()
 {
-    if (!m_layerLockEnabled || !m_options.m_enableDynamicLayers || m_resizingLayers) return;
+    if (!m_layerLockEnabled || !m_options.m_enableDynamicLayers || m_resizingLayers ||
+        m_layerResizeStatus != ErrorCode::Success) return;
     m_resizeRequested = true;
     m_resizeRequestCV.notify_one();
 }

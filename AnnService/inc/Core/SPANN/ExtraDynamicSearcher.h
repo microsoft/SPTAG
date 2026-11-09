@@ -421,6 +421,11 @@ namespace SPTAG::SPANN {
             std::vector<SizeType> heads;
             auto ret = m_headIndex->GetHeadIndexMapping(m_layer + 1, heads);
             if (ret != ErrorCode::Success) return ret;
+            if (m_postingSizeLimit <= 0 ||
+                heads.size() * static_cast<size_t>(m_postingSizeLimit) < globalIDs.size()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer has insufficient total routing posting capacity.\n");
+                return ErrorCode::MemoryOverFlow;
+            }
             std::unordered_map<SizeType, std::string> postings;
             for (SizeType head : heads) postings.emplace(head, std::string());
             const uint8_t version = 0;
@@ -438,6 +443,7 @@ namespace SPTAG::SPANN {
             m_headIndex->InitWorkSpace(&workspace);
             if (workspace.m_diskRequests.empty() || workspace.m_diskRequests[0].m_status < 0) return ErrorCode::Fail;
             std::vector<BasicResult> selections(m_opt->m_replicaCount);
+            size_t capacityFallbacks = 0;
             for (size_t i = 0; i < globalIDs.size(); ++i) {
                 if (postings.count(globalIDs[i])) continue;
                 int replicaCount = 0;
@@ -452,12 +458,36 @@ namespace SPTAG::SPANN {
                     ++written;
                 }
                 if (written == 0) {
+                    size_t candidates = (std::min)(heads.size(), static_cast<size_t>((std::max)(1, m_opt->m_internalResultNum)));
+                    while (true) {
+                        COMMON::QueryResultSet<ValueType> nearby(
+                            static_cast<ValueType*>(vectors->GetVector(static_cast<SizeType>(i))),
+                            static_cast<int>(candidates));
+                        ret = m_headIndex->SearchHeadIndex(nearby, m_layer + 1, &workspace);
+                        if (ret != ErrorCode::Success) return ret;
+                        for (int j = 0; j < nearby.GetResultNum(); ++j) {
+                            auto found = postings.find(nearby.GetResult(j)->VID);
+                            if (found == postings.end() ||
+                                found->second.size() / m_vectorInfoSize >= static_cast<size_t>(m_postingSizeLimit)) continue;
+                            append(found->second, globalIDs[i], vectors->GetVector(static_cast<SizeType>(i)));
+                            ++written;
+                            ++capacityFallbacks;
+                            break;
+                        }
+                        if (written != 0 || candidates == heads.size()) break;
+                        candidates = (std::min)(heads.size(), candidates * 2);
+                    }
+                }
+                if (written == 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                         "Dynamic layer cannot place routing VID %lld without truncation; increase HeadMemoryTarget or PostingPageLimit.\n",
                         (std::int64_t)globalIDs[i]);
                     return ErrorCode::MemoryOverFlow;
                 }
             }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "[DYNAMIC-LAYER] capacity-aware fallback placed %llu routing vectors.\n",
+                (unsigned long long)capacityFallbacks);
 
 #ifdef TIKV
             if (auto* versions = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get())) {
