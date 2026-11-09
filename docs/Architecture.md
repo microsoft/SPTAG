@@ -139,6 +139,10 @@ vector. Insufficient total capacity still fails without publishing the candidate
 An automatic resize failure is latched: further insertions do not repeatedly
 rebuild the same failed candidate. After correcting the configuration, explicitly
 retry `GrowTopLayer()`; a successful manual retry clears the error status.
+FILEIO reserves workspace IDs and backend I/O contexts for `MaxLayers` when
+dynamic growth is enabled. Growth does not issue new IDs beyond that reservation:
+modulo-aliasing a new ID onto an old backend's active context can corrupt concurrent
+I/O. Cached thread-local workspaces rebind their ID lease when changing indexes.
 The [FILEIO SIFT experiment runner](../benchmark-output/sift10m-fileio-dynamic-5m-1m-20261109/run_experiment.py)
 limits each attempt to one hour and preserves separate logs and measurements.
 Its configuration uses `Rebuild=false` and `Resume=-1` to resume from the latest

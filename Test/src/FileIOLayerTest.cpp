@@ -238,4 +238,28 @@ BOOST_AUTO_TEST_CASE(FullRoutingChoicesUseNearbyCapacityWithoutTruncation)
     fixture.Check();
 }
 
+BOOST_AUTO_TEST_CASE(CachedWorkspaceRebindsToCurrentIndex)
+{
+    FileLayerFixture first;
+    FileLayerFixture second;
+    SPANN::ExtraWorkSpace workspace;
+    first.index->InitWorkSpace(&workspace);
+    auto firstOwner = workspace.m_workspaceOwner.lock();
+    BOOST_REQUIRE(firstOwner);
+    second.index->InitWorkSpace(&workspace, true);
+    auto secondOwner = workspace.m_workspaceOwner.lock();
+    BOOST_REQUIRE(secondOwner);
+    BOOST_CHECK(firstOwner != secondOwner);
+    BOOST_REQUIRE_GE(workspace.m_workspaceId, 0);
+    BOOST_CHECK_LT(workspace.m_workspaceId, second.index->GetOptions()->GetIOThreadCount());
+    for (const auto& request : workspace.m_diskRequests)
+        BOOST_CHECK_EQUAL(request.m_status, workspace.m_workspaceId);
+    const auto reserved = second.index->GetOptions()->GetIOThreadCount();
+    second.Set("HeadMemoryTarget", std::to_string(second.index->GetHeadMemoryUsage() / 2));
+    BOOST_REQUIRE(second.index->GrowTopLayer() == ErrorCode::Success);
+    BOOST_CHECK_EQUAL(second.index->GetOptions()->GetIOThreadCount(), reserved);
+    first.Check();
+    second.Check();
+}
+
 BOOST_AUTO_TEST_SUITE_END()

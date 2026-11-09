@@ -151,20 +151,29 @@ namespace SPTAG
                 }
                 else {
                     p_exWorkSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, max(m_options.m_searchInternalResultNum, m_options.m_reassignK), (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, blockIO, m_options.m_enableDataCompression);
+                }
+                if (!clear || (m_freeWorkSpaceIds &&
+                    p_exWorkSpace->m_workspaceOwner.lock() != m_freeWorkSpaceIds)) {
+                    if (p_exWorkSpace->m_callback) p_exWorkSpace->m_callback();
+                    p_exWorkSpace->m_callback = nullptr;
+                    p_exWorkSpace->m_workspaceOwner.reset();
+                    p_exWorkSpace->m_workspaceId = -1;
                     int wid = 0;
                     if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
                     {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FreeWorkSpaceIds is not initalized or the workspace number is not enough! Please increase iothread number.\n");
-                        p_exWorkSpace->m_diskRequests[0].m_status = -1;
+                        for (auto& req : p_exWorkSpace->m_diskRequests) req.m_status = -1;
                         return;
                     }
-                    for (auto & req : p_exWorkSpace->m_diskRequests)
-                    {
-                        req.m_status = wid;
-                    }
+                    p_exWorkSpace->m_workspaceOwner = m_freeWorkSpaceIds;
+                    p_exWorkSpace->m_workspaceId = wid;
                     p_exWorkSpace->m_callback = [m_freeWorkSpaceIds = m_freeWorkSpaceIds, wid] () {
                         if (m_freeWorkSpaceIds) m_freeWorkSpaceIds->push(wid);
                     };
+                }
+                if (p_exWorkSpace->m_workspaceId >= 0) {
+                    for (auto& req : p_exWorkSpace->m_diskRequests)
+                        req.m_status = p_exWorkSpace->m_workspaceId;
                 }
             }
 

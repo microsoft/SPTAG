@@ -430,6 +430,9 @@ namespace SPTAG {
         {
             ExtraWorkSpace() {}
 
+            std::weak_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_workspaceOwner;
+            int m_workspaceId = -1;
+
             ~ExtraWorkSpace() {
                 if (m_callback) {
                     m_callback();

@@ -348,6 +348,8 @@ template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
     Index<T> candidate;
     candidate.m_options = m_options;
     candidate.m_options.m_enableDynamicLayers = false;
+    if (m_options.m_storage == Storage::FILEIO)
+        candidate.m_options.m_ioThreads = (std::max)(candidate.m_options.m_ioThreads, m_workspaceCount.load());
     candidate.m_options.m_layers = layer + 1;
     candidate.m_options.m_headIndexFolder = generation + FolderSep + "HeadIndex";
     candidate.m_options.m_headIDFile = generation + FolderSep + "HeadIDs.bin";
@@ -517,7 +519,9 @@ template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
         if ((result = SyncLayerPath(m_options.m_indexDirectory)) != ErrorCode::Success) return result;
 
         const int extraWorkers = m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum;
-        for (int i = 0; i < extraWorkers; ++i) m_freeWorkSpaceIds->push(m_workspaceCount.fetch_add(1));
+        if (m_options.m_storage != Storage::FILEIO) {
+            for (int i = 0; i < extraWorkers; ++i) m_freeWorkSpaceIds->push(m_workspaceCount.fetch_add(1));
+        }
         std::unique_lock<LayerMutex> topology(m_layerMutex, std::defer_lock);
         if (!topology.try_lock_until(std::chrono::steady_clock::now() + std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds))) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer timed out waiting for queries/iterators to release the old topology.\n");
@@ -677,8 +681,7 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
 
     if (m_freeWorkSpaceIds == nullptr) {
         m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
-        int maxIOThreads = (m_options.m_storage == Storage::STATIC) ? max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) : max(m_options.m_ioThreads, (2 * max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) +
-                                    (m_options.m_layers + 1) * (m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum)));
+        int maxIOThreads = m_options.GetIOThreadCount();
         for (int i = 0; i < maxIOThreads; i++) {
             m_freeWorkSpaceIds->push(i);
         }
@@ -764,8 +767,7 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
 
     if (m_freeWorkSpaceIds == nullptr) {
         m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
-        int maxIOThreads = (m_options.m_storage == Storage::STATIC) ? max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) : max(m_options.m_ioThreads, (2 * max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) +
-                                    (m_options.m_layers + 1) * (m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum)));
+        int maxIOThreads = m_options.GetIOThreadCount();
         for (int i = 0; i < maxIOThreads; i++) {
             m_freeWorkSpaceIds->push(i);
         }
@@ -2014,8 +2016,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
     if (m_freeWorkSpaceIds == nullptr) {
         m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
-        int maxIOThreads = (m_options.m_storage == Storage::STATIC) ? max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) : max(m_options.m_ioThreads, (2 * max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) +
-                                    (m_options.m_layers + 1) * (m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum)));
+        int maxIOThreads = m_options.GetIOThreadCount();
         for (int i = 0; i < maxIOThreads; i++) {
             m_freeWorkSpaceIds->push(i);
         }

@@ -7,6 +7,7 @@
 #include "inc/Core/Common.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
+#include <algorithm>
 #include <string>
 
 namespace SPTAG {
@@ -220,6 +221,16 @@ namespace SPTAG {
             int m_maxLayers;
             int m_layerResizeTimeoutSeconds;
             std::string m_layerStoragePrefixes;
+
+            int GetIOThreadCount() const
+            {
+                const int threads = (std::max)(m_searchThreadNum, m_iSSDNumberOfThreads);
+                if (m_storage == Storage::STATIC) return threads;
+                const int layers = m_storage == Storage::FILEIO && m_enableDynamicLayers
+                    ? (std::max)(m_layers, m_maxLayers) : m_layers;
+                return (std::max)(m_ioThreads, 2 * threads +
+                    (layers + 1) * (m_insertThreadNum + m_reassignThreadNum + m_appendThreadNum));
+            }
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
