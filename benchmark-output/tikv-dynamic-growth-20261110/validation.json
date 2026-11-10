@@ -93,11 +93,39 @@
     "progress_file": "large-attempts/20261110T024436Z/status.json"
   },
   "latest_large_attempt": {
-    "status_at_recording": "running; full-scale validation still incomplete",
+    "status_at_recording": "failed: disk safety stop during first insertion batch; full-scale growth not validated",
     "attempt_directory": "large-attempts/20261110T025741Z",
     "progress_file": "large-attempts/20261110T025741Z/status.json",
     "source_commit": "3ac50cc71f1b3a62806c4aa22faa2b48c5e1fdcd",
     "binary_sha256": "8d828bfce5856fea004900d97a45fc4c3d4515b108d67b38d9be4ffa5a82f156",
+    "completed_initial_build": {
+      "vectors": 5000000,
+      "posting_layers": 1,
+      "recall5": 0.9776,
+      "independent_reload_and_exact_live_id_enumeration": "passed: IDs exactly [0,5000000)"
+    },
+    "first_insert_batch": {
+      "status": "incomplete; not a successful batch",
+      "last_reported_progress_percent": 34,
+      "last_reported_vector_count": 5339981,
+      "failure": "Available storage fell below the unchanged 250 GiB safety floor",
+      "automatic_local_checkpoint_resume": false
+    },
+    "shutdown": {
+      "all_six_owned_nodes_stopped": true,
+      "tikv1_exit_code": 137,
+      "tikv1_oom_killed": false,
+      "other_five_exit_codes": 0,
+      "clean_shutdown": false,
+      "note": "The cluster stop exceeded its grace period for tikv1; this is recorded as a failure, not successful shutdown"
+    },
+    "disk_diagnostics": {
+      "owned_attempt_gib_before_reservation_cleanup_approximately": 311,
+      "tikv1_raft_engine_gib_approximately": 42,
+      "owned_regenerable_reservation_bytes_released_after_all_nodes_stopped": 228563152158,
+      "database_index_and_logs_retained": true,
+      "free_space_gib_after_own_cleanup_approximately": 466
+    },
     "previous_attempt": {
       "attempt_directory": "large-attempts/20261110T024436Z",
       "benchmark_exit_successful": true,
@@ -116,7 +144,7 @@
     }
   },
   "limitations": [
-    "The full 5M plus five 1M insertion batches on TiKV have been launched but have not completed",
+    "The full TiKV run stopped below the disk safety floor during its first 1M insertion batch; large-scale automatic growth and final 10M quality remain unverified",
     "The initial 500 GiB disk-space blocker was resolved by user-approved removal of exactly three old reservation files; the corrected run started with approximately 593 GiB free",
     "No SIFT recall or TiKV throughput claim follows from the synthetic functional test",
     "No node-restart, power-loss, or multi-host fault-tolerance test",
