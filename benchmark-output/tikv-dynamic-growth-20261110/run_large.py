@@ -7,6 +7,7 @@ from pathlib import Path
 import shlex
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -65,7 +66,11 @@ def write_truth(path, first, last):
 
 
 def run_process(command, directory, environment, logfile, deadline):
-    with logfile.open("w") as log, logfile.with_suffix(".memory.csv").open("w") as memory:
+    with logfile.open("w") as log, logfile.with_suffix(".memory.csv").open("w") as memory, logfile.open() as monitor:
+        def ensure_real_input():
+            if any("Using random generation" in line for line in monitor):
+                raise RuntimeError(f"Refusing random-data fallback: {logfile}")
+
         memory.write("elapsed_seconds,pid,rss_kib,hwm_kib\n")
         started = time.monotonic()
         process = subprocess.Popen(command, cwd=directory, env=environment,
@@ -73,6 +78,7 @@ def run_process(command, directory, environment, logfile, deadline):
         print(f"Started pid={process.pid}: {logfile}", flush=True)
         try:
             while process.poll() is None:
+                ensure_real_input()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(f"One-hour phase deadline exceeded: {logfile}")
@@ -91,6 +97,7 @@ def run_process(command, directory, environment, logfile, deadline):
                                  f"{values['VmRSS:']},{values['VmHWM:']}\n")
                     memory.flush()
                 time.sleep(min(10, remaining))
+            ensure_real_input()
             if process.returncode:
                 raise RuntimeError(f"Exit {process.returncode}: {logfile}")
         finally:
@@ -155,7 +162,7 @@ def main():
                 InsertVectorCount=str(inserted), TruthPath=str(truth))
             config["BuildSSDIndex"]["TiKVKeyPrefix"] = prefix
             with (directory / "benchmark.ini").open("w") as stream:
-                config.write(stream)
+                config.write(stream, space_around_delimiters=False)
             environment = os.environ.copy()
             environment.update(BENCHMARK_CONFIG=str(directory / "benchmark.ini"),
                                BENCHMARK_OUTPUT=str(directory / "output.json"),
@@ -203,6 +210,20 @@ def main():
         signal.alarm(0)
         try:
             cluster.close()
+            reservations = []
+            for node in (1, 2, 3):
+                path = attempt / "cluster" / f"tikv{node}" / "tikv" / "space_placeholder_file"
+                try:
+                    info = path.lstat()
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError(f"Unexpected owned reservation file type: {path}")
+                reservations.append({"path": str(path), "bytes": info.st_size})
+            if reservations:
+                subprocess.run(["sudo", "-n", "rm", "--",
+                                *(item["path"] for item in reservations)], check=True)
+            status["released_owned_reservations"] = reservations
         except Exception as error:
             status.update(status="failed", cleanup_error=str(error))
             raise

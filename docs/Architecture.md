@@ -184,6 +184,9 @@ an older local checkpoint. A failed/interrupted run preserves its cluster data
 and logs for diagnosis, but requires a fresh run or a separately restored
 consistent TiKV backup. The whole multi-phase experiment can exceed one hour;
 the deadline is per phase, not permission for an unbounded individual workload.
+The runner emits INI delimiters without surrounding spaces, rejects the test
+generator's random-input fallback, and releases only its own regenerable
+reservation files after all owned nodes have shut down cleanly.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;
