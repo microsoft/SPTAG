@@ -13,6 +13,7 @@ REPOSITORY = ROOT.parent.parent
 RECIPE = REPOSITORY / "evaluation/2026-11-05-sift10m-tikv-pool16-cq8"
 sys.path.insert(0, str(RECIPE))
 from deployment import Cluster, ENDPOINTS
+from presplit import replication_issues
 
 
 def main():
@@ -48,6 +49,14 @@ def main():
     result = {"status": "failed"}
     try:
         cluster.start()
+        stores = json.loads((attempt / "stores-before.json").read_text())
+        store_ids = {row["store"]["id"] for row in stores["stores"]}
+
+        def replicated(data):
+            return (data["count"] == len(data["regions"]) and bool(data["regions"])
+                    and not replication_issues(data["regions"], store_ids))
+
+        cluster.wait("regions", "regions-before.json", replicated)
         remaining = 3600 - (time.monotonic() - started)
         if remaining <= 0:
             raise TimeoutError("Cluster startup exceeded one hour")
@@ -63,6 +72,7 @@ def main():
                     process.wait()
         if returncode:
             raise RuntimeError(f"Real TiKV test failed with exit code {returncode}: {attempt / 'run.log'}")
+        cluster.wait("regions", "regions-after.json", replicated)
         result["status"] = "passed"
     except Exception as error:
         result["error"] = str(error)

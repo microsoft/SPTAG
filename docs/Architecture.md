@@ -152,7 +152,8 @@ includes the real growth event, per-prefix measurements, hourly checkpoint
 recovery, and a separate reload/query check of the final 10M checkpoint.
 The [real TiKV functional test runner](../benchmark-output/tikv-dynamic-growth-20261110/run_tests.py)
 starts an isolated three-PD/three-TiKV cluster using the pinned reproduction
-images. After building `SPTAGTest` with TiKV enabled, run it with
+images, and verifies three caught-up voting peers per region before and after
+the workload. After building `SPTAGTest` with TiKV enabled, run it with
 `python3 benchmark-output/tikv-dynamic-growth-20261110/run_tests.py`.
 It explicitly enables `TiKVDynamicLayerIntegrationTest/RealTiKVGrowthAndReload`, which is
 disabled in ordinary test runs. Both local and distributed version maps exercise
