@@ -5,7 +5,6 @@
 #define _SPTAG_COMMON_LOCALVERSIONMAP_H_
 
 #include "IVersionMap.h"
-#include "inc/Helper/ConcurrentSet.h"
 #include <array>
 #include <atomic>
 #include <cassert>

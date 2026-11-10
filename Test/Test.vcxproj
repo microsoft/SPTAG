@@ -22,7 +22,7 @@
     <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{29A25655-CCF2-47F8-8BC8-DFE1B5CF993C}</ProjectGuid>
     <RootNamespace>Test</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
@@ -73,7 +73,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\include;$(IncludePath)</IncludePath>
     <OutDir>$(OutAppDir)</OutDir>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
@@ -83,7 +83,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>SSDServing.lib;CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SSDServing.lib;CoreLibrary.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\Release\folly.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\Release\folly_test_util.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-build\Release\fmt.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\Release\gflags_static.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build\Release\glog.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\lib\Release\event_core.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\lib\Release\event_extra.lib;Shlwapi.lib;Ws2_32.lib;Crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -94,10 +94,10 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_MBCS;_SCL_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;GFLAGS_IS_A_DLL=0;LARGEVID;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions) /utf-8</AdditionalOptions>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <ControlFlowGuard>Guard</ControlFlowGuard>
     </ClCompile>
     <Link>
@@ -179,28 +179,28 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\boost.1.78.0\build\boost.targets" Condition="Exists('..\packages\boost.1.78.0\build\boost.targets')" />
-    <Import Project="..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets" Condition="Exists('..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets')" />
-    <Import Project="..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets" Condition="Exists('..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets')" />
-    <Import Project="..\packages\boost_regex-vc143.1.78.0\build\boost_regex-vc143.targets" Condition="Exists('..\packages\boost_regex-vc143.1.78.0\build\boost_regex-vc143.targets')" />
-    <Import Project="..\packages\boost_date_time-vc143.1.78.0\build\boost_date_time-vc143.targets" Condition="Exists('..\packages\boost_date_time-vc143.1.78.0\build\boost_date_time-vc143.targets')" />
-    <Import Project="..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets" Condition="Exists('..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets')" />
-    <Import Project="..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets" Condition="Exists('..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets')" />
-    <Import Project="..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets" Condition="Exists('..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets')" />
-    <Import Project="..\packages\boost_unit_test_framework-vc143.1.78.0\build\boost_unit_test_framework-vc143.targets" Condition="Exists('..\packages\boost_unit_test_framework-vc143.1.78.0\build\boost_unit_test_framework-vc143.targets')" />
+    <Import Project="..\packages\boost.1.83.0\build\boost.targets" Condition="Exists('..\packages\boost.1.83.0\build\boost.targets')" />
+    <Import Project="..\packages\boost_date_time-vc143.1.83.0\build\boost_date_time-vc143.targets" Condition="Exists('..\packages\boost_date_time-vc143.1.83.0\build\boost_date_time-vc143.targets')" />
+    <Import Project="..\packages\boost_filesystem-vc143.1.83.0\build\boost_filesystem-vc143.targets" Condition="Exists('..\packages\boost_filesystem-vc143.1.83.0\build\boost_filesystem-vc143.targets')" />
+    <Import Project="..\packages\boost_regex-vc143.1.83.0\build\boost_regex-vc143.targets" Condition="Exists('..\packages\boost_regex-vc143.1.83.0\build\boost_regex-vc143.targets')" />
+    <Import Project="..\packages\boost_serialization-vc143.1.83.0\build\boost_serialization-vc143.targets" Condition="Exists('..\packages\boost_serialization-vc143.1.83.0\build\boost_serialization-vc143.targets')" />
+    <Import Project="..\packages\boost_system-vc143.1.83.0\build\boost_system-vc143.targets" Condition="Exists('..\packages\boost_system-vc143.1.83.0\build\boost_system-vc143.targets')" />
+    <Import Project="..\packages\boost_thread-vc143.1.83.0\build\boost_thread-vc143.targets" Condition="Exists('..\packages\boost_thread-vc143.1.83.0\build\boost_thread-vc143.targets')" />
+    <Import Project="..\packages\boost_unit_test_framework-vc143.1.83.0\build\boost_unit_test_framework-vc143.targets" Condition="Exists('..\packages\boost_unit_test_framework-vc143.1.83.0\build\boost_unit_test_framework-vc143.targets')" />
+    <Import Project="..\packages\boost_wserialization-vc143.1.83.0\build\boost_wserialization-vc143.targets" Condition="Exists('..\packages\boost_wserialization-vc143.1.83.0\build\boost_wserialization-vc143.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\boost.1.78.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.78.0\build\boost.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_regex-vc143.1.78.0\build\boost_regex-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_regex-vc143.1.78.0\build\boost_regex-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_date_time-vc143.1.78.0\build\boost_date_time-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_date_time-vc143.1.78.0\build\boost_date_time-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_unit_test_framework-vc143.1.78.0\build\boost_unit_test_framework-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_unit_test_framework-vc143.1.78.0\build\boost_unit_test_framework-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost.1.83.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.83.0\build\boost.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_date_time-vc143.1.83.0\build\boost_date_time-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_date_time-vc143.1.83.0\build\boost_date_time-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_filesystem-vc143.1.83.0\build\boost_filesystem-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_filesystem-vc143.1.83.0\build\boost_filesystem-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_regex-vc143.1.83.0\build\boost_regex-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_regex-vc143.1.83.0\build\boost_regex-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_serialization-vc143.1.83.0\build\boost_serialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_serialization-vc143.1.83.0\build\boost_serialization-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_system-vc143.1.83.0\build\boost_system-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc143.1.83.0\build\boost_system-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_thread-vc143.1.83.0\build\boost_thread-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc143.1.83.0\build\boost_thread-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_unit_test_framework-vc143.1.83.0\build\boost_unit_test_framework-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_unit_test_framework-vc143.1.83.0\build\boost_unit_test_framework-vc143.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_wserialization-vc143.1.83.0\build\boost_wserialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc143.1.83.0\build\boost_wserialization-vc143.targets'))" />
   </Target>
 </Project>

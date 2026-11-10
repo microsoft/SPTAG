@@ -5,7 +5,6 @@
 #define _SPTAG_HELPER_ASYNCFILEREADER_H_
 
 #include "inc/Helper/DiskIO.h"
-#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common.h"
 
 #include <cstdint>

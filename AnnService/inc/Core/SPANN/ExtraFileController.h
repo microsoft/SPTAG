@@ -9,7 +9,6 @@
 #include "inc/Core/Common/FineGrainedLock.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/ThreadPool.h"
-#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "inc/Core/SPANN/Options.h"
 #include <cstdlib>

@@ -10,7 +10,6 @@
 #include "inc/Core/Common/IVersionMap.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "inc/Helper/VectorSetReader.h"
-#include "inc/Helper/ConcurrentSet.h"
 #include <memory>
 #include <vector>
 #include <chrono>

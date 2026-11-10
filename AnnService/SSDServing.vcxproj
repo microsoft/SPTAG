@@ -34,7 +34,7 @@
     <VCProjectVersion>15.0</VCProjectVersion>
     <ProjectGuid>{217B42B7-8F2B-4323-804C-08992CA2F65E}</ProjectGuid>
     <RootNamespace>SSDServing</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -95,7 +95,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(IncludePath);$(ProjectDir)</IncludePath>
+    <IncludePath>C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;$(VC_IncludePath);$(WindowsSDK_IncludePath);$(IncludePath);$(ProjectDir)</IncludePath>
     <LibraryPath>$(OutDir);$(LibraryPath)</LibraryPath>
     <ReferencePath>$(ReferencePath)</ReferencePath>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
@@ -154,14 +154,14 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_$(OutputType);_MBCS;_SCL_SECURE_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_$(OutputType);_MBCS;_SCL_SECURE_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;WIN32;_WINDOWS;GFLAGS_IS_A_DLL=0;LARGEVID;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>inc/SSDServing/Common/stdafx.h</PrecompiledHeaderFile>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions) /utf-8</AdditionalOptions>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <ProgramDataBaseFileName>$(IntDir)$(ProjectName).pdb</ProgramDataBaseFileName>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
@@ -179,5 +179,13 @@
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\packages\boost.1.83.0\build\boost.targets" Condition="Exists('..\packages\boost.1.83.0\build\boost.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\boost.1.83.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.83.0\build\boost.targets'))" />
+  </Target>
 </Project>

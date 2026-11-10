@@ -5,7 +5,6 @@
 #define _SPTAG_COMMON_WORKSPACEPOOL_H_
 
 #include "WorkSpace.h"
-#include "inc/Helper/ConcurrentSet.h"
 
 #include <list>
 #include <mutex>

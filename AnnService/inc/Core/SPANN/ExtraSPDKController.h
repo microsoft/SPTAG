@@ -6,7 +6,6 @@
 
 #include "inc/Helper/KeyValueIO.h"
 #include "inc/Helper/DiskIO.h"
-#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common/Dataset.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/SPANN/Options.h"

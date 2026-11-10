@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Socket/Connection.h"
 #include "inc/Core/Common.h"
+#include "inc/Socket/Connection.h"
 #include "inc/Socket/ConnectionManager.h"
 
 #include <boost/asio/bind_executor.hpp>

@@ -22,6 +22,7 @@
 #include <cmath>
 #include <filesystem>
 #include "inc/Helper/Logging.h"
+#include "inc/Helper/ConcurrentSet.h"
 
 #ifndef _MSC_VER
 #include <stdio.h>

@@ -10,7 +10,6 @@
 #include "ExtraStaticSearcher.h"
 #include "inc/Core/Common/TruthSet.h"
 #include "inc/Helper/KeyValueIO.h"
-#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common/FineGrainedLock.h"
 #include "inc/Core/Common/Checksum.h"
 #include "PersistentBuffer.h"
