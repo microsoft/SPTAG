@@ -76,9 +76,25 @@
     "removed_only_our_failed_attempt_reservation": "attempts/20261110T015918Z/cluster/tikv1/tikv/space_placeholder_file",
     "reservation_bytes_released": 76187717386
   },
+  "large_scale_launch_evidence": {
+    "status_at_recording": "running; no full-scale success claimed",
+    "attempt_directory": "large-attempts/20261110T024436Z",
+    "source_commit": "f315a88e1cfff7a015e488e973be18ad6d0ac307",
+    "current_phase_at_recording": "building initial real SIFT5M index",
+    "three_replicas_presplit_and_balanced": true,
+    "posting_buckets": 128,
+    "version0_buckets": 128,
+    "initial_5m_payload_byte_for_byte_verified": true,
+    "initial_5m_payload_sha256": "2265a6e6400657a9beac8e5bb6810d3f2b806fa0cbaac67cd855d522bf45e8f5",
+    "phase_timeout_seconds": 3600,
+    "memory_high_watermark_bytes": 209715200,
+    "replacement_head_target_bytes": 25165824,
+    "excluded_attempt": "large-attempts/20261110T024118Z: stopped after detecting INI whitespace caused random-data fallback; not a valid SIFT measurement",
+    "progress_file": "large-attempts/20261110T024436Z/status.json"
+  },
   "limitations": [
-    "The 5M plus five 1M insertion batches have not been tested on TiKV",
-    "Large-run startup requires 500 GiB free; approximately 386 GiB was available after cleanup",
+    "The full 5M plus five 1M insertion batches on TiKV have been launched but have not completed",
+    "The initial 500 GiB disk-space blocker was resolved by user-approved removal of exactly three old reservation files; the corrected run started with approximately 593 GiB free",
     "No SIFT recall or TiKV throughput claim follows from the synthetic functional test",
     "No node-restart, power-loss, or multi-host fault-tolerance test",
     "Earlier fixture attempts were corrected for missing posting overflow and differing local/distributed Count semantics; ordinary regression filters were isolated from the external-cluster suite",
