@@ -535,6 +535,10 @@ BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
         set("AsyncMergeInSearch", "false");
         set("ExcludeHead", "false");
         set("ReplicaCount", "2");
+        set("PostingVectorLimit", "0");
+        set("PostingPageLimit", "1");
+        set("SearchPostingPageLimit", "1");
+        set("BufferLength", "1");
         set("InternalResultNum", "64");
         set("SearchInternalResultNum", "64");
         set("MaxCheck", "256");
@@ -545,12 +549,14 @@ BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
         set("MaxLayers", "2");
         set("LayerResizeTimeoutSeconds", "60");
 
-        std::vector<uint8_t> vectors(72 * 2);
-        for (int i = 0; i < 72; ++i) {
-            vectors[2 * i] = static_cast<uint8_t>(i);
-            vectors[2 * i + 1] = static_cast<uint8_t>(2 * i);
+        constexpr int dimension = 128;
+        constexpr int totalCount = 136;
+        std::vector<uint8_t> vectors(totalCount * dimension);
+        for (int i = 0; i < totalCount; ++i) {
+            vectors[dimension * i] = static_cast<uint8_t>(i);
+            vectors[dimension * i + 1] = static_cast<uint8_t>(2 * i);
         }
-        BOOST_REQUIRE(index->BuildIndex(vectors.data(), 64, 2) == ErrorCode::Success);
+        BOOST_REQUIRE(index->BuildIndex(vectors.data(), 64, dimension) == ErrorCode::Success);
         wait();
         const auto memory = index->GetHeadMemoryUsage();
         set("Ratio", "0.1", "SelectHead");
@@ -567,24 +573,24 @@ BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
                 ++completed;
             }
         });
-        const auto inserted = index->AddIndex(vectors.data() + 64 * 2, 1, 2, nullptr, false, true);
+        const auto inserted = index->AddIndex(vectors.data() + 64 * dimension, 64, dimension, nullptr, false, true);
+        wait();
         reader.request_stop();
         reader.join();
         BOOST_REQUIRE(inserted == ErrorCode::Success);
-        wait();
         BOOST_REQUIRE_EQUAL(index->GetParameter("Layers", "BuildSSDIndex"), "2");
         BOOST_REQUIRE(index->GetLayerResizeStatus() == ErrorCode::Success);
         BOOST_CHECK_LE(index->GetHeadMemoryUsage(), memory / 2);
         BOOST_CHECK_EQUAL(errors.load(), 0);
         BOOST_CHECK_GT(completed.load(), 0);
         set("HeadMemoryHighWatermark", "1000000");
-        BOOST_REQUIRE(index->AddIndex(vectors.data() + 65 * 2, 7, 2, nullptr, false, true) == ErrorCode::Success);
+        BOOST_REQUIRE(index->AddIndex(vectors.data() + 128 * dimension, 8, dimension, nullptr, false, true) == ErrorCode::Success);
         wait();
 
         auto check = [&](bool deleted) {
-            BOOST_CHECK_EQUAL(index->GetNumSamples(), 72);
-            for (int i = 0; i < 72; ++i) {
-                COMMON::QueryResultSet<uint8_t> query(vectors.data() + 2 * i, 1);
+            BOOST_CHECK_EQUAL(index->GetNumSamples(), totalCount);
+            for (int i = 0; i < totalCount; ++i) {
+                COMMON::QueryResultSet<uint8_t> query(vectors.data() + dimension * i, 1);
                 BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
                 if (deleted && i == 64) {
                     BOOST_CHECK_NE(query.GetResult(0)->VID, 64);
@@ -611,7 +617,7 @@ BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
         check(true);
         BOOST_REQUIRE(index->Check() == ErrorCode::Success);
         BOOST_TEST_MESSAGE("Real TiKV automatic growth/reload passed: distributed=" << distributed
-            << ", layers=2, samples=72, concurrentQueries=" << completed.load());
+            << ", layers=2, samples=" << totalCount << ", concurrentQueries=" << completed.load());
     }
 }
 
