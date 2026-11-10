@@ -1,0 +1,12 @@
+{
+  "user_approved": true,
+  "no_running_docker_containers_at_cleanup": true,
+  "removed_only": [
+    "/mnt_ssd/qianxi/SPTAG/benchmark-output/tikv-count-fix-20261103/cluster/tikv1/tikv/space_placeholder_file",
+    "/mnt_ssd/qianxi/SPTAG/benchmark-output/tikv-count-fix-20261103/cluster/tikv2/tikv/space_placeholder_file",
+    "/mnt_ssd/qianxi/SPTAG/benchmark-output/tikv-count-fix-20261103/cluster/tikv3/tikv/space_placeholder_file"
+  ],
+  "total_bytes_released": 228563152158,
+  "database_index_and_logs_retained": true,
+  "available_space_after_cleanup_gib_approximately": 599
+}

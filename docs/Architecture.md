@@ -164,6 +164,24 @@ free and does not replace the 5M-to-10M experiment or its 500 GiB startup guard.
 The [TiKV functional validation](../benchmark-output/tikv-dynamic-growth-20261110/validation.json)
 records both version-map modes, actual three-voter region evidence and clean
 cluster shutdown; it makes no large-scale performance claim.
+The [large TiKV runner](../benchmark-output/tikv-dynamic-growth-20261110/run_large.py)
+uses the [matched settings](../benchmark-output/tikv-dynamic-growth-20261110/large.ini)
+for a 5M initial index and five 1M insertion batches. Run it with
+`python3 benchmark-output/tikv-dynamic-growth-20261110/run_large.py --build-dir BUILD`.
+It reuses the FILEIO experiment's exact six-prefix truth, requires 500 GiB free
+at startup, stops below 250 GiB, and pre-splits 128 buckets across three replicas.
+Build, each insertion batch and final reload/query verification are separate
+phases, each capped at one hour including the live-ID/metadata checker.
+Every insertion phase loads the preceding fully saved index and has exactly
+one batch; source metadata is checked bijectively within each 1M range.
+
+Unlike FILEIO, cloning local TiKV index files does not snapshot shared RawKV
+postings or distributed versions. The runner continues only after a phase
+finishes successfully and never automatically resumes interrupted writes from
+an older local checkpoint. A failed/interrupted run preserves its cluster data
+and logs for diagnosis, but requires a fresh run or a separately restored
+consistent TiKV backup. The whole multi-phase experiment can exceed one hour;
+the deadline is per phase, not permission for an unbounded individual workload.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;
