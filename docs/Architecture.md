@@ -150,6 +150,16 @@ completed checkpoint instead of discarding completed insertion batches.
 The [recorded SIFT10M validation](../benchmark-output/sift10m-fileio-dynamic-5m-1m-20261109/validation.json)
 includes the real growth event, per-prefix measurements, hourly checkpoint
 recovery, and a separate reload/query check of the final 10M checkpoint.
+The [real TiKV functional test runner](../benchmark-output/tikv-dynamic-growth-20261110/run_tests.py)
+starts an isolated three-PD/three-TiKV cluster using the pinned reproduction
+images. After building `SPTAGTest` with TiKV enabled, run it with
+`python3 benchmark-output/tikv-dynamic-growth-20261110/run_tests.py`.
+It explicitly enables `DynamicLayerTest/RealTiKVGrowthAndReload`, which is
+disabled in ordinary test runs. Both local and distributed version maps exercise
+automatic growth, concurrent queries, subsequent insertion/deletion and reload.
+The workload has a one-hour deadline; owned containers are stopped afterward,
+while logs and data are retained. This small functional test requires 250 GiB
+free and does not replace the 5M-to-10M experiment or its 500 GiB startup guard.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;

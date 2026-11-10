@@ -12,6 +12,7 @@
 
 #include <boost/filesystem.hpp>
 #include <atomic>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -482,6 +483,136 @@ BOOST_AUTO_TEST_CASE(SparseLocalVersionBatchUsesGlobalIDs)
     BOOST_CHECK_EQUAL(results[0], 3);
     BOOST_CHECK_EQUAL(results[1], 0xfe);
     BOOST_CHECK_EQUAL(results[2], 0xfe);
+}
+
+BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
+{
+    const auto* addresses = std::getenv("SPTAG_TIKV_TEST_PD");
+    const auto* prefix = std::getenv("SPTAG_TIKV_TEST_PREFIX");
+    const auto* root = std::getenv("SPTAG_TIKV_TEST_DIRECTORY");
+    BOOST_REQUIRE(addresses && *addresses);
+    BOOST_REQUIRE(prefix && *prefix);
+    BOOST_REQUIRE(root && *root);
+
+    for (bool distributed : {false, true}) {
+        const auto directory = boost::filesystem::path(root) / (distributed ? "distributed" : "local");
+        BOOST_REQUIRE(!boost::filesystem::exists(directory));
+        boost::filesystem::create_directories(directory);
+        auto index = std::make_shared<SPANN::Index<uint8_t>>();
+        auto set = [&](const char* name, const std::string& value, const char* section = "BuildSSDIndex") {
+            BOOST_REQUIRE(index->SetParameter(name, value.c_str(), section) == ErrorCode::Success);
+        };
+        auto wait = [&]() {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+            while (!index->AllFinished() && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            BOOST_REQUIRE(index->AllFinished());
+        };
+        set("IndexDirectory", directory.string(), "Base");
+        set("DistCalcMethod", "L2", "Base");
+        set("IndexAlgoType", "BKT", "Base");
+        set("ValueType", "UInt8", "Base");
+        set("isExecute", "true", "SelectHead");
+        set("SelectHeadType", "Random", "SelectHead");
+        set("Ratio", "1", "SelectHead");
+        set("NumberOfThreads", "1", "SelectHead");
+        set("isExecute", "true", "BuildHead");
+        set("NumberOfThreads", "1", "BuildHead");
+        set("NeighborhoodSize", "8", "BuildHead");
+        set("RefineIterations", "1", "BuildHead");
+        set("isExecute", "true");
+        set("BuildSsdIndex", "true");
+        set("Storage", "TIKVIO");
+        set("TiKVPDAddresses", addresses);
+        set("TiKVKeyPrefix", std::string(prefix) + (distributed ? "-distributed" : "-local"));
+        set("DistributedVersionMap", distributed ? "true" : "false");
+        set("ShareDB", "true");
+        set("Layers", "1");
+        set("NumberOfThreads", "1");
+        set("SearchThreadNum", "2");
+        set("AppendThreadNum", "1");
+        set("Update", "true");
+        set("AsyncMergeInSearch", "false");
+        set("ExcludeHead", "false");
+        set("ReplicaCount", "2");
+        set("InternalResultNum", "64");
+        set("SearchInternalResultNum", "64");
+        set("MaxCheck", "256");
+        set("MaxID", "10000");
+        set("EnableDynamicLayers", "true");
+        set("HeadMemoryHighWatermark", "1000000");
+        set("HeadMemoryTarget", "2000");
+        set("MaxLayers", "2");
+        set("LayerResizeTimeoutSeconds", "60");
+
+        std::vector<uint8_t> vectors(72 * 2);
+        for (int i = 0; i < 72; ++i) {
+            vectors[2 * i] = static_cast<uint8_t>(i);
+            vectors[2 * i + 1] = static_cast<uint8_t>(2 * i);
+        }
+        BOOST_REQUIRE(index->BuildIndex(vectors.data(), 64, 2) == ErrorCode::Success);
+        wait();
+        const auto memory = index->GetHeadMemoryUsage();
+        set("Ratio", "0.1", "SelectHead");
+        set("HeadMemoryTarget", std::to_string(memory / 2));
+        set("HeadMemoryHighWatermark", std::to_string(memory - 1));
+
+        std::atomic_int errors{0};
+        std::atomic_int completed{0};
+        std::jthread reader([&](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                COMMON::QueryResultSet<uint8_t> query(vectors.data(), 1);
+                if (index->SearchIndex(query) != ErrorCode::Success || query.GetResult(0)->VID != 0)
+                    ++errors;
+                ++completed;
+            }
+        });
+        const auto inserted = index->AddIndex(vectors.data() + 64 * 2, 1, 2, nullptr, false, true);
+        reader.request_stop();
+        reader.join();
+        BOOST_REQUIRE(inserted == ErrorCode::Success);
+        wait();
+        BOOST_REQUIRE_EQUAL(index->GetParameter("Layers", "BuildSSDIndex"), "2");
+        BOOST_REQUIRE(index->GetLayerResizeStatus() == ErrorCode::Success);
+        BOOST_CHECK_LE(index->GetHeadMemoryUsage(), memory / 2);
+        BOOST_CHECK_EQUAL(errors.load(), 0);
+        BOOST_CHECK_GT(completed.load(), 0);
+        set("HeadMemoryHighWatermark", "1000000");
+        BOOST_REQUIRE(index->AddIndex(vectors.data() + 65 * 2, 7, 2, nullptr, false, true) == ErrorCode::Success);
+        wait();
+
+        auto check = [&](bool deleted) {
+            BOOST_CHECK_EQUAL(index->GetNumSamples(), 72);
+            for (int i = 0; i < 72; ++i) {
+                COMMON::QueryResultSet<uint8_t> query(vectors.data() + 2 * i, 1);
+                BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
+                if (deleted && i == 64) {
+                    BOOST_CHECK_NE(query.GetResult(0)->VID, 64);
+                } else {
+                    BOOST_CHECK_EQUAL(query.GetResult(0)->VID, i);
+                    BOOST_CHECK_EQUAL(query.GetResult(0)->Dist, 0);
+                }
+            }
+        };
+        check(false);
+        BOOST_REQUIRE(index->DeleteIndex(64) == ErrorCode::Success);
+        check(true);
+        const auto storagePrefixes = index->GetParameter("LayerStoragePrefixes", "BuildSSDIndex");
+        BOOST_REQUIRE(!storagePrefixes.empty());
+        BOOST_REQUIRE(index->SaveIndex(directory.string()) == ErrorCode::Success);
+        index.reset();
+        std::shared_ptr<VectorIndex> loaded;
+        BOOST_REQUIRE(VectorIndex::LoadIndex(directory.string(), loaded) == ErrorCode::Success);
+        index = std::dynamic_pointer_cast<SPANN::Index<uint8_t>>(loaded);
+        BOOST_REQUIRE(index);
+        wait();
+        BOOST_REQUIRE_EQUAL(index->GetParameter("Layers", "BuildSSDIndex"), "2");
+        BOOST_CHECK_EQUAL(index->GetParameter("LayerStoragePrefixes", "BuildSSDIndex"), storagePrefixes);
+        check(true);
+        BOOST_REQUIRE(index->Check() == ErrorCode::Success);
+        BOOST_TEST_MESSAGE("Real TiKV automatic growth/reload passed: distributed=" << distributed
+            << ", layers=2, samples=72, concurrentQueries=" << completed.load());
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
