@@ -154,7 +154,7 @@ The [real TiKV functional test runner](../benchmark-output/tikv-dynamic-growth-2
 starts an isolated three-PD/three-TiKV cluster using the pinned reproduction
 images. After building `SPTAGTest` with TiKV enabled, run it with
 `python3 benchmark-output/tikv-dynamic-growth-20261110/run_tests.py`.
-It explicitly enables `DynamicLayerTest/RealTiKVGrowthAndReload`, which is
+It explicitly enables `TiKVDynamicLayerIntegrationTest/RealTiKVGrowthAndReload`, which is
 disabled in ordinary test runs. Both local and distributed version maps exercise
 automatic growth, concurrent queries, subsequent insertion/deletion and reload.
 The workload has a one-hour deadline; owned containers are stopped afterward,

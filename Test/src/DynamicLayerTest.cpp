@@ -485,6 +485,10 @@ BOOST_AUTO_TEST_CASE(SparseLocalVersionBatchUsesGlobalIDs)
     BOOST_CHECK_EQUAL(results[2], 0xfe);
 }
 
+BOOST_AUTO_TEST_SUITE_END()
+
+BOOST_AUTO_TEST_SUITE(TiKVDynamicLayerIntegrationTest)
+
 BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
 {
     const auto* addresses = std::getenv("SPTAG_TIKV_TEST_PD");

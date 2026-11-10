@@ -23,7 +23,7 @@ def main():
     shutil.copyfile(RECIPE / "tikv.toml", attempt / "tikv.toml")
     prefix = "dynamic-" + attempt.name.lower()
     binary = REPOSITORY / "Release/SPTAGTest"
-    command = [str(binary), "--run_test=DynamicLayerTest/RealTiKVGrowthAndReload",
+    command = [str(binary), "--run_test=TiKVDynamicLayerIntegrationTest/RealTiKVGrowthAndReload",
                "--log_level=test_suite"]
     environment = os.environ.copy()
     environment.update(
