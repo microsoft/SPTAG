@@ -187,6 +187,10 @@ the deadline is per phase, not permission for an unbounded individual workload.
 The runner emits INI delimiters without surrounding spaces, rejects the test
 generator's random-input fallback, and releases only its own regenerable
 reservation files after all owned nodes have shut down cleanly.
+Run `python3 benchmark-output/tikv-dynamic-growth-20261110/test_runner.py`
+to check truth slicing, INI paths, rejection of random fallback, and strict
+benchmark JSON parsing with both zero and nonzero insertion counts. These
+focused checks use the existing SIFT input and a small temporary FILEIO index.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;

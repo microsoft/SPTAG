@@ -1083,7 +1083,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     jsonFile << "    \"benchmark0b_query_before_insert_round2\": ";
     BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                  numSearchThreads, numQueries, 0, batches, jsonFile);
-    jsonFile << ",\n";
+    jsonFile << (insertBatchSize > 0 ? ",\n" : "\n");
     jsonFile.flush();
 
     BOOST_REQUIRE(index->SaveIndex(indexPath) == ErrorCode::Success);
