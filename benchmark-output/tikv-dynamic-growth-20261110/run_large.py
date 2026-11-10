@@ -30,7 +30,10 @@ def save(path, data):
 
 
 def build_checker(build, output):
-    entry = next(item for item in json.loads((build / "compile_commands.json").read_text())
+    commands_file = build / "compile_commands.json"
+    if not commands_file.exists():
+        raise RuntimeError("Configure the build with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    entry = next(item for item in json.loads(commands_file.read_text())
                  if item["file"].endswith("/TiKVIOTest.cpp"))
     command = shlex.split(entry["command"])
     obj = output.with_suffix(".o")

@@ -168,6 +168,8 @@ The [large TiKV runner](../benchmark-output/tikv-dynamic-growth-20261110/run_lar
 uses the [matched settings](../benchmark-output/tikv-dynamic-growth-20261110/large.ini)
 for a 5M initial index and five 1M insertion batches. Run it with
 `python3 benchmark-output/tikv-dynamic-growth-20261110/run_large.py --build-dir BUILD`.
+The matching Ninja build must export commands with
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`; its compiler/linker flags build the checker.
 It reuses the FILEIO experiment's exact six-prefix truth, requires 500 GiB free
 at startup, stops below 250 GiB, and pre-splits 128 buckets across three replicas.
 Build, each insertion batch and final reload/query verification are separate
