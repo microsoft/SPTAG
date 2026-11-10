@@ -161,6 +161,9 @@ automatic growth, concurrent queries, subsequent insertion/deletion and reload.
 The workload has a one-hour deadline; owned containers are stopped afterward,
 while logs and data are retained. This small functional test requires 250 GiB
 free and does not replace the 5M-to-10M experiment or its 500 GiB startup guard.
+The [TiKV functional validation](../benchmark-output/tikv-dynamic-growth-20261110/validation.json)
+records both version-map modes, actual three-voter region evidence and clean
+cluster shutdown; it makes no large-scale performance claim.
 
 Writes pause while the coordinator drains maintenance and builds the new
 top. Queries continue against the frozen old topology during construction;

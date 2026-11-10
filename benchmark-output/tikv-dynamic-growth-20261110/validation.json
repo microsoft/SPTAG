@@ -1,0 +1,87 @@
+{
+  "status": "passed",
+  "scope": "Small synthetic functional validation on a real single-host three-replica TiKV cluster; not a SIFT5M-to-10M benchmark",
+  "source_commit": "c0b527e826f75168b42c57f5ee1ffee65cc0a7b3",
+  "binary_sha256": "c4535e86b1e4d61769566610db580401bc56cc345ae0c815b0d8714c29d5ac5e",
+  "attempt_directory": "attempts/20261110T020831Z",
+  "pd_nodes": 3,
+  "tikv_nodes": 3,
+  "replica_validation": {
+    "regions_before": 5,
+    "regions_after": 5,
+    "voters_per_region": 3,
+    "pending_or_down_peers": 0,
+    "evidence": ["regions-before.json", "regions-after.json"]
+  },
+  "default_regressions": {
+    "selector": "DynamicLayerTest:TiKVIOTest",
+    "cases": 14,
+    "status": "passed",
+    "integration_suite_excluded": true
+  },
+  "real_cluster_test": {
+    "selector": "TiKVDynamicLayerIntegrationTest/RealTiKVGrowthAndReload",
+    "status": "passed",
+    "dimension": 128,
+    "initial_vectors": 64,
+    "first_insert_batch": 64,
+    "subsequent_insert_batch": 8,
+    "total_inserted_vectors": 136,
+    "deleted_vid": 64,
+    "final_live_vectors": 135,
+    "checks": [
+      "Posting overflow creates new heads and triggers automatic growth",
+      "Posting layers change from one to two",
+      "Replacement head remains within the configured memory target",
+      "Queries continue during insertion and growth without errors",
+      "Insertion continues after growth",
+      "Every retained vector is its exact nearest neighbor",
+      "The deleted VID is excluded from search",
+      "Enumerated live IDs exactly match the expected set before and after reload",
+      "Layer storage prefixes and topology survive save/reload",
+      "Reloaded index Check() succeeds"
+    ],
+    "configurations": [
+      {
+        "distributed_version_map": false,
+        "old_head_vectors": 67,
+        "old_head_memory_estimate_bytes": 14070,
+        "new_head_vectors": 6,
+        "new_head_memory_estimate_bytes": 1470,
+        "base_vectors_at_growth": 128,
+        "concurrent_queries": 105,
+        "concurrent_query_errors": 0
+      },
+      {
+        "distributed_version_map": true,
+        "old_head_vectors": 67,
+        "old_head_memory_estimate_bytes": 14070,
+        "new_head_vectors": 6,
+        "new_head_memory_estimate_bytes": 1470,
+        "base_vectors_at_growth": 128,
+        "concurrent_queries": 432,
+        "concurrent_query_errors": 0
+      }
+    ]
+  },
+  "timeout_seconds": 3600,
+  "timeout_triggered": false,
+  "workload_elapsed_seconds_including_cluster_startup": 17.110374065930955,
+  "elapsed_seconds_including_cleanup": 48.26208375394344,
+  "cleanup": {
+    "owned_containers_stopped": 6,
+    "all_exit_codes_zero": true,
+    "oom_killed": false,
+    "database_index_and_logs_retained": true,
+    "removed_only_our_failed_attempt_reservation": "attempts/20261110T015918Z/cluster/tikv1/tikv/space_placeholder_file",
+    "reservation_bytes_released": 76187717386
+  },
+  "limitations": [
+    "The 5M plus five 1M insertion batches have not been tested on TiKV",
+    "Large-run startup requires 500 GiB free; approximately 386 GiB was available after cleanup",
+    "No SIFT recall or TiKV throughput claim follows from the synthetic functional test",
+    "No node-restart, power-loss, or multi-host fault-tolerance test",
+    "Earlier fixture attempts were corrected for missing posting overflow and differing local/distributed Count semantics; ordinary regression filters were isolated from the external-cluster suite",
+    "One immediate rerun failed port preflight with address already in use; the subsequent clean-cluster attempt passed"
+  ]
+}
