@@ -1,0 +1,42 @@
+test_complete_replicated_balanced_plan (test_reproduce.PresplitTests) ... ok
+test_exact_posting_and_both_version_key_layouts (test_reproduce.PresplitTests) ... ok
+test_invalid_key_plans_fail_explicitly (test_reproduce.PresplitTests) ... ok
+test_one_layer_preserves_posting_and_version0_layout (test_reproduce.PresplitTests) ... ok
+test_pending_down_and_learner_peers_are_not_ready (test_reproduce.PresplitTests) ... ok
+test_rejects_leader_concentration (test_reproduce.PresplitTests) ... ok
+test_deployment_matches_recorded_container_commands (test_reproduce.ReproductionTests) ... ok
+test_exact_truth_matches_integer_bruteforce_including_ties (test_reproduce.ReproductionTests) ... ok
+test_extracts_exact_prefix_and_rejects_truncation (test_reproduce.ReproductionTests) ... ok
+test_fileio_one_layer_uses_local_scan_telemetry (test_reproduce.ReproductionTests) ... ok
+test_fileio_rejects_distributed_runtime (test_reproduce.ReproductionTests) ... ok
+test_fileio_rejects_distributed_version_check_telemetry (test_reproduce.ReproductionTests) ... ok
+test_fileio_rejects_missing_upper_local_versionmap (test_reproduce.ReproductionTests) ... ok
+test_fileio_rejects_presplit_before_creating_files (test_reproduce.ReproductionTests) ... ok
+test_fileio_rejects_unsearched_upper_layer (test_reproduce.ReproductionTests) ... ok
+test_fileio_runner_never_starts_a_tikv_cluster (test_reproduce.ReproductionTests) ... ok
+test_fileio_two_layers_keep_local_version_checks (test_reproduce.ReproductionTests) ... ok
+test_prepare_rejects_unmeasured_source_before_creating_run (test_reproduce.ReproductionTests) ... ok
+test_recorded_results_match_all_published_rounds (test_reproduce.ReproductionTests) ... ok
+test_rejects_disabled_version_checks (test_reproduce.ReproductionTests) ... ok
+test_rejects_missing_round (test_reproduce.ReproductionTests) ... ok
+test_rejects_nonpositive_insertion_time (test_reproduce.ReproductionTests) ... ok
+test_rejects_read_failure (test_reproduce.ReproductionTests) ... ok
+test_rejects_wrong_count (test_reproduce.ReproductionTests) ... ok
+test_shutdown_refuses_foreign_container_labels (test_reproduce.ReproductionTests) ... ok
+test_two_layers_reject_missing_upper_checkpoint (test_reproduce.ReproductionTests) ... ok
+test_two_layers_reject_upper_search_version_checks (test_reproduce.ReproductionTests) ... ok
+test_two_layers_retain_version_checks_only_on_bottom (test_reproduce.ReproductionTests) ... ok
+test_all_metrics_and_throughput_denominator_match_raw_records (test_publish_report.PublicationTests) ... ok
+test_publish_never_overwrites_previous_report (test_publish_report.PublicationTests) ... ok
+test_recomputes_presplit_replicas_boundaries_and_leaders (test_publish_report.PublicationTests) ... ok
+test_rejects_barrier_outside_insertion (test_publish_report.PublicationTests) ... ok
+test_rejects_inconsistent_insertion_rate (test_publish_report.PublicationTests) ... ok
+test_rejects_nonfinite_checkpoint_duration (test_publish_report.PublicationTests) ... ok
+test_rejects_nonfinite_qps (test_publish_report.PublicationTests) ... ok
+test_rejects_nonmonotonic_latency_percentiles (test_publish_report.PublicationTests) ... ok
+test_rejects_wrong_server_image (test_publish_report.PublicationTests) ... ok
+
+----------------------------------------------------------------------
+Ran 37 tests in 0.613s
+
+OK

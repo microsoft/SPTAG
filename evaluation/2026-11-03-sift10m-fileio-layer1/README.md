@@ -7,6 +7,10 @@
 **Status: completed; strict count and final reload validation passed.**
 This report contains only the FILEIO run completed on November 3, 2026.
 Other local experiments and source changes are not published with this report.
+For the newer four-profile comparison, use the separate
+[November9 matched-binary FILEIO1 run](../2026-11-09-sift10m-fileio-layer1-matched/README.md)
+and its [reproduction guide](../2026-11-09-sift10m-fileio-layer1-matched/Reproduce.md).
+This historical run and its recorded metrics/provenance remain unchanged.
 
 ## Workload and configuration
 

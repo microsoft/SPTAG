@@ -2497,10 +2497,10 @@ namespace SPTAG::SPANN {
                     if (p_headGlobaltoLocal.find(*(p_headToLocal[i])) == p_headGlobaltoLocal.end()) {
                         p_headGlobaltoLocal[*(p_headToLocal[i])] = i;
                     } else {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Duplicate entry found for global ID: %lld previous i:%lld current i:%lld\n", static_cast<std::int64_t>(*(p_headToLocal[i])), 
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Duplicate entry found for global ID: %lld previous i:%lld current i:%lld\n", static_cast<std::int64_t>(*(p_headToLocal[i])),
                             static_cast<std::int64_t>(p_headGlobaltoLocal[*(p_headToLocal[i])]), static_cast<std::int64_t>(i));
                     }
-                } 
+                }
             }
 
             auto fullVectors = p_reader->GetVectorSet();
@@ -2517,8 +2517,8 @@ namespace SPTAG::SPANN {
             {
                 tikvMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity,
                                     &p_localToGlobal);
-            }
-#else
+            } else
+#endif
             {
                 std::vector<std::thread> mythreads;
                 mythreads.reserve(m_opt->m_iSSDNumberOfThreads);
@@ -2573,8 +2573,6 @@ namespace SPTAG::SPANN {
                 }
                 mythreads.clear();
             }
-#endif
-
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize p_localToGlobal(%lld) and versionMap (%lld)\n",
                          (std::int64_t)p_localToGlobal.R(), (std::int64_t)m_versionMap->Count());
 
@@ -2840,9 +2838,13 @@ namespace SPTAG::SPANN {
             SizeType begin, bool disableSplit = false) override {
             // Phase 1: RNGSelection + serialize + WAL for each vector, group by headID
             std::unordered_map<SizeType, std::string> headAppends;
+            // LocalVersionMap counts sparse members, not the global VID bound.
+            const bool isTiKVVersionMap = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get()) != nullptr;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
                 SizeType VID = begin + v;
-                if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, m_versionMap->Default());
+                if ((isTiKVVersionMap && VID >= m_versionMap->Count()) || m_versionMap->Deleted(VID)) {
+                    m_versionMap->SetVersion(VID, m_versionMap->Default());
+                }
                 uint8_t version = m_versionMap->GetVersion(VID);
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;

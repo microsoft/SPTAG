@@ -1,0 +1,21 @@
+{
+  "prefix": "fileio-layer1-matched-20261109",
+  "source_checkout": "95bcb20f48f7864072f9443ec91027875382b722",
+  "layers": 1,
+  "storage": "FILEIO",
+  "presplit_regions": 0,
+  "recipe_checkout": "10c5fdc095e7dd232ad807d962eac27999dfa2ac",
+  "source_root": "/mnt_ssd/qianxi/SPTAG/benchmark-output/tikv16-reproduction-check",
+  "recipe_root": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer1-build80-matched-20261109-recipe",
+  "recipe_source_commit": "95bcb20f48f7864072f9443ec91027875382b722",
+  "recipe_sha256": {
+    "reproduce.py": "8f0b47cd5d127d4e8a3d61dfa743549dba7698cd7025ea3621cf12495dfad995",
+    "deployment.py": "da272062ba10cba0c30731446a8dcbc397ee8e357857b2d962cc6c121197cb38",
+    "presplit.py": "953520d10367211d1956e761ac9a2d9ec5eed79424e08c21584627c2b92833f8",
+    "benchmark.ini": "4ce9716487e20206303bc089c87f4c184ac119b6aa5171eef03fb280bcab8644",
+    "tikv.toml": "1f6e59f33ed518568ffd49f053cc94f5973b31ced7ad67c21e80739a86976350"
+  },
+  "binary_sha256": "a38242ea9fac9ef9153af9c46ddd8389c57fc65da814d85cb2b13a72ac4c1323",
+  "count_checker_sha256": "60725cd58978ae86bfe0dc30973c334160c456b09ba17a21f7ee61b3a032ff3e",
+  "created_utc": "2026-11-09T03:34:33Z"
+}

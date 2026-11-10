@@ -1,0 +1,14 @@
+{
+  "status": "benchmark_and_counts_verified_after_validator_correction",
+  "original_runner_status": {
+    "phase": "failed",
+    "error": "RuntimeError('Layer-0 version checks were disabled')"
+  },
+  "reason": "Original validator incorrectly required positive TiKV-only batch-check counters for FILEIO. Pinned FILEIO source checks local Deleted inline, within computation time.",
+  "benchmark_rerun": false,
+  "original_recipe_and_raw_outputs_preserved": true,
+  "corrected_validator": "/mnt_ssd/qianxi/SPTAG/evaluation/2026-11-05-sift10m-tikv-pool16-cq8/reproduce.py",
+  "corrected_validator_sha256": "8f0b47cd5d127d4e8a3d61dfa743549dba7698cd7025ea3621cf12495dfad995",
+  "tests_log": "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-fileio-layer2-build80-20261109/recovery-validator-tests.log",
+  "original_frozen_files_verified": 21
+}

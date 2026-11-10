@@ -231,6 +231,51 @@ returns if `BENCHMARK_CONFIG` is unset; zero exit status alone is not evidence
 of a completed benchmark. Verify the logged backend, paths, counts, and phase
 outputs. Do not hide failed operations or missing output files.
 
+For TiKV append-only workloads, check the layer-0 `GetNumSamples()` and
+contained-ID enumeration against the initial count plus completed insertions,
+both before and after saving/reloading. Saved `Base.VectorSize` and metadata
+alone do not prove count consistency. Upper-layer counts use global VID bounds
+and need not equal their sparse membership sizes.
+
+The insertion path must register a new VID beyond the VersionMap count even
+when a missing layer-0 version key is implicitly alive. The
+[`InsertedVIDsGrowCountAcrossReloads` regression](../Test/src/TiKVIOTest.cpp)
+exercises actual posting insertion, count growth, checkpoint/reload, enumeration,
+deleted-VID restoration, and preservation of an existing non-default version.
+The bound check applies only to TiKV VersionMaps: a local sparse map counts
+members, not the global VID bound. `LocalSparseVIDKeepsExistingVersion` checks
+that inserting an existing sparse VID does not reset its version.
+Fresh-build initialization must select the actual VersionMap type at runtime:
+a TiKV-enabled binary can still use FILEIO and a local VersionMap. Enabling
+TiKV at compile time must not compile out local initialization.
+`FileIOBuildInitializesLocalVersionsWithTiKVEnabled` builds real one- and
+two-layer FILEIO indexes, checks dense bottom and sparse upper membership,
+and verifies exact-vector queries before and after saving/reloading.
+TiKV's stub pool must also preserve physical connection fan-out: gRPC channels
+with identical arguments otherwise share a global subchannel, so multiple
+stubs alone do not create independent connections. The pool uses 16 stubs
+with local subchannel pools per client and store, independently of maintenance
+thread counts, and eight completion queues with one pump thread each. These
+transport defaults target concurrent reads; they do not increase search,
+insert, or maintenance worker counts. Same-index warm-cache crossover tests
+at 32 search threads favored 16 connections over eight and eight completion
+queues over four; single-thread latency was slightly higher. These read-only
+tests disable query-triggered maintenance and are not a full insertion rerun.
+The [full 16-channel/8-CQ experiment](../evaluation/2026-11-05-sift10m-tikv-pool16-cq8/README.md)
+also completed a fresh build and all ten insertion batches with count/reload
+acceptance. Its standalone reproduction guide uses committed source, pinned
+deployment images and exact phase truth; it also records the unresolved
+recall decrease between independently rebuilt indexes.
+`StubPoolUsesIndependentConnections` verifies the actual
+server-side peer count, while `AsyncReadsSurviveClientAddressReuse` checks pool
+lifetime across client destruction/recreation.
+Run these checks with a TiKV-enabled build:
+
+```bash
+./Release/SPTAGTest \
+  --run_test=TiKVIOTest --log_level=message
+```
+
 `Rebuild=false` does not automatically mean query-only: configured insert/delete
 work may still execute. Set operation counts deliberately. Resume behavior
 depends on available checkpoint state; validate it with the specific revision
@@ -242,6 +287,31 @@ Use the actual saved corpus size and matching truth phase, and do not assume
 the checkpoint marker includes the last successfully saved index.
 Do not use the update harness as a read-only query tool: it can save indexes
 and execute configured mutations even when rebuilding is disabled.
+
+For independent TiKV tuning runs, preserve the baseline configuration and use
+a new `IndexPath` and `TiKVKeyPrefix` with `Rebuild=true` and `Resume=-1`.
+Keep the same input vectors, queries, and phase-specific truth. Place the truth
+under its auto-generated filename in the new working directory as well, so
+data preparation does not regenerate it before loading `TruthPath`.
+Use `;` for INI comments, not `#`, and write `key=value` without spaces around
+the delimiter: the repository parser does not accept `#` comments and retains
+leading spaces in string values.
+
+`Benchmark.NumInsertThreads` controls foreground insertion callers.
+`BuildSSDIndex.AppendThreadNum` controls each posting layer's shared background
+pool for split, merge, reassignment, and asynchronous append work. The harness
+defaults the latter to the former; override it explicitly to tune them
+independently. `ReassignThreadNum=0` does not disable reassignment in this path.
+Editing an INI does not resize an already-running pool.
+
+Set search `MaxCheck` explicitly in `BuildHead` and `BuildSSDIndex` when
+comparing exploration budgets. It is distinct from `MaxCheckForRefineGraph`,
+which controls graph refinement. Check saved effective settings after building
+and reloading. The dynamic-searcher constructor also sets
+`SearchPostingPageLimit` to the effective `PostingPageLimit`; do not assume these
+two page limits can be tuned independently on this path. Storage-layout changes
+such as `UseMultiChunkPosting` require a separate rebuild, not a flag change
+against existing single-key postings.
 
 ## 6. Measure and report
 

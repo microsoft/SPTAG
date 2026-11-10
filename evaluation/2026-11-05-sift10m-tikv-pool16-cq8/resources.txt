@@ -1,0 +1,23 @@
+	Command being timed: "/mnt_ssd/qianxi/SPTAG/benchmark-output/sift10m-tikv-layer1-build80-pool16-cq8-20261105/SPTAGTest --run_test=SPFreshTest/BenchmarkFromConfig --log_level=message"
+	User time (seconds): 69374.66
+	System time (seconds): 9265.62
+	Percent of CPU this job got: 2739%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 47:50.29
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 5832596
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 43917429
+	Voluntary context switches: 257053051
+	Involuntary context switches: 25936403
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 45892784
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

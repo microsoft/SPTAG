@@ -1,0 +1,27 @@
+{
+  "pd_image": "pingcap/pd@sha256:2a79836fcfe4948103b9eed9f69cc664208c3e6d5bae5e12d0c01e29c3d1598e",
+  "tikv_image": "pingcap/tikv@sha256:b6893e84e1914cff9fd262daac479ab24ef07ad99b15fd2b33457d02cb9ee38a",
+  "pd_nodes": 3,
+  "tikv_nodes": 3,
+  "replicas": 3,
+  "host_network": true,
+  "pd_addresses": "127.0.0.1:33991,127.0.0.1:33992,127.0.0.1:33993",
+  "ports": [
+    33991,
+    33992,
+    33993,
+    34001,
+    34002,
+    34003,
+    30361,
+    30362,
+    30363,
+    30381,
+    30382,
+    30383
+  ],
+  "buckets_per_active_key_family": 128,
+  "client_channels_per_store": 16,
+  "completion_queues_per_client": 8,
+  "commands": "../2026-11-05-sift10m-tikv-pool16-cq8/deployment.py"
+}

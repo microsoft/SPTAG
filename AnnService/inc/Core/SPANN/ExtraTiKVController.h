@@ -2920,7 +2920,7 @@ namespace SPTAG::SPANN
         bool m_available = false;
 
         // Async RPC pump (see AsyncRawBatchPut above).
-        static constexpr int kAsyncCompletionQueueCount = 4;
+        static constexpr int kAsyncCompletionQueueCount = 8;
         std::vector<std::unique_ptr<grpc::CompletionQueue>> m_asyncCqs;
         std::vector<std::thread> m_asyncPumpThreads;
         std::atomic<uint64_t> m_asyncCqNext{0};
@@ -2934,7 +2934,7 @@ namespace SPTAG::SPANN
         std::atomic<uint64_t> m_asyncRpcMaxInflightObserved{0};
 
         // TiKV store stub pools keyed by store address (multiple channels per store)
-        static constexpr int kStubPoolSize = 48;
+        static constexpr int kStubPoolSize = 16;
         struct StubPool {
             std::vector<std::shared_ptr<tikvpb::Tikv::Stub>> stubs;
             std::atomic<uint64_t> next{0};
@@ -3408,7 +3408,7 @@ namespace SPTAG::SPANN
         // ---- Get or create a gRPC stub pool for a TiKV store ----
         // Hot path is lock-free: every thread caches a shared_ptr<StubPool> per
         // address in thread_local storage and still round-robins across the pool's
-        // 48 stubs on every call (preserving channel fan-out). The global
+        // stubs on every call (preserving channel fan-out). The global
         // m_storeStubs map is only consulted on first-touch (per-thread,
         // per-address) and on epoch bump.
         //
@@ -3456,6 +3456,8 @@ namespace SPTAG::SPANN
                     grpc::ChannelArguments args;
                     args.SetMaxReceiveMessageSize(64 * 1024 * 1024); // 64MB
                     args.SetMaxSendMessageSize(64 * 1024 * 1024);    // 64MB
+                    // Preserve connection fan-out instead of sharing one global subchannel.
+                    args.SetInt(GRPC_ARG_USE_LOCAL_SUBCHANNEL_POOL, 1);
                     auto channel = grpc::CreateCustomChannel(address, grpc::InsecureChannelCredentials(), args);
                     auto stub = tikvpb::Tikv::NewStub(channel);
                     if (!stub) {
