@@ -588,7 +588,13 @@ BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
         wait();
 
         auto check = [&](bool deleted) {
-            BOOST_CHECK_EQUAL(index->GetNumSamples(), totalCount);
+            if (!deleted) BOOST_CHECK_EQUAL(index->GetNumSamples(), totalCount);
+            std::vector<SizeType> contained, expected;
+            BOOST_REQUIRE(index->GetHeadIndexMapping(0, contained) == ErrorCode::Success);
+            for (int i = 0; i < totalCount; ++i)
+                if (!deleted || i != 64) expected.push_back(i);
+            std::sort(contained.begin(), contained.end());
+            BOOST_CHECK_EQUAL_COLLECTIONS(contained.begin(), contained.end(), expected.begin(), expected.end());
             for (int i = 0; i < totalCount; ++i) {
                 COMMON::QueryResultSet<uint8_t> query(vectors.data() + dimension * i, 1);
                 BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
@@ -617,7 +623,8 @@ BOOST_AUTO_TEST_CASE(RealTiKVGrowthAndReload, *boost::unit_test::disabled())
         check(true);
         BOOST_REQUIRE(index->Check() == ErrorCode::Success);
         BOOST_TEST_MESSAGE("Real TiKV automatic growth/reload passed: distributed=" << distributed
-            << ", layers=2, samples=" << totalCount << ", concurrentQueries=" << completed.load());
+            << ", layers=2, insertedVectors=" << totalCount << ", liveVectors=" << totalCount - 1
+            << ", concurrentQueries=" << completed.load());
     }
 }
 
