@@ -92,6 +92,29 @@
     "excluded_attempt": "large-attempts/20261110T024118Z: stopped after detecting INI whitespace caused random-data fallback; not a valid SIFT measurement",
     "progress_file": "large-attempts/20261110T024436Z/status.json"
   },
+  "latest_large_attempt": {
+    "status_at_recording": "running; full-scale validation still incomplete",
+    "attempt_directory": "large-attempts/20261110T025741Z",
+    "progress_file": "large-attempts/20261110T025741Z/status.json",
+    "source_commit": "3ac50cc71f1b3a62806c4aa22faa2b48c5e1fdcd",
+    "binary_sha256": "8d828bfce5856fea004900d97a45fc4c3d4515b108d67b38d9be4ffa5a82f156",
+    "previous_attempt": {
+      "attempt_directory": "large-attempts/20261110T024436Z",
+      "benchmark_exit_successful": true,
+      "saved_base_vectors": 5000000,
+      "recall5": 0.9772,
+      "failure": "Build-only benchmark output had a trailing comma; strict JSON parsing correctly stopped the driver",
+      "insertion_batches_started": 0,
+      "fix": "Only emit the result comma when an insertion section follows"
+    },
+    "focused_regressions_after_fix": {
+      "command": "python3 benchmark-output/tikv-dynamic-growth-20261110/test_runner.py -v",
+      "tests": 4,
+      "status": "passed",
+      "benchmark_insert_counts_checked": [0, 1000],
+      "other_checks": ["all seven exact-truth slices", "INI path whitespace", "reject random fallback even when the child exits zero"]
+    }
+  },
   "limitations": [
     "The full 5M plus five 1M insertion batches on TiKV have been launched but have not completed",
     "The initial 500 GiB disk-space blocker was resolved by user-approved removal of exactly three old reservation files; the corrected run started with approximately 593 GiB free",
