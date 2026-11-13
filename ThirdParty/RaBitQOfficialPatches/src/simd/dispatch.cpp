@@ -1,3 +1,4 @@
+#include "rabitqlib/utils/compiler_compat.hpp"
 #include "rabitqlib/simd/dispatch.hpp"
 
 #include <array>

@@ -95,7 +95,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;$(VC_IncludePath);$(WindowsSDK_IncludePath);$(IncludePath);$(ProjectDir)</IncludePath>
+    <IncludePath>C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\RaBitQOfficial\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\RaBitQOfficialPatches\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);$(IncludePath);$(ProjectDir)</IncludePath>
     <LibraryPath>$(OutDir);$(LibraryPath)</LibraryPath>
     <ReferencePath>$(ReferencePath)</ReferencePath>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
@@ -154,7 +154,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_$(OutputType);_MBCS;_SCL_SECURE_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;WIN32;_WINDOWS;GFLAGS_IS_A_DLL=0;LARGEVID;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_$(OutputType);_MBCS;_SCL_SECURE_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;WIN32;_WINDOWS;GFLAGS_IS_A_DLL=0;__x86_64__;__SSE2__;LARGEVID;RABITQ;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

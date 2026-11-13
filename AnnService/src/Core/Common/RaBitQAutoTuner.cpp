@@ -48,7 +48,7 @@ ErrorCode EvaluateBits(const std::shared_ptr<RaBitQQuantizer>& p_quantizer,
     p_quantizer->SetEnableADC(true);
     std::vector<float> queryRecalls(p_queries->Count(), 0.0F);
     std::atomic<SizeType> nextQuery(0);
-    const int workerCount = std::max(1, std::min<int>(p_threads, (int)(p_queries->Count())));
+    const int workerCount = max(1, min(p_threads, (int)(p_queries->Count())));
     std::vector<std::thread> workers;
     workers.reserve(static_cast<std::size_t>(workerCount));
     for (int worker = 0; worker < workerCount; ++worker) {

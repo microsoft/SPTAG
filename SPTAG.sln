@@ -1,6 +1,6 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.4.33403.182
+# Visual Studio Version 18
+VisualStudioVersion = 18.11.12328.437 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CoreLibrary", "AnnService\CoreLibrary.vcxproj", "{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}"
 EndProject
@@ -109,6 +109,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SPTAG", "Wrappers\WinRT\SPT
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinRTTest", "Test\WinRTTest\WinRTTest.vcxproj", "{C9DF3099-A142-4AA7-B936-1541816A1F21}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RaBitQ", "AnnService\RaBitQ.vcxproj", "{9051ABC3-06DE-4816-AACB-E5ABB8810E43}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -276,6 +278,14 @@ Global
 		{C9DF3099-A142-4AA7-B936-1541816A1F21}.Release|x64.ActiveCfg = Release|x64
 		{C9DF3099-A142-4AA7-B936-1541816A1F21}.Release|x86.ActiveCfg = Release|Win32
 		{C9DF3099-A142-4AA7-B936-1541816A1F21}.Release|x86.Build.0 = Release|Win32
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Debug|x64.ActiveCfg = Debug|x64
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Debug|x64.Build.0 = Debug|x64
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Debug|x86.ActiveCfg = Debug|Win32
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Debug|x86.Build.0 = Debug|Win32
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Release|x64.ActiveCfg = Release|x64
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Release|x64.Build.0 = Release|x64
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Release|x86.ActiveCfg = Release|Win32
+		{9051ABC3-06DE-4816-AACB-E5ABB8810E43}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

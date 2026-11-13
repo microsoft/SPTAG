@@ -47,7 +47,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <IncludePath>C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;$(IncludePath);$(ProjectDir)</IncludePath>
+    <IncludePath>C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\RaBitQOfficialPatches\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\RaBitQOfficial\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;$(IncludePath);$(ProjectDir)</IncludePath>
   </PropertyGroup>
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
@@ -76,7 +76,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <OpenMPSupport>true</OpenMPSupport>
-      <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;GFLAGS_IS_A_DLL=0;LARGEVID;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;GFLAGS_IS_A_DLL=0;__x86_64__;__SSE2__;LARGEVID;RABITQ;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/Zc:twoPhase- /Zc:__cplusplus /bigobj %(AdditionalOptions) /utf-8</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
@@ -105,6 +105,8 @@
     <ClInclude Include="inc\Core\Common\PostingSizeRecord.h" />
     <ClInclude Include="inc\Core\Common\PQQuantizer.h" />
     <ClInclude Include="inc\Core\Common\IQuantizer.h" />
+    <ClInclude Include="inc\Core\Common\RaBitQAutoTuner.h" />
+    <ClInclude Include="inc\Core\Common\RaBitQQuantizer.h" />
     <ClInclude Include="inc\Core\Common\SIMDUtils.h" />
     <ClInclude Include="inc\Core\Common\TruthSet.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
@@ -168,6 +170,8 @@
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
+    <ClCompile Include="src\Core\Common\RaBitQAutoTuner.cpp" />
+    <ClCompile Include="src\Core\Common\RaBitQQuantizer.cpp" />
     <ClCompile Include="src\Core\Common\SIMDUtils.cpp" />
     <ClCompile Include="src\Core\Common\TruthSet.cpp" />
     <ClCompile Include="src\Core\SPANN\ExtraFileController.cpp" />

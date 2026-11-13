@@ -73,7 +73,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-src\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\RaBitQOfficialPatches\include;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\RaBitQOfficial\include;$(IncludePath)</IncludePath>
     <OutDir>$(OutAppDir)</OutDir>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
@@ -83,7 +83,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>SSDServing.lib;CoreLibrary.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\Release\folly.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\Release\folly_test_util.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-build\Release\fmt.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\Release\gflags_static.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build\Release\glog.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\lib\Release\event_core.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\lib\Release\event_extra.lib;Shlwapi.lib;Ws2_32.lib;Crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SSDServing.lib;RaBitQ.lib;CoreLibrary.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\Release\folly.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\Release\folly_test_util.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\fmt-build\Release\fmt.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\gflags-build\Release\gflags_static.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\glog-build\Release\glog.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\lib\Release\event_core.lib;C:\Users\cheqi\source\repos\SPTAG\ThirdParty\folly\_build\_deps\libevent-build\lib\Release\event_extra.lib;Shlwapi.lib;Ws2_32.lib;Crypt32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -94,7 +94,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_MBCS;_SCL_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;GFLAGS_IS_A_DLL=0;LARGEVID;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_MBCS;_SCL_SECURE_NO_WARNINGS;WIN32;_WINDOWS;NDEBUG;GFLAGS_IS_A_DLL=0;__x86_64__;__SSE2__;LARGEVID;RABITQ;FOLLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport>true</OpenMPSupport>
       <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions) /utf-8</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>

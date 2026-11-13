@@ -14,4 +14,16 @@
 #ifndef __builtin_popcountll
 #define __builtin_popcountll(value) __popcnt64(static_cast<unsigned __int64>(value))
 #endif
+
+inline void* aligned_alloc(size_t size, size_t alignment)
+{
+    return _aligned_malloc(size, alignment);
+}
+
+inline void aligned_free(void *ptr)
+{
+    _aligned_free(ptr);
+}
+#else
+using namespace std;
 #endif

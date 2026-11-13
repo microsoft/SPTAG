@@ -1,3 +1,4 @@
+#include "rabitqlib/utils/compiler_compat.hpp"
 #include "rabitqlib/utils/cpu_features.hpp"
 
 #include <cstdint>
