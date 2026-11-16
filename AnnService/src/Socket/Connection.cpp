@@ -96,22 +96,45 @@ void Connection::AsyncSend(Packet p_packet, std::function<void(bool)> p_callback
 
     auto sharedThis = shared_from_this();
     boost::asio::post(m_strand, [sharedThis, p_packet, p_callback]() {
-        auto handler = [p_callback, p_packet, sharedThis](boost::system::error_code p_ec,
-                                                          std::size_t p_bytesTransferred) {
-            if (p_ec && boost::asio::error::operation_aborted != p_ec)
-            {
-                sharedThis->OnConnectionFail(p_ec);
-            }
-
-            if (bool(p_callback))
-            {
-                p_callback(!p_ec);
-            }
-        };
-
-        boost::asio::async_write(sharedThis->m_socket, boost::asio::buffer(p_packet.Buffer(), p_packet.BufferLength()),
-                                 std::move(handler));
+        sharedThis->m_writes.push_back({p_packet, p_callback});
+        if (sharedThis->m_writes.size() == 1)
+            sharedThis->StartWrite();
     });
+}
+
+void Connection::StartWrite()
+{
+    if (m_stopped)
+    {
+        auto pending = std::move(m_writes);
+        m_writes.clear();
+        for (auto &write : pending)
+            if (write.callback)
+                write.callback(false);
+        return;
+    }
+    auto sharedThis = shared_from_this();
+    auto packet = m_writes.front().packet;
+    boost::asio::async_write(
+        m_socket, boost::asio::buffer(packet.Buffer(), packet.BufferLength()),
+        boost::asio::bind_executor(m_strand, [sharedThis, packet](boost::system::error_code error, std::size_t) {
+            auto callback = std::move(sharedThis->m_writes.front().callback);
+            sharedThis->m_writes.pop_front();
+            if (callback)
+                callback(!error);
+            if (error)
+            {
+                auto pending = std::move(sharedThis->m_writes);
+                sharedThis->m_writes.clear();
+                for (auto &write : pending)
+                    if (write.callback)
+                        write.callback(false);
+                if (error != boost::asio::error::operation_aborted)
+                    sharedThis->OnConnectionFail(error);
+            }
+            else if (!sharedThis->m_writes.empty())
+                sharedThis->StartWrite();
+        }));
 }
 
 void Connection::AsyncReadHeader()
@@ -155,6 +178,13 @@ void Connection::HandleReadHeader(boost::system::error_code p_ec, std::size_t p_
     if (!p_ec)
     {
         m_packetRead.Header().ReadBuffer(m_packetHeaderReadBuffer);
+        if ((m_packetRead.Header().m_packetType == PacketType::TenantRequest ||
+             m_packetRead.Header().m_packetType == PacketType::TenantResponse) &&
+            m_packetRead.Header().m_bodyLength > c_maxTenantPacketBytes)
+        {
+            OnConnectionFail(boost::asio::error::message_size);
+            return;
+        }
         if (m_packetRead.Header().m_bodyLength > 0)
         {
             m_packetRead.AllocateBuffer(m_packetRead.Header().m_bodyLength);

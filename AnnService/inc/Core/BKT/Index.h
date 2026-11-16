@@ -108,6 +108,7 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
+            bool m_instanceWorkspaces = false;
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
         public:
@@ -208,6 +209,13 @@ namespace SPTAG
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams,
                                   IAbortOperation *p_abort, std::vector<SizeType> *p_mapping);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
+            ErrorCode UseInstanceWorkspaces() override
+            {
+                m_workSpaceFactory = std::make_unique<COMMON::InstanceThreadLocalWorkSpaceFactory<COMMON::WorkSpace>>();
+                m_instanceWorkspaces = true;
+                return ErrorCode::Success;
+            }
+
             ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
             {
                 SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();

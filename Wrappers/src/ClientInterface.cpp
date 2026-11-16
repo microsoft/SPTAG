@@ -8,6 +8,7 @@
 #include "inc/Helper/StringConvert.h"
 
 #include <boost/asio.hpp>
+#include <future>
 
 AnnClient::AnnClient(const char *p_serverAddr, const char *p_serverPort)
     : m_connectionID(SPTAG::Socket::c_invalidConnectionID), m_timeoutInMilliseconds(9000)
@@ -32,29 +33,38 @@ AnnClient::AnnClient(const char *p_serverAddr, const char *p_serverPort)
             return;
         }
 
-        while (Socket::c_invalidConnectionID == m_connectionID)
-        {
-            ErrorCode errCode;
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            m_connectionID = m_socketClient->ConnectToServer(m_server, m_port, errCode);
-        }
+        RetryConnect();
     };
 
     m_socketClient->AsyncConnectToServer(m_server, m_port, connectCallback);
 
     m_socketClient->SetEventOnConnectionClose([this](Socket::ConnectionID p_cid) {
-        ErrorCode errCode;
         m_connectionID = Socket::c_invalidConnectionID;
-        while (Socket::c_invalidConnectionID == m_connectionID)
-        {
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            m_connectionID = m_socketClient->ConnectToServer(m_server, m_port, errCode);
-        }
+        RetryConnect();
     });
 }
 
 AnnClient::~AnnClient()
 {
+    m_stopping = true;
+    m_reconnectWake.notify_all();
+    {
+        std::lock_guard<std::mutex> lock(m_reconnectMutex);
+    }
+    // Stop socket callbacks before destroying either callback registry.
+    m_socketClient.reset();
+}
+
+void AnnClient::RetryConnect()
+{
+    std::unique_lock<std::mutex> lock(m_reconnectMutex);
+    while (!m_stopping && m_connectionID == SPTAG::Socket::c_invalidConnectionID)
+    {
+        if (m_reconnectWake.wait_for(lock, std::chrono::seconds(10), [this] { return m_stopping.load(); }))
+            return;
+        SPTAG::ErrorCode status;
+        m_connectionID = m_socketClient->ConnectToServer(m_server, m_port, status);
+    }
 }
 
 void AnnClient::SetTimeoutMilliseconds(int p_timeout)
@@ -171,6 +181,8 @@ SPTAG::Socket::PacketHandlerMapPtr AnnClient::GetHandlerMap()
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
     handlerMap->emplace(Socket::PacketType::SearchResponse, std::bind(&AnnClient::SearchResponseHanlder, this,
                                                                       std::placeholders::_1, std::placeholders::_2));
+    handlerMap->emplace(Socket::PacketType::TenantResponse, std::bind(&AnnClient::TenantResponseHandler, this,
+                                                                      std::placeholders::_1, std::placeholders::_2));
 
     return handlerMap;
 }
@@ -222,4 +234,138 @@ std::string AnnClient::CreateSearchQuery(const ByteArray &p_data, int p_resultNu
     }
 
     return out.str();
+}
+
+namespace
+{
+SPTAG::Socket::RemoteTenantRequest TenantRequest(SPTAG::Socket::TenantOperation operation, const char *tenant,
+                                                 ByteArray vectors = ByteArray(), int count = 0,
+                                                 const char *valueType = nullptr)
+{
+    SPTAG::Socket::RemoteTenantRequest request;
+    request.operation = operation;
+    request.tenant = tenant ? tenant : "";
+    request.vectors = vectors;
+    request.count = count;
+    if (valueType)
+        SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(valueType, request.valueType);
+    const auto elementSize = SPTAG::GetValueTypeSize(request.valueType);
+    if (count > 0 && elementSize > 0)
+    {
+        const auto stride = static_cast<std::uint64_t>(count) * elementSize;
+        if (vectors.Length() % stride == 0 && vectors.Length() / stride <= static_cast<size_t>(SPTAG::MaxSize))
+            request.dimension = static_cast<SPTAG::DimensionType>(vectors.Length() / stride);
+    }
+    return request;
+}
+} // namespace
+
+std::shared_ptr<RemoteTenantResult> AnnClient::CreateTenant(const char *tenant, ByteArray vectors, int count,
+                                                            int dimension, const char *valueType, const char *metric,
+                                                            const char *headIndexAlgo)
+{
+    auto request = TenantRequest(SPTAG::Socket::TenantOperation::Create, tenant, vectors, count, valueType);
+    request.dimension = dimension;
+    if (metric)
+        SPTAG::Helper::Convert::ConvertStringTo<SPTAG::DistCalcMethod>(metric, request.metric);
+    if (headIndexAlgo && *headIndexAlgo &&
+        (!SPTAG::Helper::Convert::ConvertStringTo<SPTAG::IndexAlgoType>(headIndexAlgo, request.headIndexAlgo) ||
+         (request.headIndexAlgo != SPTAG::IndexAlgoType::BKT && request.headIndexAlgo != SPTAG::IndexAlgoType::KDT)))
+    {
+        auto result = std::make_shared<RemoteTenantResult>();
+        result->status = SPTAG::ErrorCode::FailedParseValue;
+        return result;
+    }
+    return SendTenantRequest(request);
+}
+
+std::shared_ptr<RemoteTenantResult> AnnClient::DeleteTenant(const char *tenant)
+{
+    return SendTenantRequest(TenantRequest(SPTAG::Socket::TenantOperation::Delete, tenant));
+}
+
+std::shared_ptr<RemoteTenantResult> AnnClient::InsertTenant(const char *tenant, ByteArray vectors, int count,
+                                                            const char *valueType)
+{
+    return SendTenantRequest(TenantRequest(SPTAG::Socket::TenantOperation::Insert, tenant, vectors, count, valueType));
+}
+
+std::shared_ptr<RemoteTenantResult> AnnClient::DeleteTenantVector(const char *tenant, int vectorID)
+{
+    auto request = TenantRequest(SPTAG::Socket::TenantOperation::DeleteVector, tenant);
+    request.vectorID = vectorID;
+    return SendTenantRequest(request);
+}
+
+std::shared_ptr<RemoteTenantResult> AnnClient::SearchTenant(const char *tenant, ByteArray query, int k,
+                                                            const char *valueType)
+{
+    auto request = TenantRequest(SPTAG::Socket::TenantOperation::Search, tenant, query, 1, valueType);
+    request.k = k;
+    return SendTenantRequest(request);
+}
+
+std::shared_ptr<RemoteTenantResult> AnnClient::SendTenantRequest(const SPTAG::Socket::RemoteTenantRequest &request)
+{
+    using namespace SPTAG;
+    auto failure = std::make_shared<RemoteTenantResult>();
+    ByteArray body;
+    if (!request.Write(body))
+    {
+        failure->status = ErrorCode::FailedParseValue;
+        return failure;
+    }
+    if (!IsConnected())
+    {
+        failure->status = ErrorCode::Socket_FailedNetwork;
+        return failure;
+    }
+
+    auto promise = std::make_shared<std::promise<RemoteTenantResult>>();
+    auto future = promise->get_future();
+    auto callback = std::make_shared<TenantCallback>(
+        [promise](RemoteTenantResult result) { promise->set_value(std::move(result)); });
+    Socket::Packet packet;
+    packet.Header().m_packetType = Socket::PacketType::TenantRequest;
+    // A nonpositive legacy timeout must not leave new synchronous writes waiting forever.
+    auto timeout = m_timeoutInMilliseconds.load();
+    timeout = timeout && timeout <= MaxSize ? timeout : 9000;
+    packet.Header().m_resourceID = m_tenantCallbacks.Add(callback, 0, nullptr);
+    const auto resource = packet.Header().m_resourceID;
+    packet.Header().m_bodyLength = static_cast<std::uint32_t>(body.Length());
+    packet.AllocateBuffer(packet.Header().m_bodyLength);
+    memcpy(packet.Body(), body.Data(), body.Length());
+    packet.Header().WriteBuffer(packet.HeaderBuffer());
+    m_socketClient->SendPacket(m_connectionID, std::move(packet), [this, resource](bool sent) {
+        if (!sent)
+        {
+            auto callback = m_tenantCallbacks.GetAndRemove(resource);
+            if (callback)
+            {
+                RemoteTenantResult result;
+                result.status = ErrorCode::Socket_FailedNetwork;
+                (*callback)(std::move(result));
+            }
+        }
+    });
+    if (future.wait_for(std::chrono::milliseconds(timeout)) != std::future_status::ready)
+    {
+        m_tenantCallbacks.Remove(resource);
+        failure->status = ErrorCode::Socket_Timeout;
+        return failure;
+    }
+    return std::make_shared<RemoteTenantResult>(future.get());
+}
+
+void AnnClient::TenantResponseHandler(SPTAG::Socket::ConnectionID, SPTAG::Socket::Packet packet)
+{
+    auto callback = m_tenantCallbacks.GetAndRemove(packet.Header().m_resourceID);
+    if (!callback)
+        return;
+    RemoteTenantResult result;
+    if (packet.Header().m_processStatus != SPTAG::Socket::PacketProcessStatus::Ok)
+        result.status = SPTAG::ErrorCode::Socket_UnsupportedRequest;
+    else if (!result.Read(packet.Body(), packet.Header().m_bodyLength))
+        result.status = SPTAG::ErrorCode::Socket_InvalidMessage;
+    (*callback)(std::move(result));
 }

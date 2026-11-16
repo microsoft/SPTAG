@@ -18,7 +18,7 @@
 #endif
 
 #ifdef ROCKSDB
-#include "ExtraRocksDBController.h"
+#include "inc/Core/SPANN/ExtraRocksDBController.h"
 // enable rocksdb io_uring
 extern "C" bool RocksDbIOUringEnable() { return true; }
 #endif
@@ -244,10 +244,13 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
 
 template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
 {
+    auto savedOptions = m_options;
+    if (m_options.m_postingStore)
+        savedOptions.m_vectorSize = m_managedNextID.load();
     IOSTRING(p_configOut, WriteString, "[Base]\n");
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr)                                             \
     IOSTRING(p_configOut, WriteString,                                                                                 \
-             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(m_options.VarName) +           \
+             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(savedOptions.VarName) +        \
               std::string("\n"))                                                                                       \
                  .c_str());
 
@@ -276,11 +279,14 @@ template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::Dis
 
     m_topIndex->SaveConfig(p_configOut);
 
-    Helper::Convert::ConvertStringTo<int>(m_topIndex->GetParameter("HashTableExponent").c_str(), m_options.m_hashExp);
+    Helper::Convert::ConvertStringTo<int>(m_topIndex->GetParameter("HashTableExponent").c_str(),
+                                          savedOptions.m_hashExp);
+    if (!m_options.m_postingStore)
+        m_options.m_hashExp = savedOptions.m_hashExp;
     IOSTRING(p_configOut, WriteString, "[BuildSSDIndex]\n");
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr)                                               \
     IOSTRING(p_configOut, WriteString,                                                                                 \
-             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(m_options.VarName) +           \
+             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(savedOptions.VarName) +        \
               std::string("\n"))                                                                                       \
                  .c_str());
 
@@ -323,7 +329,13 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
         if ((ret = searcher->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
             return ret;
     }
-    if (m_options.m_shareDB) { m_db->Checkpoint(m_options.m_indexDirectory); }
+    if (m_options.m_shareDB && !m_options.m_postingStore && m_options.m_storage != Storage::STATIC)
+    {
+        if (!m_db)
+            return ErrorCode::Fail;
+        if ((ret = m_db->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
+            return ret;
+    }
     return ErrorCode::Success;
 }
 
@@ -1360,6 +1372,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
 
         m_topIndex->UpdateIndex();
 
+        if (m_options.m_postingStore)
+        {
+            auto status = m_topIndex->UseInstanceWorkspaces();
+            if (status != ErrorCode::Success)
+                return status;
+        }
+
         if (m_options.m_storage == Storage::STATIC)
         {
             m_extraSearchers.emplace_back(std::make_shared<ExtraStaticSearcher<T>>(m_extraSearchers.size(), this));
@@ -1691,6 +1710,8 @@ template <typename T> ErrorCode Index<T>::BuildIndex(bool p_normalized)
         m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
     }
 
+    if (m_options.m_postingStore)
+        m_managedNextID = m_options.m_vectorSize;
     return BuildIndexInternal(vectorReader, vectorOptions);
 }
 
@@ -1731,6 +1752,8 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     m_options.m_valueType = GetEnumValueType<T>();
     m_options.m_dim = p_dimension;
     m_options.m_vectorSize = p_vectorNum;
+    if (m_options.m_postingStore)
+        m_managedNextID = p_vectorNum;
 
     return BuildIndexInternal(vectorReader, vectorOptions);
 }
@@ -1862,6 +1885,48 @@ template <typename T> std::string Index<T>::GetParameter(const char *p_param, co
     {
         return m_options.GetParameter(p_section, p_param);
     }
+}
+
+template <typename T> ErrorCode Index<T>::ReserveVectorIDs(SizeType count, SizeType limit, SizeType &first)
+{
+    if (!m_options.m_postingStore || m_extraSearchers.empty() || count <= 0)
+        return ErrorCode::FailedParseValue;
+    std::lock_guard<std::mutex> lock(m_dataAddLock);
+    const auto begin = m_managedNextID.load();
+    if (static_cast<int64_t>(begin) + count > limit || static_cast<int64_t>(begin) + count > m_options.m_maxID)
+        return ErrorCode::MemoryOverFlow;
+    first = begin;
+    m_managedNextID = begin + count;
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::InsertAt(const void *data, SizeType count, DimensionType dimension, SizeType first)
+{
+    if (!m_options.m_postingStore || m_extraSearchers.empty() || !data || count <= 0 || first < 0 ||
+        dimension != GetFeatureDim() || static_cast<int64_t>(first) + count > m_managedNextID.load())
+        return ErrorCode::FailedParseValue;
+    auto copy = ByteArray::Alloc(static_cast<size_t>(count) * dimension * sizeof(T));
+    memcpy(copy.Data(), data, copy.Length());
+    std::shared_ptr<VectorSet> vectors =
+        std::make_shared<BasicVectorSet>(copy, GetEnumValueType<T>(), dimension, count);
+    if (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
+        vectors->Normalize(1);
+    auto workspace = m_workSpaceFactory->GetWorkSpace();
+    if (!workspace)
+    {
+        workspace = std::make_unique<ExtraWorkSpace>();
+        InitWorkSpace(workspace.get(), false);
+    }
+    else
+    {
+        InitWorkSpace(workspace.get(), true);
+    }
+    workspace->m_deduper.clear();
+    workspace->m_postingIDs.clear();
+    auto status = m_extraSearchers[0]->AddIndex(workspace.get(), vectors, first);
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
+    return status;
 }
 
 // Add insert entry to persistent buffer
@@ -2131,6 +2196,11 @@ template <typename T> ErrorCode Index<T>::DeleteIndex(const void *p_vectors, Siz
 
 template <typename T> void Index<T>::PrepareDB(std::shared_ptr<Helper::KeyValueIO>& db, int layer)
 {
+    if (m_options.m_postingStore)
+    {
+        db = m_options.m_postingStore;
+        return;
+    }
     if(m_options.m_storage == Storage::FILEIO) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:UseFileIO\n");
         db.reset(new FileIO(m_options, layer));

@@ -31,14 +31,15 @@ namespace SPTAG::SPANN
             bool FullMergeV2(const rocksdb::MergeOperator::MergeOperationInput& merge_in,
                 rocksdb::MergeOperator::MergeOperationOutput* merge_out) const override
             {
-                size_t length = (merge_in.existing_value)->size();
+                const size_t existingSize = merge_in.existing_value ? merge_in.existing_value->size() : 0;
+                size_t length = existingSize;
                 for (const rocksdb::Slice& s : merge_in.operand_list) {
                     length += s.size();
                 }
                 (merge_out->new_value).resize(length);
-                memcpy((char*)((merge_out->new_value).c_str()), 
-                    (merge_in.existing_value)->data(), (merge_in.existing_value)->size());
-                size_t start = (merge_in.existing_value)->size();
+                if (existingSize != 0)
+                    memcpy(merge_out->new_value.data(), merge_in.existing_value->data(), existingSize);
+                size_t start = existingSize;
                 for (const rocksdb::Slice& s : merge_in.operand_list) {
                     memcpy((char*)((merge_out->new_value).c_str() + start), s.data(), s.size());
                     start += s.size();
@@ -203,13 +204,19 @@ namespace SPTAG::SPANN
                 num_keys, slice_keys, slice_values, statuses);
 
             for (int i = 0; i < num_keys; i++) {
+                if (statuses[i].IsNotFound())
+                {
+                    values[i].SetAvailableSize(0);
+                    continue;
+                }
                 if (statuses[i] != rocksdb::Status::OK()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error in MultiGet: %s\n", statuses[i].ToString().c_str());
                     delete[] slice_keys;
                     delete[] slice_values;
                     delete[] statuses;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), keys[i]);
                     return ErrorCode::Fail;
                 }
+                values[i].ReservePageBuffer(slice_values[i].size());
                 memcpy(values[i].GetBuffer(), slice_values[i].data(), slice_values[i].size());
                 values[i].SetAvailableSize(slice_values[i].size());
             }
@@ -303,6 +310,12 @@ namespace SPTAG::SPANN
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Merge\e[0m: %s, key: %d\n", s.getState(), key);
                 return ErrorCode::Fail;
             }
+        }
+
+        ErrorCode MergeWithCAS(const SizeType key, const std::string &value, const std::chrono::microseconds &timeout,
+                               std::vector<Helper::AsyncReadRequest> *reqs, int &size) override
+        {
+            return Merge(key, value, timeout, reqs, size);
         }
 
         ErrorCode StartToScan(SizeType& key, std::string* value) {

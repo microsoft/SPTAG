@@ -27,15 +27,20 @@ enum class PacketType : std::uint8_t
 
     SearchRequest = 0x03,
 
+    TenantRequest = 0x04,
+
     ResponseMask = 0x80,
 
     HeartbeatResponse = ResponseMask | HeartbeatRequest,
 
     RegisterResponse = ResponseMask | RegisterRequest,
 
-    SearchResponse = ResponseMask | SearchRequest
+    SearchResponse = ResponseMask | SearchRequest,
+
+    TenantResponse = ResponseMask | TenantRequest
 };
 
+constexpr std::uint32_t c_maxTenantPacketBytes = 64U << 20;
 
 enum class PacketProcessStatus : std::uint8_t
 {

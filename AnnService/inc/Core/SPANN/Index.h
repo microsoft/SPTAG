@@ -67,6 +67,7 @@ namespace SPTAG
             int m_iBaseSquare;
 
             std::mutex m_dataAddLock;
+            std::atomic<SizeType> m_managedNextID{0};
             std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
@@ -92,7 +93,73 @@ namespace SPTAG
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
-            ~Index() {}
+            ~Index()
+            {
+                if (m_options.m_postingStore)
+                {
+                    if (!m_extraSearchers.empty())
+                        DrainUpdates();
+                    m_workSpaceFactory.reset();
+                    m_extraSearchers.clear();
+                    m_topIndex.reset();
+                }
+            }
+
+            ErrorCode SetPostingStore(std::shared_ptr<Helper::KeyValueIO> store) override
+            {
+                if (!m_extraSearchers.empty() || !store || !store->Available() || m_options.m_layers < 1 ||
+                    m_options.m_maxID <= 0 ||
+                    m_options.m_layers > MaxSize / m_options.m_maxID)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Posting storage must be injected before loading/building\n");
+                    return ErrorCode::Fail;
+                }
+                m_options.m_postingStore = std::move(store);
+                const auto storage = m_options.m_postingStore->GetStorageType();
+                m_options.m_storage = storage == Storage::Undefined ? Storage::ROCKSDBIO : storage;
+                m_options.m_shareDB = true;
+                m_options.m_enableWAL = false;
+                m_options.m_recovery = false;
+                m_options.m_distributedVersionMap = false;
+                m_options.m_useMultiChunkPosting = false;
+                m_options.m_update = true;
+                m_options.m_asyncMergeInSearch = false;
+                m_options.m_asyncAppendQueueSize = 0;
+                m_options.m_fDeletePercentageForRefine = 2.0f;
+                m_managedNextID = m_options.m_vectorSize;
+                m_workSpaceFactory = std::make_unique<COMMON::InstanceThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
+                if (m_topIndex)
+                    return m_topIndex->UseInstanceWorkspaces();
+                return ErrorCode::Success;
+            }
+
+            ErrorCode DrainUpdates() override
+            {
+                if (m_extraSearchers.empty())
+                    return ErrorCode::EmptyIndex;
+                while (!AllFinished())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                return GetUpdateStatus();
+            }
+
+            ErrorCode GetUpdateStatus() const override
+            {
+                if (m_extraSearchers.empty())
+                    return ErrorCode::EmptyIndex;
+                for (const auto &searcher : m_extraSearchers)
+                {
+                    if (!searcher)
+                        return ErrorCode::EmptyIndex;
+                    auto status = searcher->UpdateStatus();
+                    if (status != ErrorCode::Success)
+                        return status;
+                }
+                return ErrorCode::Success;
+            }
+
+            ErrorCode ReserveVectorIDs(SizeType count, SizeType limit, SizeType &first) override;
+            ErrorCode InsertAt(const void *data, SizeType count, DimensionType dimension, SizeType first) override;
 
             void SetQuantizerADC(bool p_enableADC) override
             {
@@ -133,7 +200,10 @@ namespace SPTAG
             inline std::shared_ptr<IExtraSearcher> GetDiskIndex(int layer = 0) { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]; else return nullptr; }
             inline Options* GetOptions() { return &m_options; }
 
-            inline SizeType GetNumSamples() const { return GetNumSamples(0); }
+            inline SizeType GetNumSamples() const
+            {
+                return m_options.m_postingStore ? m_managedNextID.load() : GetNumSamples(0);
+            }
             inline SizeType GetNumSamples(int layer) const { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumSamples(); else return m_topIndex->GetNumSamples(); }
             inline DimensionType GetFeatureDim() const { return m_topIndex->GetFeatureDim(); }
             inline SizeType GetValueSize() const { return m_options.m_dim * sizeof(T); }

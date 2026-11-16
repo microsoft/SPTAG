@@ -16,6 +16,11 @@ namespace SPTAG
 
             virtual ~KeyValueIO() {}
 
+            virtual Storage GetStorageType() const { return Storage::Undefined; }
+
+            // Includes failure/exception paths: no operation may retain caller buffers or requests.
+            virtual bool CompletesRequestsBeforeReturn() const { return false; }
+
             virtual void ShutDown() = 0;
 
             virtual ErrorCode Get(const std::string& key, std::string* value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) { return ErrorCode::Undefined; }

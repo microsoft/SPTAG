@@ -8,6 +8,7 @@
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
 #include <string>
+#include "inc/Helper/KeyValueIO.h"
 
 namespace SPTAG {
     namespace SPANN {
@@ -15,6 +16,8 @@ namespace SPTAG {
         class Options
         {
         public:
+            // Runtime-only injection; never serialized in index configuration.
+            std::shared_ptr<Helper::KeyValueIO> m_postingStore;
             VectorValueType m_valueType;
             DistCalcMethod m_distCalcMethod;
             IndexAlgoType m_indexAlgoType;

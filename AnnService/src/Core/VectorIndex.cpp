@@ -386,15 +386,21 @@ ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteAr
 
 ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<SizeType>* p_mapping)
 {
+    return SaveIndex(p_folderPath, p_mapping, false);
+}
+
+ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<SizeType> *p_mapping,
+                                 bool p_allowFullyDeleted)
+{
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SaveIndex(%s) begin...ready:%d GetNumSamples():%d GetNumDeleted():%d\n",
                  p_folderPath.c_str(), m_bReady, GetNumSamples(), GetNumDeleted());
-    if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
+    if (!m_bReady || GetNumSamples() == 0 || (!p_allowFullyDeleted && GetNumSamples() - GetNumDeleted() == 0))
         return ErrorCode::EmptyIndex;
 
     if (GetIndexAlgoType() == IndexAlgoType::SPANN && GetParameter("IndexDirectory", "Base") != p_folderPath)
     {
         std::string oldFolder = GetParameter("IndexDirectory", "Base");
-        ErrorCode ret = SaveIndex(oldFolder);
+        ErrorCode ret = SaveIndex(oldFolder, nullptr, p_allowFullyDeleted);
         if (ret != ErrorCode::Success || !copydirectory(oldFolder, p_folderPath))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to copy index directory contents to %s!\n",
@@ -793,6 +799,12 @@ std::shared_ptr<VectorIndex> VectorIndex::CreateInstance(IndexAlgoType p_algo, V
 
 ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::shared_ptr<VectorIndex> &p_vectorIndex)
 {
+    return LoadIndex(p_loaderFilePath, p_vectorIndex, nullptr);
+}
+
+ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::shared_ptr<VectorIndex> &p_vectorIndex,
+                                 std::shared_ptr<Helper::KeyValueIO> p_postingStore)
+{
     std::string folderPath(p_loaderFilePath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
         folderPath += FolderSep;
@@ -813,6 +825,9 @@ ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::share
 
     ErrorCode ret = ErrorCode::Success;
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success)
+        return ret;
+
+    if (p_postingStore && (ret = p_vectorIndex->SetPostingStore(std::move(p_postingStore))) != ErrorCode::Success)
         return ret;
 
     std::shared_ptr<std::vector<std::string>> indexfiles = p_vectorIndex->GetIndexFiles();

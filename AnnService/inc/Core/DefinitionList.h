@@ -82,6 +82,10 @@ DefineErrorCode(ReadIni_DuplicatedParam, 0x3003)
 // 0x4000 ~ 0x4FFF Socket Library Status
 DefineErrorCode(Socket_FailedResolveEndPoint, 0x4000)
 DefineErrorCode(Socket_FailedConnectToEndPoint, 0x4001)
+DefineErrorCode(Socket_Timeout, 0x4002)
+DefineErrorCode(Socket_FailedNetwork, 0x4003)
+DefineErrorCode(Socket_InvalidMessage, 0x4004)
+DefineErrorCode(Socket_UnsupportedRequest, 0x4005)
 
 // 0x5000 ~ -0x5FFF Block File Status
 DefineErrorCode(Key_OverFlow, 0x5000) 
