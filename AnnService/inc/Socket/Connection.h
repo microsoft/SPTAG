@@ -6,13 +6,14 @@
 
 #include "Packet.h"
 
-#include <cstdint>
-#include <memory>
 #include <atomic>
+#include <cstdint>
+#include <deque>
+#include <memory>
 
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/io_service_strand.hpp>
 #include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/io_service_strand.hpp>
+#include <boost/asio/ip/tcp.hpp>
 
 namespace SPTAG
 {
@@ -23,13 +24,11 @@ class ConnectionManager;
 
 class Connection : public std::enable_shared_from_this<Connection>
 {
-public:
+  public:
     typedef std::shared_ptr<Connection> Ptr;
 
-    Connection(ConnectionID p_connectionID,
-               boost::asio::ip::tcp::socket&& p_socket,
-               const PacketHandlerMapPtr& p_handlerMap,
-               std::weak_ptr<ConnectionManager> p_connectionManager);
+    Connection(ConnectionID p_connectionID, boost::asio::ip::tcp::socket &&p_socket,
+               const PacketHandlerMapPtr &p_handlerMap, std::weak_ptr<ConnectionManager> p_connectionManager);
 
     void Start();
 
@@ -43,11 +42,12 @@ public:
 
     ConnectionID GetRemoteConnectionID() const;
 
-    Connection(const Connection&) = delete;
-    Connection& operator=(const Connection&) = delete;
+    Connection(const Connection &) = delete;
+    Connection &operator=(const Connection &) = delete;
 
-private:
+  private:
     void AsyncReadHeader();
+    void StartWrite();
 
     void AsyncReadBody();
 
@@ -67,9 +67,9 @@ private:
 
     void HandleNoHandlerResponse();
 
-    void OnConnectionFail(const boost::system::error_code& p_ec);
+    void OnConnectionFail(const boost::system::error_code &p_ec);
 
-private:
+  private:
     const ConnectionID c_connectionID;
 
     ConnectionID m_remoteConnectionID;
@@ -87,12 +87,17 @@ private:
     std::uint8_t m_packetHeaderReadBuffer[PacketHeader::c_bufferSize];
 
     Packet m_packetRead;
+    struct PendingWrite
+    {
+        Packet packet;
+        std::function<void(bool)> callback;
+    };
+    std::deque<PendingWrite> m_writes;
 
     std::atomic_bool m_stopped;
 
     std::atomic_bool m_heartbeatStarted;
 };
-
 
 } // namespace Socket
 } // namespace SPTAG

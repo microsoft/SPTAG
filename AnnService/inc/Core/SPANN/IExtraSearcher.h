@@ -692,6 +692,10 @@ namespace SPTAG {
             }
 
             virtual bool AllFinished() { return false; }
+            virtual ErrorCode UpdateStatus() const
+            {
+                return ErrorCode::Success;
+            }
             virtual void GetDBStats() { return; }
             virtual int64_t GetNumBlocks() { return 0; }
             virtual void GetIndexStats(int finishedInsert, bool cost, bool reset) { return; }

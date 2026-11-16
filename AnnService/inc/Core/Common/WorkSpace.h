@@ -8,8 +8,12 @@
 #include "CommonUtils.h"
 #include "Heap.h"
 
-#include <stdarg.h>
+#include <algorithm>
+#include <atomic>
 #include <functional>
+#include <mutex>
+#include <stdarg.h>
+#include <unordered_map>
 
 namespace SPTAG
 {
@@ -21,6 +25,7 @@ namespace SPTAG
         public:
             using Ptr = std::unique_ptr<WorkSpaceType>;
 
+            virtual ~IWorkSpaceFactory() = default;
             virtual std::unique_ptr<WorkSpaceType> GetWorkSpace() = 0;
             virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) = 0;
         };
@@ -66,6 +71,72 @@ namespace SPTAG
         private:
             std::mutex m_mutex;
             std::vector<std::unique_ptr<WorkSpaceType>> m_pool;
+        };
+
+        template <typename WorkSpaceType>
+        class InstanceThreadLocalWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType>
+        {
+            struct Slot
+            {
+                std::unique_ptr<WorkSpaceType> workspace;
+                std::atomic<bool> retired{false};
+            };
+
+            inline static std::atomic<uint64_t> s_nextID{1};
+            inline static thread_local std::unordered_map<uint64_t, std::shared_ptr<Slot>> s_slots;
+            const uint64_t m_id = s_nextID.fetch_add(1, std::memory_order_relaxed);
+            std::mutex m_registration;
+            std::vector<std::weak_ptr<Slot>> m_slots;
+
+            Slot &LocalSlot()
+            {
+                auto found = s_slots.find(m_id);
+                if (found != s_slots.end())
+                    return *found->second;
+                for (auto it = s_slots.begin(); it != s_slots.end();)
+                {
+                    if (it->second->retired.load(std::memory_order_acquire))
+                        it = s_slots.erase(it);
+                    else
+                        ++it;
+                }
+                // Bound idle buffers even when a worker visits more than the default tenant limit.
+                if (s_slots.size() >= 64)
+                    s_slots.erase(s_slots.begin());
+                auto slot = std::make_shared<Slot>();
+                {
+                    std::lock_guard<std::mutex> lock(m_registration);
+                    m_slots.erase(std::remove_if(m_slots.begin(), m_slots.end(),
+                                                 [](const auto &entry) { return entry.expired(); }),
+                                  m_slots.end());
+                    m_slots.emplace_back(slot);
+                }
+                return *s_slots.emplace(m_id, std::move(slot)).first->second;
+            }
+
+          public:
+            ~InstanceThreadLocalWorkSpaceFactory() override
+            {
+                // The index owner drains users before destruction. TLS owns only the slot;
+                // eviction releases its buffer now, without waiting for the worker to exit.
+                for (auto &entry : m_slots)
+                    if (auto slot = entry.lock())
+                    {
+                        slot->workspace.reset();
+                        slot->retired.store(true, std::memory_order_release);
+                    }
+            }
+
+            std::unique_ptr<WorkSpaceType> GetWorkSpace() override
+            {
+                return std::move(LocalSlot().workspace);
+            }
+
+            void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> workspace) override
+            {
+                if (workspace)
+                    LocalSlot().workspace = std::move(workspace);
+            }
         };
 
         class OptHashPosVector

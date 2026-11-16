@@ -4,37 +4,39 @@
 #ifndef _SPTAG_SPANN_EXTRADYNAMICSEARCHER_H_
 #define _SPTAG_SPANN_EXTRADYNAMICSEARCHER_H_
 
-#include "inc/Helper/VectorSetReader.h"
-#include "inc/Helper/AsyncFileReader.h"
-#include "IExtraSearcher.h"
+#include "ExtraFileController.h"
 #include "ExtraStaticSearcher.h"
-#include "inc/Core/Common/TruthSet.h"
-#include "inc/Helper/KeyValueIO.h"
-#include "inc/Core/Common/FineGrainedLock.h"
-#include "inc/Core/Common/Checksum.h"
+#include "IExtraSearcher.h"
 #include "PersistentBuffer.h"
-#include "inc/Core/Common/PostingSizeRecord.h"
+#include "UpdateContext.h"
+#include "inc/Core/Common/Checksum.h"
+#include "inc/Core/Common/FineGrainedLock.h"
 #include "inc/Core/Common/IVersionMap.h"
 #include "inc/Core/Common/LocalVersionMap.h"
+#include "inc/Core/Common/PostingSizeRecord.h"
 #include "inc/Core/Common/TiKVVersionMap.h"
-#include "ExtraFileController.h"
-#include <chrono>
-#include <cstdint>
+#include "inc/Core/Common/TruthSet.h"
+#include "inc/Helper/AsyncFileReader.h"
+#include "inc/Helper/ConcurrentSet.h"
+#include "inc/Helper/KeyValueIO.h"
+#include "inc/Helper/VectorSetReader.h"
 #include <algorithm>
-#include <map>
-#include <cmath>
-#include <cstring>
+#include <chrono>
 #include <climits>
+#include <cmath>
+#include <condition_variable>
+#include <cstdint>
+#include <cstring>
+#include <deque>
 #include <future>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <numeric>
-#include <utility>
+#include <random>
 #include <unordered_map>
 #include <unordered_set>
-#include <random>
-#include <deque>
-#include <condition_variable>
+#include <utility>
 
 #ifdef SPDK
 #include "ExtraSPDKController.h"
@@ -42,8 +44,6 @@
 
 #ifdef ROCKSDB
 #include "ExtraRocksDBController.h"
-// enable rocksdb io_uring
-extern "C" bool RocksDbIOUringEnable() { return true; }
 #endif
 
 #ifdef TIKV
@@ -55,7 +55,23 @@ namespace SPTAG::SPANN {
     template <typename ValueType>
     class ExtraDynamicSearcher : public IExtraSearcher
     {
-        class MergeAsyncJob : public Helper::ThreadPool::Job
+        class TrackedJob : public Helper::ThreadPool::Job
+        {
+          public:
+            std::shared_ptr<UpdateContext> context = UpdateContext::Current();
+            TrackedJob()
+            {
+                if (context)
+                    context->Add();
+            }
+            ~TrackedJob() override
+            {
+                if (context)
+                    context->Complete();
+            }
+        };
+
+        class MergeAsyncJob : public TrackedJob
         {
         private:
             ExtraDynamicSearcher<ValueType>* m_extraIndex;
@@ -81,7 +97,7 @@ namespace SPTAG::SPANN {
             }
         };
 
-        class SplitAsyncJob : public Helper::ThreadPool::Job
+        class SplitAsyncJob : public TrackedJob
         {
         private:
             ExtraDynamicSearcher<ValueType>* m_extraIndex;
@@ -113,7 +129,7 @@ namespace SPTAG::SPANN {
             }
         };
 
-        class AppendAsyncJob : public Helper::ThreadPool::Job
+        class AppendAsyncJob : public TrackedJob
         {
         private:
             ExtraDynamicSearcher<ValueType>* m_extraIndex;
@@ -140,7 +156,7 @@ namespace SPTAG::SPANN {
             }
         };
 
-        class ReassignAsyncJob : public Helper::ThreadPool::Job
+        class ReassignAsyncJob : public TrackedJob
         {
         private:
             ExtraDynamicSearcher<ValueType>* m_extraIndex;
@@ -190,12 +206,24 @@ namespace SPTAG::SPANN {
                         extraIndex->GetHeadIndex()->InitWorkSpace(&workSpace);
                         while (get(j))
                         {
+                            auto *tracked = dynamic_cast<TrackedJob *>(j);
+                            auto context = tracked ? tracked->context : nullptr;
+                            UpdateContext::Scope scope(context);
                             try 
                             {
                                 j->exec(&workSpace, &m_abort);
                             }
                             catch (std::exception& e) {
+                                m_failed = true;
+                                if (context)
+                                    context->Fail();
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
+                            }
+                            catch (...)
+                            {
+                                m_failed = true;
+                                if (context)
+                                    context->Fail();
                             }
                             delete j;
                             currentJobs--;
@@ -216,6 +244,15 @@ namespace SPTAG::SPANN {
         COMMON::FineGrainedRWLock m_rwLocks;
 
         IndexStats m_stat;
+        std::mutex m_statisticsLock;
+
+        template <typename F> void RecordStat(F &&update)
+        {
+            std::unique_lock<std::mutex> lock(m_statisticsLock, std::defer_lock);
+            if (m_opt->m_postingStore)
+                lock.lock();
+            update();
+        }
 
         std::shared_ptr<PersistentBuffer> m_wal;
 
@@ -649,7 +686,7 @@ namespace SPTAG::SPANN {
                 }
                 auto splitGetEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitGetEnd - splitGetBegin).count();
-                m_stat.m_getCost += elapsedMSeconds;
+                RecordStat([&] { m_stat.m_getCost += elapsedMSeconds; });
                 // reinterpret postingList to vectors and IDs
                 uint8_t* postingP = reinterpret_cast<uint8_t*>(postingList.data());
                 SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
@@ -716,10 +753,10 @@ namespace SPTAG::SPANN {
                         return ret;
                     }
                     CheckCentroid(headID, postingList, "Split-GC");
-                    m_stat.m_garbageNum++;
+                    RecordStat([&] { m_stat.m_garbageNum++; });
                     auto GCEnd = std::chrono::high_resolution_clock::now();
                     elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
-                    m_stat.m_garbageCost += elapsedMSeconds;
+                    RecordStat([&] { m_stat.m_garbageCost += elapsedMSeconds; });
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "GC triggered: %lld, new length: %d\n", (std::int64_t)headID, index);
                     return ErrorCode::Success;
                 }
@@ -733,7 +770,7 @@ namespace SPTAG::SPANN {
 
                 auto clusterEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(clusterEnd - clusterBegin).count();
-                m_stat.m_clusteringCost += elapsedMSeconds;
+                RecordStat([&] { m_stat.m_clusteringCost += elapsedMSeconds; });
                 // int numClusters = ClusteringSPFresh(smallSample, localIndices, 0, localIndices.size(), args, 10, false, m_opt->m_virtualHead);
                 if (numClusters <= 1)
                 {
@@ -791,8 +828,8 @@ namespace SPTAG::SPANN {
                         CheckCentroid(newHeadVID, newPostingLists[k], "Split-SameHead");
                         auto splitPutEnd = std::chrono::high_resolution_clock::now();
                         elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
-                        m_stat.m_putCost += elapsedMSeconds;
-                        m_stat.m_theSameHeadNum++;
+                        RecordStat([&] { m_stat.m_putCost += elapsedMSeconds; });
+                        RecordStat([&] { m_stat.m_theSameHeadNum++; });
                         m_stat.m_splitSameHeadCount.fetch_add(1, std::memory_order_relaxed);
                     }
                     else {
@@ -908,8 +945,7 @@ namespace SPTAG::SPANN {
                             elapsedMSeconds =
                                 std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin)
                                     .count();
-                            m_stat.m_putCost += elapsedMSeconds;
-
+                            RecordStat([&] { m_stat.m_putCost += elapsedMSeconds; });
                             if (currentLength > m_postingSizeLimit)
                             {
                                 m_stat.m_splitExistingHeadMergeResplitCount.fetch_add(1, std::memory_order_relaxed);
@@ -924,8 +960,7 @@ namespace SPTAG::SPANN {
                             CheckCentroid(newHeadVID, newPostingLists[k], "Split-NewPosting");
                             auto splitPutEnd = std::chrono::high_resolution_clock::now();
                             elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
-                            m_stat.m_putCost += elapsedMSeconds;
-
+                            RecordStat([&] { m_stat.m_putCost += elapsedMSeconds; });
                             auto updateHeadBegin = std::chrono::high_resolution_clock::now();
                             if ((ret = m_headIndex->AddHeadIndex(args.centers + k * args._D, newHeadVID, version, m_opt->m_dim, m_layer + 1, p_exWorkSpace)) != ErrorCode::Success) {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to update head index %lld\n", (std::int64_t)(newHeadVID));
@@ -938,7 +973,7 @@ namespace SPTAG::SPANN {
                             m_stat.m_splitCreatedNewHeadCount.fetch_add(1, std::memory_order_relaxed);
                             auto updateHeadEnd = std::chrono::high_resolution_clock::now();
                             elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
-                            m_stat.m_updateHeadCost += elapsedMSeconds;
+                            RecordStat([&] { m_stat.m_updateHeadCost += elapsedMSeconds; });
                         }
                         if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
                     }
@@ -964,8 +999,8 @@ namespace SPTAG::SPANN {
                     }
                 }
             }
-            
-            m_stat.m_splitNum++;
+
+            RecordStat([&] { m_stat.m_splitNum++; });
             IndexStats::HistAdd(m_stat.m_splitPostingVectors, splitPostingVectors);
             m_stat.m_splitPostingVectorsTotal.fetch_add(splitPostingVectors, std::memory_order_relaxed);
             m_stat.m_splitPostingVectorSampleCount.fetch_add(1, std::memory_order_relaxed);
@@ -981,11 +1016,11 @@ namespace SPTAG::SPANN {
                 auto reassignScanEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignScanEnd - reassignScanBegin).count();
 
-                m_stat.m_reassignScanCost += elapsedMSeconds;
+                RecordStat([&] { m_stat.m_reassignScanCost += elapsedMSeconds; });
             }
             auto splitEnd = std::chrono::high_resolution_clock::now();
             elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - splitBegin).count();
-            m_stat.m_splitCost += elapsedMSeconds;
+            RecordStat([&] { m_stat.m_splitCost += elapsedMSeconds; });
             return ErrorCode::Success;
         }
 
@@ -1087,7 +1122,7 @@ namespace SPTAG::SPANN {
                     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Locked: %lld, to be lock: %lld\n", (std::int64_t)headID, (std::int64_t)queryResult->VID);
                     if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) {
                         if (!anotherLock.try_lock()) {
-                            auto* curJob = new MergeAsyncJob(this, headID, nullptr);
+                            auto curJob = std::make_unique<MergeAsyncJob>(this, headID, nullptr);
                             // Re-queue counts as a new submission; matched by the
                             // m_mergeJobsInFlight-- / m_totalMergeCompleted++ in
                             // MergeAsyncJob::exec(). Without these increments
@@ -1095,7 +1130,8 @@ namespace SPTAG::SPANN {
                             // and m_totalMergeCompleted exceeds m_totalMergeSubmitted.
                             m_mergeJobsInFlight++;
                             m_totalMergeSubmitted++;
-                            m_splitThreadPool->add(curJob);
+                            m_splitThreadPool->add(curJob.get());
+                            curJob.release();
                             return ErrorCode::Success;
                         }
                     }
@@ -1210,7 +1246,7 @@ namespace SPTAG::SPANN {
                         MergeAsync(nextHeadID);
                     }
                 }
-                m_stat.m_mergeNum++;
+                RecordStat([&] { m_stat.m_mergeNum++; });
                 return ErrorCode::Success;
             }
 
@@ -1244,10 +1280,11 @@ namespace SPTAG::SPANN {
                 return;
             }
 
-            auto* curJob = new SplitAsyncJob(this, headID, p_callback);
+            auto curJob = std::make_unique<SplitAsyncJob>(this, headID, p_callback);
             m_splitJobsInFlight++;
             m_totalSplitSubmitted++;
-            m_splitThreadPool->add(curJob);
+            m_splitThreadPool->add(curJob.get());
+            curJob.release();
             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Add to thread pool\n");
         }
 
@@ -1261,34 +1298,37 @@ namespace SPTAG::SPANN {
                 return;
             }
 
-            auto* curJob = new MergeAsyncJob(this, headID, p_callback);
+            auto curJob = std::make_unique<MergeAsyncJob>(this, headID, p_callback);
             m_mergeJobsInFlight++;
             m_totalMergeSubmitted++;
-            m_splitThreadPool->add(curJob);
+            m_splitThreadPool->add(curJob.get());
+            curJob.release();
         }
 
         inline void AppendAsync(SizeType headID, std::shared_ptr<std::string> postingList, bool urgent = false,std::function<void()> p_callback = nullptr)
         {
-            auto* curJob = new AppendAsyncJob(this, headID, std::move(postingList), p_callback);
+            auto curJob = std::make_unique<AppendAsyncJob>(this, headID, std::move(postingList), p_callback);
             m_appendJobsInFlight++;
             m_totalAppendSubmitted++;
             if (urgent) {
-                m_splitThreadPool->addfront(curJob);
+                m_splitThreadPool->addfront(curJob.get());
             } else {
-                m_splitThreadPool->add(curJob);
+                m_splitThreadPool->add(curJob.get());
             }
+            curJob.release();
         }
 
         inline void ReassignAsync(std::shared_ptr<std::string> vectorInfo, SizeType headPrev, bool urgent = false, std::function<void()> p_callback = nullptr)
         {
-            auto* curJob = new ReassignAsyncJob(this, std::move(vectorInfo), headPrev, p_callback);
+            auto curJob = std::make_unique<ReassignAsyncJob>(this, std::move(vectorInfo), headPrev, p_callback);
             m_reassignJobsInFlight++;
             m_totalReassignSubmitted++;
             if (urgent) {
-                m_splitThreadPool->addfront(curJob);
+                m_splitThreadPool->addfront(curJob.get());
             } else {
-                m_splitThreadPool->add(curJob);
+                m_splitThreadPool->add(curJob.get());
             }
+            curJob.release();
         }
 
         ErrorCode CollectReAssign(ExtraWorkSpace *p_exWorkSpace, SizeType headID, std::shared_ptr<std::string> headVec,
@@ -1319,7 +1359,7 @@ namespace SPTAG::SPANN {
 
                 if (m_versionMap->Deleted(vid) || m_versionMap->GetVersion(vid) != version) return;
 
-                m_stat.m_reAssignNum++;
+                RecordStat([&] { m_stat.m_reAssignNum++; });
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount;
                 bool isNeedReassign = RNGSelection(p_exWorkSpace, selections, vectorData, replicaCount, headPrev);
@@ -1361,7 +1401,7 @@ namespace SPTAG::SPANN {
                         continue;
                     }
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
-                        m_stat.m_reAssignScanNum++;
+                        RecordStat([&] { m_stat.m_reAssignScanNum++; });
                         if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], newHeadsVec[i]->data(), true)) {
                             tryBatchReassign(vectorId, newHeadsID[i]);
                             reAssignVectorsTopK.insert(vid);
@@ -1408,8 +1448,7 @@ namespace SPTAG::SPANN {
 
                 auto reassignScanIOEnd = std::chrono::high_resolution_clock::now();
                 auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignScanIOEnd - reassignScanIOBegin).count();
-                m_stat.m_reassignScanIOCost += elapsedMSeconds;
-
+                RecordStat([&] { m_stat.m_reassignScanIOCost += elapsedMSeconds; });
                 std::vector<std::string> nearbyPostings(HeadPrevTopK.size());
                 for (int i = 0; i < HeadPrevTopK.size(); i++)
                 {
@@ -1436,7 +1475,7 @@ namespace SPTAG::SPANN {
                             continue;
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
-                            m_stat.m_reAssignScanNum++;
+                            RecordStat([&] { m_stat.m_reAssignScanNum++; });
                             if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], HeadPrevTopKVec[i]->data(), false)) {
                                 tryBatchReassign(vectorId, HeadPrevTopK[i]);
                                 reAssignVectorsTopK.insert(vid);
@@ -1624,9 +1663,9 @@ namespace SPTAG::SPANN {
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
             if (!reassignThreshold) {
                 m_totalAppendCount++;
-                m_stat.m_appendTaskNum++;
-                m_stat.m_appendIOCost += appendIOSeconds;
-                m_stat.m_appendCost += elapsedMSeconds;
+                RecordStat([&] { m_stat.m_appendTaskNum++; });
+                RecordStat([&] { m_stat.m_appendIOCost += appendIOSeconds; });
+                RecordStat([&] { m_stat.m_appendCost += elapsedMSeconds; });
             }
             // } else {
             //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReAssign Append To: %lld\n", (std::int64_t)headID);
@@ -1715,9 +1754,9 @@ namespace SPTAG::SPANN {
                 auto appendEnd = std::chrono::high_resolution_clock::now();
                 double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
                 m_totalAppendCount++;
-                m_stat.m_appendTaskNum++;
-                m_stat.m_appendIOCost += appendIOSeconds;
-                m_stat.m_appendCost += elapsedMSeconds;
+                RecordStat([&] { m_stat.m_appendTaskNum++; });
+                RecordStat([&] { m_stat.m_appendIOCost += appendIOSeconds; });
+                RecordStat([&] { m_stat.m_appendCost += elapsedMSeconds; });
             }
             return ErrorCode::Success;
         }
@@ -1739,16 +1778,14 @@ namespace SPTAG::SPANN {
             }
             auto reassignBegin = std::chrono::high_resolution_clock::now();
 
-            m_stat.m_reAssignNum++;
-
+            RecordStat([&] { m_stat.m_reAssignNum++; });
             auto selectBegin = std::chrono::high_resolution_clock::now();
             std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
             int replicaCount;
             bool isNeedReassign = RNGSelection(p_exWorkSpace, selections, (ValueType*)(vectorInfo->c_str() + m_metaDataSize), replicaCount, headPrev);
             auto selectEnd = std::chrono::high_resolution_clock::now();
             auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(selectEnd - selectBegin).count();
-            m_stat.m_selectCost += elapsedMSeconds;
-
+            RecordStat([&] { m_stat.m_selectCost += elapsedMSeconds; });
             auto reassignAppendBegin = std::chrono::high_resolution_clock::now();
             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Need ReAssign\n");
             if (isNeedReassign && m_versionMap->GetVersion(VID) == version) {
@@ -1779,11 +1816,10 @@ namespace SPTAG::SPANN {
             }
             auto reassignAppendEnd = std::chrono::high_resolution_clock::now();
             elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignAppendEnd - reassignAppendBegin).count();
-            m_stat.m_reAssignAppendCost += elapsedMSeconds;
-
+            RecordStat([&] { m_stat.m_reAssignAppendCost += elapsedMSeconds; });
             auto reassignEnd = std::chrono::high_resolution_clock::now();
             elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignEnd - reassignBegin).count();
-            m_stat.m_reAssignCost += elapsedMSeconds;
+            RecordStat([&] { m_stat.m_reAssignCost += elapsedMSeconds; });
             return ErrorCode::Success;
         }
 
@@ -1967,7 +2003,7 @@ namespace SPTAG::SPANN {
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
 
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
-            bool isTiKV = (m_opt->m_storage == Storage::TIKVIO);
+            bool isTiKV = (m_opt->m_storage == Storage::TIKVIO && m_opt->m_distributedVersionMap);
             bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch(p_checkVersionMap);
             for (uint32_t pi = 0; pi < postingListCount; ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
@@ -2102,7 +2138,7 @@ namespace SPTAG::SPANN {
             }
 
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
-            const bool isTiKV = (m_opt->m_storage == Storage::TIKVIO);
+            const bool isTiKV = (m_opt->m_storage == Storage::TIKVIO && m_opt->m_distributedVersionMap);
             const bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch(p_checkVersionMap);
             const std::size_t resultStart = p_results.size();
             std::vector<SizeType> candidateVIDs;
@@ -2890,6 +2926,8 @@ namespace SPTAG::SPANN {
 
         bool AllFinished() {
             if (!m_splitThreadPool) return true;
+            if (m_opt->m_postingStore)
+                return m_splitThreadPool->allClear();
 
             size_t totalJobs = m_splitThreadPool->jobsize();
             unsigned int runningJobs = static_cast<unsigned int>(m_splitThreadPool->runningJobs());
@@ -3028,6 +3066,11 @@ namespace SPTAG::SPANN {
             m_allDonePrinted = false;
             return false;
         } // && m_reassignThreadPool->allClear(); }
+        ErrorCode UpdateStatus() const override
+        {
+            return m_splitThreadPool && m_splitThreadPool->hasFailed() ? ErrorCode::Fail : m_asyncStatus.load();
+        }
+
         void ForceCompaction() override { db->ForceCompaction(); }
         void GetDBStats() override { 
             db->GetStat();
@@ -3054,7 +3097,10 @@ namespace SPTAG::SPANN {
             return db->GetNumBlocks();   
         }
 
-        void GetIndexStats(int finishedInsert, bool cost, bool reset) override { m_stat.PrintStat(finishedInsert, cost, reset); }
+        void GetIndexStats(int finishedInsert, bool cost, bool reset) override
+        {
+            RecordStat([&] { m_stat.PrintStat(finishedInsert, cost, reset); });
+        }
 
         virtual ErrorCode CheckPosting(SizeType postingID, std::vector<std::uint8_t> *visited = nullptr,
                                        ExtraWorkSpace *p_exWorkSpace = nullptr) override
@@ -3113,9 +3159,13 @@ namespace SPTAG::SPANN {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - waitStart).count();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Checkpoint: layer %d background jobs done (waited %lld s)\n", m_layer, (long long)elapsed);
             }
-            if (m_asyncStatus != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Checkpoint: resetting transient async error (code=%d) for layer %d\n",
-                             (int)m_asyncStatus, m_layer);
+            if (m_opt->m_postingStore && UpdateStatus() != ErrorCode::Success)
+                return UpdateStatus();
+            if (m_asyncStatus.load() != ErrorCode::Success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                             "Checkpoint: resetting transient async error (code=%d) for layer %d\n",
+                             (int)m_asyncStatus.load(), m_layer);
                 m_asyncStatus = ErrorCode::Success;
             }
             std::string p_persistenMap = prefix + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
@@ -3164,7 +3214,7 @@ namespace SPTAG::SPANN {
         std::chrono::microseconds m_hardLatencyLimit = std::chrono::microseconds(2000);
 
         int m_mergeThreshold = 10;
-        ErrorCode m_asyncStatus = ErrorCode::Success;
+        std::atomic<ErrorCode> m_asyncStatus{ErrorCode::Success};
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;

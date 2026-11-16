@@ -8,9 +8,10 @@
 #include "inc/Socket/Client.h"
 #include "inc/Socket/ResourceManager.h"
 
-#include <unordered_map>
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
+#include <unordered_map>
 
 class AnnClient
 {
@@ -27,6 +28,15 @@ public:
 
     std::shared_ptr<RemoteSearchResult> Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bool p_withMetaData);
 
+    std::shared_ptr<RemoteTenantResult> CreateTenant(const char *tenant, ByteArray vectors, int count, int dimension,
+                                                     const char *valueType, const char *metric,
+                                                     const char *headIndexAlgo = nullptr);
+    std::shared_ptr<RemoteTenantResult> DeleteTenant(const char *tenant);
+    std::shared_ptr<RemoteTenantResult> InsertTenant(const char *tenant, ByteArray vectors, int count,
+                                                     const char *valueType);
+    std::shared_ptr<RemoteTenantResult> DeleteTenantVector(const char *tenant, int vectorID);
+    std::shared_ptr<RemoteTenantResult> SearchTenant(const char *tenant, ByteArray query, int k, const char *valueType);
+
     bool IsConnected() const;
 
 private:
@@ -40,10 +50,14 @@ private:
     void SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID,
                                SPTAG::Socket::Packet p_packet);
 
-private:
+    std::shared_ptr<RemoteTenantResult> SendTenantRequest(const SPTAG::Socket::RemoteTenantRequest &request);
+    void TenantResponseHandler(SPTAG::Socket::ConnectionID connectionID, SPTAG::Socket::Packet packet);
+    void RetryConnect();
+
+  private:
     typedef std::function<void(SPTAG::Socket::RemoteSearchResult)> Callback;
 
-    std::uint32_t m_timeoutInMilliseconds;
+    std::atomic<std::uint32_t> m_timeoutInMilliseconds;
 
     std::string m_server;
 
@@ -54,6 +68,12 @@ private:
     std::atomic<SPTAG::Socket::ConnectionID> m_connectionID;
 
     SPTAG::Socket::ResourceManager<Callback> m_callbackManager;
+
+    using TenantCallback = std::function<void(RemoteTenantResult)>;
+    SPTAG::Socket::ResourceManager<TenantCallback> m_tenantCallbacks;
+    std::atomic<bool> m_stopping{false};
+    std::mutex m_reconnectMutex;
+    std::condition_variable m_reconnectWake;
 
     std::unordered_map<std::string, std::string> m_params;
 

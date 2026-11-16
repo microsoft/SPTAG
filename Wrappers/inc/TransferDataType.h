@@ -17,4 +17,6 @@ typedef SPTAG::BasicResult BasicResult;
 
 typedef SPTAG::Socket::RemoteSearchResult RemoteSearchResult;
 
+typedef SPTAG::Socket::RemoteTenantResult RemoteTenantResult;
+
 #endif // _SPTAG_PW_TRANSFERDATATYPE_H_

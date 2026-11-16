@@ -31,7 +31,7 @@ public:
 
     ErrorCode ParseQuery(const std::string& p_query);
 
-    ErrorCode ExtractOption();
+    ErrorCode ExtractOption(bool p_strict = false);
 
     ErrorCode ExtractVector(VectorValueType p_targetType);
 
@@ -52,6 +52,10 @@ public:
     const SizeType GetResultNum() const;
 
     const bool GetExtractMetadata() const;
+    const std::string &GetTenantID() const
+    {
+        return m_tenantID;
+    }
 
 private:
     const std::shared_ptr<const ServiceSettings> c_serviceSettings;
@@ -59,6 +63,7 @@ private:
     QueryParser m_queryParser;
 
     std::vector<std::string> m_indexNames;
+    std::string m_tenantID;
 
     ByteArray m_vector;
 

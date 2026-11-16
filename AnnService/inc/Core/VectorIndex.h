@@ -4,15 +4,16 @@
 #ifndef _SPTAG_VECTORINDEX_H_
 #define _SPTAG_VECTORINDEX_H_
 
-#include <unordered_set>
 #include "Common.h"
 #include "Common/WorkSpace.h"
-#include "inc/Helper/DiskIO.h"
+#include "MetadataSet.h"
 #include "SearchQuery.h"
 #include "VectorSet.h"
-#include "MetadataSet.h"
-#include "inc/Helper/SimpleIniReader.h"
 #include "inc/Core/Common/IQuantizer.h"
+#include "inc/Helper/DiskIO.h"
+#include "inc/Helper/KeyValueIO.h"
+#include "inc/Helper/SimpleIniReader.h"
+#include <unordered_set>
 
 class ResultIterator;
 
@@ -97,6 +98,7 @@ public:
     virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs,  std::vector<SizeType>* p_mapping = nullptr);
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath,  std::vector<SizeType>* p_mapping = nullptr);
+    ErrorCode SaveIndex(const std::string &p_folderPath, std::vector<SizeType> *p_mapping, bool p_allowFullyDeleted);
 
     virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr,  std::vector<SizeType>* p_mapping = nullptr);
 
@@ -167,6 +169,34 @@ public:
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
+
+    static ErrorCode LoadIndex(const std::string &p_loaderFilePath, std::shared_ptr<VectorIndex> &p_vectorIndex,
+                               std::shared_ptr<Helper::KeyValueIO> p_postingStore);
+
+    virtual ErrorCode SetPostingStore(std::shared_ptr<Helper::KeyValueIO>)
+    {
+        return ErrorCode::Undefined;
+    }
+    virtual ErrorCode DrainUpdates()
+    {
+        return ErrorCode::Undefined;
+    }
+    virtual ErrorCode GetUpdateStatus() const
+    {
+        return ErrorCode::Undefined;
+    }
+    virtual ErrorCode ReserveVectorIDs(SizeType, SizeType, SizeType &)
+    {
+        return ErrorCode::Undefined;
+    }
+    virtual ErrorCode InsertAt(const void *, SizeType, DimensionType, SizeType)
+    {
+        return ErrorCode::Undefined;
+    }
+    virtual ErrorCode UseInstanceWorkspaces()
+    {
+        return ErrorCode::Undefined;
+    }
 
     static ErrorCode LoadIndexFromFile(const std::string& p_file, std::shared_ptr<VectorIndex>& p_vectorIndex);
 

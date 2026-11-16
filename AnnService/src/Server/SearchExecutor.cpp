@@ -28,14 +28,71 @@ void SearchExecutor::Execute()
 void SearchExecutor::ExecuteInternal()
 {
     m_executionContext.reset(new SearchExecutionContext(c_serviceContext->GetServiceSettings()));
+#ifdef MULTITENANT
+    auto *manager = c_serviceContext->GetTenantManager();
+    const bool tenantMode = manager != nullptr;
+#else
+    const bool tenantMode = false;
+#endif
 
     if (m_executionContext->ParseQuery(m_queryString) != ErrorCode::Success)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to parse query:%s!\n", m_queryString.c_str());
+        if (tenantMode)
+            m_executionContext.reset();
         return;
     }
 
-    m_executionContext->ExtractOption();
+    if (m_executionContext->ExtractOption(tenantMode) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid query options\n");
+        m_executionContext.reset();
+        return;
+    }
+
+#ifdef MULTITENANT
+    if (manager)
+    {
+        const auto execute = [&]() -> ErrorCode {
+            const auto &tenant = m_executionContext->GetTenantID();
+            if (tenant.empty() || !m_executionContext->GetSelectedIndexNames().empty() ||
+                m_executionContext->GetExtractMetadata())
+                return ErrorCode::FailedParseValue;
+            VectorValueType type;
+            DimensionType dimension;
+            auto status = manager->Describe(tenant, type, dimension);
+            if (status != ErrorCode::Success)
+                return status;
+            if ((status = m_executionContext->ExtractVector(type)) != ErrorCode::Success)
+                return status;
+            if (dimension != m_executionContext->GetVectorDimension())
+                return ErrorCode::DimensionSizeMismatch;
+            std::vector<BasicResult> results;
+            status = manager->Search(tenant, m_executionContext->GetVector(), m_executionContext->GetResultNum(),
+                                     results, type);
+            if (status != ErrorCode::Success)
+                return status;
+            QueryResult query(m_executionContext->GetVector().Data(), static_cast<SizeType>(results.size()), false);
+            std::copy(results.begin(), results.end(), query.GetResults());
+            m_executionContext->AddResults(tenant, query);
+            return ErrorCode::Success;
+        };
+        auto status = execute();
+        if (status != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Tenant query failed: %d\n", static_cast<int>(status));
+            m_executionContext.reset();
+        }
+        return;
+    }
+#endif
+
+    if (!m_executionContext->GetTenantID().empty())
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "tenantid requires MultiTenant.Root\n");
+        m_executionContext.reset();
+        return;
+    }
 
     SelectIndex();
 

@@ -61,6 +61,14 @@ namespace SPTAG
                 if (iter == m_label.end()) return 0xfe;
                 return iter->second; 
             }
+            using IVersionMap::BatchGetVersions;
+            void BatchGetVersions(const std::vector<SizeType> &ids, std::vector<uint8_t> &versions,
+                                  VersionReadPolicy) override
+            {
+                versions.resize(ids.size());
+                for (size_t i = 0; i < ids.size(); ++i)
+                    versions[i] = ids[i] < 0 ? 0xfe : GetVersion(ids[i]);
+            }
             void SetVersion(SizeType& key, uint8_t& version) override { 
                 m_label.insert_or_assign(std::forward<SizeType>(key), std::forward<uint8_t>(version));
             }

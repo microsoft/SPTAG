@@ -21,7 +21,7 @@ namespace SPTAG
             class Abort : public IAbortOperation
             {
             private:
-                bool m_stopped;
+              std::atomic<bool> m_stopped;
 
             public:
                 Abort(bool p_status = true) { m_stopped = p_status; }
@@ -43,7 +43,10 @@ namespace SPTAG
 
             ~ThreadPool() 
             {
-                m_abort.SetAbort(true);
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    m_abort.SetAbort(true);
+                }
                 m_cond.notify_all();
                 for (auto&& t : m_threads) t.join();
                 m_threads.clear();
@@ -64,6 +67,7 @@ namespace SPTAG
                             }
                             catch (std::exception &e)
                             {
+                                m_failed = true;
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n",
                                              typeid(*j).name(), e.what());
                             }
@@ -112,16 +116,19 @@ namespace SPTAG
             }
 
             inline uint32_t runningJobs() { return currentJobs; }
+            bool hasFailed() const
+            {
+                return m_failed.load();
+            }
 
             inline bool allClear() {
-                size_t totaljobs = jobsize();
-                if (totaljobs % 10000 == 0)
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "jobsize: %zu\n", totaljobs);
-                return currentJobs == 0 && totaljobs == 0; 
+                std::lock_guard<std::mutex> lock(m_lock);
+                return currentJobs == 0 && m_jobs.empty();
             }
 
         protected:
             std::atomic_uint32_t currentJobs{ 0 };
+            std::atomic<bool> m_failed{false};
             std::deque<Job*> m_jobs;
             Abort m_abort;
             std::mutex m_lock;
