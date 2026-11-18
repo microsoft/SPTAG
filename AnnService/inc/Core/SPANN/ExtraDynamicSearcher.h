@@ -2328,7 +2328,7 @@ namespace SPTAG::SPANN {
                     SizeType start = i * batchSize;
                     SizeType end = min(start + batchSize, fullCount);
                     auto fullVectors = p_reader->GetVectorSet(start, end);
-                    if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
+                    if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
                     if (p_opt.m_batches > 1) {
                         if (selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount) != ErrorCode::Success)

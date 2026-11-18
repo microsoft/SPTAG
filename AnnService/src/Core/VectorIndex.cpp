@@ -1094,7 +1094,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet> &fullVectors, std::u
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
 
-    int metric = (GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine);
+    int metric = (GetDistCalcMethod() != SPTAG::DistCalcMethod::L2);
 
     if (m_pQuantizer)
     {

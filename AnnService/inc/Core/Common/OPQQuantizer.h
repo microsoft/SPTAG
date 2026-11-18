@@ -59,9 +59,10 @@ namespace SPTAG
             using PQQuantizer<OPQMatrixType>::m_DimPerSubvector;
             using PQQuantizer<OPQMatrixType>::m_KsPerSubvector;
             using PQQuantizer<OPQMatrixType>::m_codebooks;
+            using PQQuantizer<OPQMatrixType>::m_distCalcMethod;
+            using PQQuantizer<OPQMatrixType>::m_base;
             DimensionType m_matrixDim;
-            const std::function<float(const OPQMatrixType*, const OPQMatrixType*, DimensionType)> m_fdot = SPTAG::COMMON::DistanceCalcSelector<OPQMatrixType>(SPTAG::DistCalcMethod::Cosine);
-            const int m_base = COMMON::Utils::GetBase<OPQMatrixType>() * COMMON::Utils::GetBase<OPQMatrixType>();
+            const std::function<float(const OPQMatrixType*, const OPQMatrixType*, DimensionType)> m_fdot = SPTAG::COMMON::DistanceCalcSelector<OPQMatrixType>(SPTAG::DistCalcMethod::InnerProduct);
 
             void m_InitMatrixTranspose();
 
@@ -141,8 +142,9 @@ namespace SPTAG
             IOBINARY(p_out, WriteBinary, sizeof(int), (char*)&m_KsPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
+            IOBINARY(p_out, WriteBinary, sizeof(DistCalcMethod), (char*)&m_distCalcMethod);
             IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d DistType:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, (int)m_distCalcMethod);
             return ErrorCode::Success;
         }
         

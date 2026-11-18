@@ -89,7 +89,7 @@ namespace SPTAG
                 m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
                 //m_workSpaceFactory = std::make_unique<SPTAG::COMMON::SharedPoolWorkSpaceFactory<ExtraWorkSpace>>();
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
-                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_iBaseSquare = (m_options.m_distCalcMethod != DistCalcMethod::L2) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
             ~Index() {}
@@ -150,6 +150,8 @@ namespace SPTAG
                 if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
 
                 float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
+                if (m_options.m_distCalcMethod == DistCalcMethod::InnerProduct) return 1.0f - xy;
+                
                 float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_options.m_dim);
                 float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_options.m_dim);
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));

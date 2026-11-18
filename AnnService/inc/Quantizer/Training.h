@@ -20,6 +20,7 @@ public:
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFile, "-o", "--output", "Output quantized vectors.");
+        AddOptionalOption(m_distCalcMethod, "-dd", "--dist", "Distance calculation method.");
         AddOptionalOption(m_outputMetadataFile, "-om", "--outputmeta", "Output metadata.");
         AddOptionalOption(m_outputMetadataIndexFile, "-omi", "--outputmetaindex", "Output metadata index.");
         AddOptionalOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
@@ -41,6 +42,8 @@ public:
     std::string m_inputFiles;
 
     std::string m_outputFile;
+
+    SPTAG::DistCalcMethod m_distCalcMethod;
 
     std::string m_outputFullVecFile;
 
@@ -66,17 +69,19 @@ public:
 };
 
 template <typename T>
-std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<VectorSet> raw_vectors, std::shared_ptr<VectorSet> quantized_vectors)
+std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<VectorSet> raw_vectors,
+                                      std::shared_ptr<VectorSet> quantized_vectors)
 {
     SizeType numCentroids = 256;
-    if (raw_vectors->Dimension() % options->m_quantizedDim != 0) {
+    if (raw_vectors->Dimension() % options->m_quantizedDim != 0)
+    {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only n_codebooks that divide dimension are supported.\n");
         return nullptr;
     }
     DimensionType subdim = raw_vectors->Dimension() / options->m_quantizedDim;
     auto codebooks = std::make_unique<T[]>(numCentroids * raw_vectors->Dimension());
 
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks with Dist %d.\n", (int)options->m_distCalcMethod);
     std::vector<std::thread> mythreads;
     mythreads.reserve(options->m_threadNum);
     std::atomic_size_t sent(0);
@@ -91,7 +96,7 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
                     auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum,
-                                                       DistCalcMethod::L2, nullptr);
+                                                       options->m_distCalcMethod, nullptr);
                     auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
 
                     for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++)
@@ -110,8 +115,8 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
                     for (SizeType il = 0; il < localindices.size(); il++)
                         localindices[il] = il;
 
-                    // auto nclusters = COMMON::KmeansClustering<T>(dset, localindices, 0, dset.R(), kargs,
-                    // options->m_trainingSamples, options->m_KmeansLambda, options->m_debug, nullptr);
+                    auto nclusters = COMMON::KmeansClustering<T>(dset, localindices, 0, dset.R(), kargs,
+                        options->m_trainingSamples, options->m_KmeansLambda, options->m_debug, nullptr);
 
                     std::vector<SizeType> reverselocalindex;
                     reverselocalindex.resize(dset.R());

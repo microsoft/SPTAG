@@ -789,7 +789,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     int numDevicesOnHost;
     CUDA_CHECK(cudaGetDeviceCount(&numDevicesOnHost));
     int NUM_GPUS = numDevicesOnHost;
-    int metric = distMethod == DistCalcMethod::Cosine ? 1 : 0;
+    int metric = distMethod != DistCalcMethod::L2 ? 1 : 0;
     //const int NUM_GPUS = 4;
 
     std::vector< std::vector<SPTAG::SizeType> > temp_truth = truthset;

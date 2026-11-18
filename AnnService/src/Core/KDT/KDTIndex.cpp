@@ -29,12 +29,12 @@ template <> void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON
     {
         m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<std::uint8_t>(m_iDistCalcMethod);
         m_iBaseSquare =
-            (m_iDistCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
+            (m_iDistCalcMethod != DistCalcMethod::L2) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
     }
     else
     {
         m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_iDistCalcMethod);
-        m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine)
+        m_iBaseSquare = (m_iDistCalcMethod != DistCalcMethod::L2)
                             ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>()
                             : 1;
     }
@@ -912,7 +912,7 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
         m_fComputeDistance = m_pQuantizer ? m_pQuantizer->DistanceCalcSelector<T>(m_iDistCalcMethod)
                                           : COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
         auto base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
-        m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? base * base : 1;
+        m_iBaseSquare = (m_iDistCalcMethod != DistCalcMethod::L2) ? base * base : 1;
     }
     return ErrorCode::Success;
 }

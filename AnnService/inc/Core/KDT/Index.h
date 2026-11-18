@@ -98,7 +98,7 @@ namespace SPTAG
 
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod));
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_iBaseSquare = (m_iDistCalcMethod != DistCalcMethod::L2) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
                 m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>();
             }
 
@@ -119,6 +119,8 @@ namespace SPTAG
                 if (m_iDistCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
 
                 float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
+                if (m_iDistCalcMethod == DistCalcMethod::InnerProduct) return 1.0f - xy;
+
                 float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_pSamples.C());
                 float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_pSamples.C());
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));
