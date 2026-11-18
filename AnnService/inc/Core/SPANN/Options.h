@@ -216,10 +216,13 @@ namespace SPTAG {
             SizeType m_maxID;
             bool m_shareDB;
             bool m_enableDynamicLayers;
+            bool m_enableDynamicLayerShrink;
             std::uint64_t m_headMemoryHighWatermark;
             std::uint64_t m_headMemoryTarget;
+            std::uint64_t m_headMemoryLowWatermark;
             int m_maxLayers;
             int m_layerResizeTimeoutSeconds;
+            int m_layerResizeCooldownSeconds;
             std::string m_layerStoragePrefixes;
 
             int GetIOThreadCount() const
@@ -318,9 +321,12 @@ namespace SPTAG {
                 else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildSSDIndex")) {
                     const bool memoryParameter =
                         Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryHighWatermark") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryLowWatermark") ||
                         Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryTarget");
                     const bool resizeParameter = memoryParameter ||
                         Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayers") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayerShrink") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "LayerResizeCooldownSeconds") ||
                         Helper::StrUtils::StrEqualIgnoreCase(p_param, "MaxLayers") ||
                         Helper::StrUtils::StrEqualIgnoreCase(p_param, "LayerResizeTimeoutSeconds");
                     if (memoryParameter && std::strchr(p_value, '-')) {

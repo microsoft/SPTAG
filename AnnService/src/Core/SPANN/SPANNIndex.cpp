@@ -122,12 +122,17 @@ template <typename T> ErrorCode Index<T>::AcquireSaveGuard(std::unique_ptr<SaveO
 
 template <typename T> ErrorCode Index<T>::ValidateDynamicLayers() const
 {
-    if (!m_options.m_enableDynamicLayers && m_options.m_layerStoragePrefixes.empty()) return ErrorCode::Success;
+    if (!m_options.m_enableDynamicLayers && !m_options.m_enableDynamicLayerShrink &&
+        m_options.m_layerStoragePrefixes.empty()) return ErrorCode::Success;
     if ((m_options.m_storage != Storage::TIKVIO && m_options.m_storage != Storage::FILEIO) ||
         m_pQuantizer || m_options.m_enableWAL ||
         m_options.m_recovery || m_options.m_centeringToZero ||
         (m_options.m_enableDynamicLayers && (m_options.m_headMemoryTarget == 0 ||
             m_options.m_headMemoryTarget >= m_options.m_headMemoryHighWatermark)) ||
+        (m_options.m_enableDynamicLayerShrink && (!m_options.m_enableDynamicLayers ||
+            m_options.m_headMemoryLowWatermark == 0 ||
+            m_options.m_headMemoryLowWatermark >= m_options.m_headMemoryTarget)) ||
+        m_options.m_layerResizeCooldownSeconds < 0 ||
         m_options.m_layers < 1 || m_options.m_maxLayers < m_options.m_layers ||
         m_options.m_maxLayers > SearchStats::kSearchLatencyBreakdownLayers ||
         m_options.m_layerResizeTimeoutSeconds <= 0 || m_options.m_replicaCount <= 0 ||
@@ -138,7 +143,8 @@ template <typename T> ErrorCode Index<T>::ValidateDynamicLayers() const
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
             "Invalid dynamic-layer configuration: requires unquantized FILEIO/TiKV, no WAL/recovery/centering, "
             "0 < HeadMemoryTarget < HeadMemoryHighWatermark, Layers <= MaxLayers <= 16, "
-            "positive resize timeout, 0 < Ratio <= 1 and valid replica/worker counts.\n");
+            "positive resize timeout, 0 < Ratio <= 1 and valid replica/worker counts; "
+            "automatic shrinking requires dynamic layers, 0 < LowWatermark < Target and nonnegative cooldown.\n");
         return ErrorCode::FailedParseValue;
     }
 #ifndef TIKV
@@ -204,27 +210,40 @@ template <typename T> void Index<T>::StartLayerResizeWorker()
 {
     if (!m_options.m_enableDynamicLayers || m_resizeThread.joinable()) return;
     m_layerLockEnabled = true;
-    m_resizeThread = std::thread([this]() {
+    m_resizeThread = std::thread([this, automaticShrink = m_options.m_enableDynamicLayerShrink]() {
         std::unique_lock<std::mutex> lock(m_resizeRequestMutex);
         while (true) {
-            m_resizeRequestCV.wait(lock, [this]() { return m_stopResizeThread || m_resizeRequested.load(); });
+            const auto ready = [this]() { return m_stopResizeThread || m_resizeRequested.load(); };
+            bool requested = true;
+            if (automaticShrink) requested = m_resizeRequestCV.wait_for(lock, std::chrono::seconds(5), ready);
+            else m_resizeRequestCV.wait(lock, ready);
             if (m_stopResizeThread) break;
             m_resizeWorkerBusy = true;
             m_resizeRequested = false;
             lock.unlock();
             ErrorCode ret = ErrorCode::Success;
             bool shouldGrow = false;
+            bool shouldShrink = false;
             try {
                 LayerReadLock topology(m_layerMutex, m_layerLockEnabled);
-                if (m_bReady && m_options.m_enableDynamicLayers && m_layerResizeStatus == ErrorCode::Success &&
-                    GetHeadMemoryUsage() >= m_options.m_headMemoryHighWatermark) {
-                    shouldGrow = true;
+                if (m_bReady && m_options.m_enableDynamicLayers && m_layerResizeStatus == ErrorCode::Success) {
+                    const bool coolingDown = m_options.m_enableDynamicLayerShrink &&
+                        m_lastLayerResize != std::chrono::steady_clock::time_point{} &&
+                        std::chrono::steady_clock::now() - m_lastLayerResize <
+                            std::chrono::seconds(m_options.m_layerResizeCooldownSeconds);
+                    if (!coolingDown) {
+                        shouldGrow = (requested || m_options.m_enableDynamicLayerShrink) &&
+                            GetHeadMemoryUsage() >= m_options.m_headMemoryHighWatermark;
+                        shouldShrink = !shouldGrow && m_options.m_enableDynamicLayerShrink &&
+                            m_extraSearchers.size() > 1;
+                    }
                 }
             } catch (const std::exception& error) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer threshold check failed: %s.\n", error.what());
                 ret = ErrorCode::Fail;
             }
-            if (shouldGrow) ret = GrowTopLayer();
+            if (shouldGrow) ret = ResizeTopLayer(false, true);
+            else if (shouldShrink) ret = ResizeTopLayer(true, true);
             if (ret != ErrorCode::Success) m_layerResizeStatus = ret;
             m_resizeWorkerBusy = false;
             lock.lock();
@@ -242,23 +261,50 @@ template <typename T> void Index<T>::RequestLayerResize()
 
 template <typename T> ErrorCode Index<T>::GrowTopLayer()
 {
+    return ResizeTopLayer(false);
+}
+
+template <typename T> ErrorCode Index<T>::ShrinkTopLayer()
+{
+    return ResizeTopLayer(true);
+}
+
+template <typename T> ErrorCode Index<T>::ResizeTopLayer(bool shrink, bool automatic)
+{
     std::unique_lock<std::mutex> coordinator(m_resizeMutex);
-    ErrorCode ret = ValidateDynamicLayers();
-    if (ret != ErrorCode::Success) return ret;
-    if (!m_options.m_enableDynamicLayers || !m_bReady) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "GrowTopLayer requires a ready index with EnableDynamicLayers=true.\n");
-        return ErrorCode::Fail;
-    }
+    if (automatic && m_layerResizeStatus != ErrorCode::Success) return m_layerResizeStatus.load();
     m_resizingLayers = true;
-    std::unique_lock<LayerMutex> mutations(m_checkPointLock, std::defer_lock);
-    if (!mutations.try_lock_for(std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds))) {
-        m_resizingLayers = false;
-        m_layerResizeStatus = ErrorCode::Fail;
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic growth timed out waiting for writes.\n");
-        return ErrorCode::Fail;
-    }
+    const auto resize = [&]() -> ErrorCode {
+        int timeout;
+        {
+            LayerReadLock configuration(m_layerMutex, m_layerLockEnabled);
+            timeout = m_options.m_layerResizeTimeoutSeconds;
+        }
+        std::unique_lock<LayerMutex> mutations(m_checkPointLock, std::defer_lock);
+        if (!mutations.try_lock_for(std::chrono::seconds(timeout))) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic resize timed out waiting for writes.\n");
+            return ErrorCode::Fail;
+        }
+        {
+            LayerReadLock configuration(m_layerMutex, m_layerLockEnabled);
+            auto validation = ValidateDynamicLayers();
+            if (validation != ErrorCode::Success) return validation;
+            if (!m_options.m_enableDynamicLayers || !m_bReady) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Layer resize requires a ready index with EnableDynamicLayers=true.\n");
+                return ErrorCode::Fail;
+            }
+            if (automatic && m_options.m_enableDynamicLayerShrink &&
+                m_lastLayerResize != std::chrono::steady_clock::time_point{} &&
+                std::chrono::steady_clock::now() - m_lastLayerResize <
+                    std::chrono::seconds(m_options.m_layerResizeCooldownSeconds)) return ErrorCode::Success;
+            if (automatic && ((shrink && (!m_options.m_enableDynamicLayerShrink || m_extraSearchers.size() <= 1)) ||
+                (!shrink && GetHeadMemoryUsage() < m_options.m_headMemoryHighWatermark))) return ErrorCode::Success;
+        }
+        return shrink ? ShrinkTopLayerInternal(automatic) : GrowTopLayerInternal();
+    };
+    ErrorCode ret;
     try {
-        ret = GrowTopLayerInternal();
+        ret = resize();
     } catch (const std::exception& error) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer construction failed: %s.\n", error.what());
         ret = ErrorCode::Fail;
@@ -266,19 +312,28 @@ template <typename T> ErrorCode Index<T>::GrowTopLayer()
     m_resizingLayers = false;
     m_layerResizeStatus = ret;
     if (ret != ErrorCode::Success) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "GrowTopLayer failed with error %d; existing topology retained unless publication completed.\n",
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Layer resize failed with error %d; existing topology retained unless publication completed.\n",
             static_cast<int>(ret));
     }
     return ret;
 }
 
-template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
+template <typename T> ErrorCode Index<T>::DrainLayerMaintenance(const std::chrono::steady_clock::time_point& deadline)
 {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds);
-    {
-        // Finish queries that could have observed the old maintenance-admission flag before draining workers.
+    while (true) {
+        while (!PostingMaintenanceFinished()) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer timed out draining posting maintenance.\n");
+                return ErrorCode::Fail;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        // A query may depend on a worker that still needs a topology read lock.
+        // Release writer admission promptly if such a worker raced the idle check.
         std::unique_lock<LayerMutex> barrier(m_layerMutex, std::defer_lock);
-        if (!barrier.try_lock_until(deadline)) {
+        if (barrier.try_lock_until((std::min)(deadline,
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(20)))) break;
+        if (std::chrono::steady_clock::now() >= deadline) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer timed out waiting for active queries/iterators.\n");
             return ErrorCode::Fail;
         }
@@ -290,17 +345,25 @@ template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    for (auto& searcher : m_extraSearchers) {
+        auto dynamicSearcher = std::dynamic_pointer_cast<ExtraDynamicSearcher<T>>(searcher);
+        if (!dynamicSearcher || dynamicSearcher->MaintenanceStatus() != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic resize cannot proceed after failed posting maintenance.\n");
+            return ErrorCode::Fail;
+        }
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds);
+    auto drained = DrainLayerMaintenance(deadline);
+    if (drained != ErrorCode::Success) return drained;
     const int layer = static_cast<int>(m_extraSearchers.size());
     if (layer >= m_options.m_maxLayers) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer growth reached MaxLayers=%d.\n", m_options.m_maxLayers);
         return ErrorCode::Fail;
-    }
-    for (auto& searcher : m_extraSearchers) {
-        auto dynamicSearcher = std::dynamic_pointer_cast<ExtraDynamicSearcher<T>>(searcher);
-        if (!dynamicSearcher || dynamicSearcher->MaintenanceStatus() != ErrorCode::Success) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic growth cannot proceed after failed posting maintenance.\n");
-            return ErrorCode::Fail;
-        }
     }
 
     std::vector<SizeType> ids;
@@ -445,113 +508,11 @@ template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
         result = extra->MaintenanceStatus();
         if (result != ErrorCode::Success) return result;
 
-        std::filesystem::create_directory(directory / "HeadIndex", filesystemError);
-        if (filesystemError) return ErrorCode::FailedCreateFile;
-        auto headFiles = candidate.m_topIndex->GetIndexFiles();
-        std::vector<std::shared_ptr<Helper::DiskIO>> outputs;
-        for (const auto& file : *headFiles) {
-            auto output = f_createIO();
-            if (!output || !output->Initialize((directory / "HeadIndex" / file).string().c_str(),
-                std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-            outputs.push_back(output);
-        }
-        result = candidate.m_topIndex->SaveIndexData(outputs);
-        outputs.clear();
-        if (result != ErrorCode::Success) return result;
-        result = candidate.m_topLocalToGlobalID.Save(m_options.m_indexDirectory + FolderSep + candidate.m_options.m_headIDFile);
-        if (result != ErrorCode::Success) return result;
-        for (auto& searcher : candidate.m_extraSearchers) {
-            result = searcher->Checkpoint(m_options.m_indexDirectory);
-            if (result != ErrorCode::Success) return result;
-        }
-        if (m_options.m_shareDB && m_db) {
-            result = m_db->Checkpoint(m_options.m_indexDirectory);
-            if (result != ErrorCode::Success) return result;
-        }
-
-        candidate.m_options.m_enableDynamicLayers = m_options.m_enableDynamicLayers;
-        candidate.m_pMetadata = m_pMetadata;
-        candidate.m_pMetaToVec = m_pMetaToVec;
-        candidate.m_sMetadataFile = m_sMetadataFile;
-        candidate.m_sMetadataIndexFile = m_sMetadataIndexFile;
-        if (m_pMetadata) {
-            auto metadata = f_createIO(), metadataIndex = f_createIO();
-            if (!metadata || !metadataIndex ||
-                !metadata->Initialize((m_options.m_indexDirectory + FolderSep + m_sMetadataFile).c_str(), std::ios::binary | std::ios::out) ||
-                !metadataIndex->Initialize((m_options.m_indexDirectory + FolderSep + m_sMetadataIndexFile).c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-            result = m_pMetadata->SaveMetadata(metadata, metadataIndex);
-            metadata.reset();
-            metadataIndex.reset();
-            if (result != ErrorCode::Success) return result;
-            if ((result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + m_sMetadataFile)) != ErrorCode::Success) return result;
-            if ((result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + m_sMetadataIndexFile)) != ErrorCode::Success) return result;
-        }
-        auto configOutput = f_createIO();
-        const std::string pending = (directory / "indexloader.ini").string();
-        if (!configOutput || !configOutput->Initialize(pending.c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
-        result = candidate.SaveIndexConfig(configOutput);
-        configOutput.reset();
-        if (result != ErrorCode::Success) return result;
-        for (const auto& file : *headFiles) {
-            if ((result = SyncLayerPath((directory / "HeadIndex" / file).string())) != ErrorCode::Success) return result;
-        }
-        if ((result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + candidate.m_options.m_headIDFile)) != ErrorCode::Success) return result;
-        if ((result = SyncLayerPath(pending)) != ErrorCode::Success) return result;
-        if (m_options.m_storage == Storage::FILEIO || !m_options.m_distributedVersionMap) {
-            for (int i = 0; i <= layer; ++i) {
-                result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + m_options.m_deleteIDFile + "_" + std::to_string(i));
-                if (result != ErrorCode::Success) return result;
-            }
-            if (m_options.m_storage == Storage::FILEIO) {
-                for (int i = 0; i <= layer; ++i) {
-                    if (i > 0 && m_options.m_shareDB &&
-                        candidate.LayerStoragePrefix(i) == candidate.LayerStoragePrefix(0)) continue;
-                    const std::string mapping = m_options.m_indexDirectory + FolderSep +
-                        candidate.LayerStoragePrefix(i) + "_" + std::to_string(i);
-                    for (const auto& file : {mapping, mapping + "_postings", mapping + "_postings_blockpool"}) {
-                        if ((result = SyncLayerPath(file)) != ErrorCode::Success) return result;
-                    }
-                }
-            }
-        }
-        if ((result = SyncLayerPath((directory / "HeadIndex").string())) != ErrorCode::Success) return result;
-        if ((result = SyncLayerPath(directory.string())) != ErrorCode::Success) return result;
-        if ((result = SyncLayerPath(m_options.m_indexDirectory)) != ErrorCode::Success) return result;
-
-        const int extraWorkers = m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum;
         if (m_options.m_storage != Storage::FILEIO) {
-            for (int i = 0; i < extraWorkers; ++i) m_freeWorkSpaceIds->push(m_workspaceCount.fetch_add(1));
+            const int required = candidate.m_options.GetIOThreadCount();
+            while (m_workspaceCount < required) m_freeWorkSpaceIds->push(m_workspaceCount.fetch_add(1));
         }
-        std::unique_lock<LayerMutex> topology(m_layerMutex, std::defer_lock);
-        if (!topology.try_lock_until(std::chrono::steady_clock::now() + std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds))) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer timed out waiting for queries/iterators to release the old topology.\n");
-            return ErrorCode::Fail;
-        }
-        LayerReadLock exclusiveContext(m_layerMutex, true, true, true);
-        std::filesystem::rename(pending, std::filesystem::path(m_options.m_indexDirectory) / "indexloader.ini", filesystemError);
-        if (filesystemError) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot publish dynamic index manifest: %s.\n", filesystemError.message().c_str());
-            return ErrorCode::DiskIOFail;
-        }
-        published = true;
-        m_topIndex.swap(candidate.m_topIndex);
-        m_topLocalToGlobalID.Swap(candidate.m_topLocalToGlobalID);
-        m_topGlobalToLocalID.swap(candidate.m_topGlobalToLocalID);
-        m_extraSearchers.swap(candidate.m_extraSearchers);
-        m_options.m_headIndexFolder.swap(candidate.m_options.m_headIndexFolder);
-        m_options.m_headIDFile.swap(candidate.m_options.m_headIDFile);
-        m_options.m_headVectorFile.swap(candidate.m_options.m_headVectorFile);
-        m_options.m_layerStoragePrefixes.swap(candidate.m_options.m_layerStoragePrefixes);
-        m_options.m_layers = layer + 1;
-        extra->RebindHeadIndex(this, m_options);
-        candidate.m_extraSearchers.clear();
-        result = SyncLayerPath(m_options.m_indexDirectory);
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "[DYNAMIC-LAYER] posting layers %d -> %d, old head %zu vectors/%llu bytes, new head %d vectors/%llu bytes, prefix=%s, base vectors=%lld.\n",
-            layer, layer + 1, ids.size(), (unsigned long long)previousMemory,
-            m_topIndex->GetNumSamples(), (unsigned long long)GetHeadMemoryUsage(), prefix.c_str(),
-            (std::int64_t)m_extraSearchers.front()->GetNumSamples());
-        return result;
+        return PublishLayerCandidate(candidate, directory.string(), published);
     };
     ErrorCode result;
     try {
@@ -570,6 +531,272 @@ template <typename T> ErrorCode Index<T>::GrowTopLayerInternal()
         }
         // The isolated TiKV prefix is never reused; partial KV data is retained for explicit administrative cleanup.
     }
+    return result;
+}
+
+template <typename T> ErrorCode Index<T>::ShrinkTopLayerInternal(bool automatic)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds);
+    auto ret = DrainLayerMaintenance(deadline);
+    if (ret != ErrorCode::Success) return ret;
+    const int layers = static_cast<int>(m_extraSearchers.size());
+    if (layers <= 1) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic shrinking must retain posting layer 0.\n");
+        return ErrorCode::Fail;
+    }
+    auto upper = std::dynamic_pointer_cast<ExtraDynamicSearcher<T>>(m_extraSearchers.back());
+    std::vector<SizeType> ids;
+    ret = upper->GetContainedIDs(ids);
+    if (ret != ErrorCode::Success) return ret;
+    std::sort(ids.begin(), ids.end());
+    if (ids.empty()) {
+        if (automatic) return ErrorCode::Success;
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot shrink an empty routing layer.\n");
+        return ErrorCode::EmptyData;
+    }
+    if (std::adjacent_find(ids.begin(), ids.end()) != ids.end() || ids.front() < 0 ||
+        ids.back() >= m_options.m_maxID || ids.size() > static_cast<size_t>(MaxSize) ||
+        ids.size() > (std::numeric_limits<size_t>::max)() / GetValueSize()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid routing IDs or vector size during shrinking.\n");
+        return ErrorCode::Key_OverFlow;
+    }
+    const long double minimumBytes = static_cast<long double>(ids.size()) *
+        (GetValueSize() + 2 * sizeof(SizeType) + 2 * sizeof(void*));
+    if (minimumBytes > m_options.m_headMemoryTarget) {
+        if (automatic) return ErrorCode::Success;
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Promoted routing vectors exceed HeadMemoryTarget before construction.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+    // The candidate is compact: deleted head slots must not inflate its per-vector estimate.
+    const auto headSlots = m_topIndex->GetNumSamples();
+    const long double estimate = static_cast<long double>(GetHeadMemoryUsage()) * ids.size() /
+        (std::max)(SizeType{1}, headSlots);
+    if (automatic && estimate > m_options.m_headMemoryLowWatermark) return ErrorCode::Success;
+    if (automatic) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "[DYNAMIC-LAYER] shrink eligible: routing=%zu estimated=%.0Lf low=%llu target=%llu.\n",
+            ids.size(), estimate, (unsigned long long)m_options.m_headMemoryLowWatermark,
+            (unsigned long long)m_options.m_headMemoryTarget);
+    }
+#ifndef _MSC_VER
+    const long pages = sysconf(_SC_AVPHYS_PAGES), pageSize = sysconf(_SC_PAGESIZE);
+    if (pages <= 0 || pageSize <= 0) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot determine available memory for layer shrinking.\n");
+        return ErrorCode::Fail;
+    }
+    const long double workingBytes = 3 * (std::max)(minimumBytes, estimate) + 2.0L * ids.size() * GetValueSize();
+    if (workingBytes > static_cast<long double>(pages) * pageSize) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Insufficient available memory for the replacement head and construction buffers.\n");
+        return ErrorCode::MemoryOverFlow;
+    }
+#endif
+    ByteArray bytes;
+    ret = upper->ExportRoutingVectors(ids, bytes, deadline);
+    if (ret != ErrorCode::Success) return ret;
+    ExtraWorkSpace workspace;
+    InitWorkSpace(&workspace);
+    if (workspace.m_diskRequests.empty() || workspace.m_diskRequests[0].m_status < 0) return ErrorCode::Fail;
+    for (SizeType vid : ids) {
+        ret = m_extraSearchers[layers - 2]->CheckPosting(vid, nullptr, &workspace);
+        if (ret != ErrorCode::Success) return ret;
+    }
+
+    std::random_device random;
+    std::ostringstream token;
+    token << "_dynamic_shrink_" << layers << "_" << std::hex << random() << random();
+    const std::string generation = token.str();
+    const auto directory = std::filesystem::path(m_options.m_indexDirectory) / generation;
+    std::error_code filesystemError;
+    if (!std::filesystem::create_directory(directory, filesystemError) || filesystemError) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot create shrink generation: %s.\n", directory.string().c_str());
+        return ErrorCode::FailedCreateFile;
+    }
+    Index<T> candidate;
+    candidate.m_options = m_options;
+    candidate.m_options.m_enableDynamicLayers = false;
+    candidate.m_options.m_layers = layers - 1;
+    candidate.m_options.m_headIndexFolder = generation + FolderSep + "HeadIndex";
+    candidate.m_options.m_headIDFile = generation + FolderSep + "HeadIDs.bin";
+    candidate.m_options.m_headVectorFile = generation + FolderSep + "HeadVectors.bin";
+    candidate.m_options.m_layerStoragePrefixes.clear();
+    for (int i = 0; i < layers - 1; ++i) {
+        if (i > 0) candidate.m_options.m_layerStoragePrefixes += '|';
+        candidate.m_options.m_layerStoragePrefixes += LayerStoragePrefix(i);
+    }
+    candidate.m_extraSearchers.assign(m_extraSearchers.begin(), m_extraSearchers.end() - 1);
+    bool published = false;
+    const auto construct = [&]() -> ErrorCode {
+        const auto configPath = (directory / "head-options.ini").string();
+        auto config = f_createIO();
+        if (!config || !config->Initialize(configPath.c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
+        if (config->WriteString("[BuildHead]\n") == 0) return ErrorCode::DiskIOFail;
+        auto result = m_topIndex->SaveConfig(config);
+        config.reset();
+        if (result != ErrorCode::Success) return result;
+        config = f_createIO();
+        if (!config || !config->Initialize(configPath.c_str(), std::ios::in)) return ErrorCode::FailedOpenFile;
+        Helper::IniReader reader;
+        if ((result = reader.LoadIni(config)) != ErrorCode::Success) return result;
+        candidate.m_topIndex = VectorIndex::CreateInstance(m_topIndex->GetIndexAlgoType(), GetEnumValueType<T>());
+        if (!candidate.m_topIndex) return ErrorCode::FailedParseValue;
+        for (const auto& parameter : reader.GetParameters("BuildHead")) {
+            result = candidate.m_topIndex->SetParameter(parameter.first.c_str(), parameter.second.c_str());
+            if (result != ErrorCode::Success) return result;
+        }
+        auto vectors = std::make_shared<BasicVectorSet>(bytes, GetEnumValueType<T>(),
+            m_options.m_dim, static_cast<SizeType>(ids.size()));
+        if (std::chrono::steady_clock::now() >= deadline) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Timed out before constructing promoted head.\n");
+            return ErrorCode::Fail;
+        }
+        result = candidate.m_topIndex->BuildIndex(vectors, nullptr, false, true, false);
+        if (result != ErrorCode::Success) return result;
+        candidate.m_topLocalToGlobalID.Initialize(static_cast<SizeType>(ids.size()), 1,
+            m_options.m_datasetRowsInBlock, m_options.m_datasetCapacity, ids.data(), false);
+        for (SizeType i = 0; i < static_cast<SizeType>(ids.size()); ++i)
+            candidate.m_topGlobalToLocalID[ids[i]] = i;
+        if (candidate.GetHeadMemoryUsage() > m_options.m_headMemoryTarget) {
+            SPTAGLIB_LOG(automatic ? Helper::LogLevel::LL_Info : Helper::LogLevel::LL_Error,
+                "Promoted head exceeds HeadMemoryTarget; retaining existing topology.\n");
+            return automatic ? ErrorCode::Success : ErrorCode::MemoryOverFlow;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Timed out constructing promoted head.\n");
+            return ErrorCode::Fail;
+        }
+        return PublishLayerCandidate(candidate, directory.string(), published);
+    };
+    try {
+        ret = construct();
+    } catch (const std::exception& error) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Shrink candidate construction failed: %s.\n", error.what());
+        ret = ErrorCode::Fail;
+    }
+    candidate.m_extraSearchers.clear();
+    if (!published) {
+        std::filesystem::remove_all(directory, filesystemError);
+        if (filesystemError) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot clean failed shrink generation %s: %s.\n",
+                directory.string().c_str(), filesystemError.message().c_str());
+        }
+    }
+    return ret;
+}
+
+template <typename T> ErrorCode Index<T>::PublishLayerCandidate(Index<T>& candidate,
+    const std::string& path, bool& published)
+{
+    const std::filesystem::path directory(path);
+    const int oldLayers = static_cast<int>(m_extraSearchers.size());
+    const auto oldCount = m_topIndex->GetNumSamples();
+    const auto oldMemory = GetHeadMemoryUsage();
+    const int layers = candidate.m_options.m_layers;
+    std::error_code filesystemError;
+    std::filesystem::create_directory(directory / "HeadIndex", filesystemError);
+    if (filesystemError) return ErrorCode::FailedCreateFile;
+    auto headFiles = candidate.m_topIndex->GetIndexFiles();
+    std::vector<std::shared_ptr<Helper::DiskIO>> outputs;
+    for (const auto& file : *headFiles) {
+        auto output = f_createIO();
+        if (!output || !output->Initialize((directory / "HeadIndex" / file).string().c_str(),
+            std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+        outputs.push_back(output);
+    }
+    auto result = candidate.m_topIndex->SaveIndexData(outputs);
+    outputs.clear();
+    if (result != ErrorCode::Success) return result;
+    result = candidate.m_topLocalToGlobalID.Save(m_options.m_indexDirectory + FolderSep + candidate.m_options.m_headIDFile);
+    if (result != ErrorCode::Success) return result;
+    for (auto& searcher : candidate.m_extraSearchers) {
+        result = searcher->Checkpoint(m_options.m_indexDirectory);
+        if (result != ErrorCode::Success) return result;
+    }
+    if (m_options.m_shareDB && m_db) {
+        result = m_db->Checkpoint(m_options.m_indexDirectory);
+        if (result != ErrorCode::Success) return result;
+    }
+    candidate.m_options.m_enableDynamicLayers = m_options.m_enableDynamicLayers;
+    candidate.m_pMetadata = m_pMetadata;
+    candidate.m_pMetaToVec = m_pMetaToVec;
+    candidate.m_sMetadataFile = m_sMetadataFile;
+    candidate.m_sMetadataIndexFile = m_sMetadataIndexFile;
+    if (m_pMetadata) {
+        auto metadata = f_createIO(), metadataIndex = f_createIO();
+        if (!metadata || !metadataIndex ||
+            !metadata->Initialize((m_options.m_indexDirectory + FolderSep + m_sMetadataFile).c_str(), std::ios::binary | std::ios::out) ||
+            !metadataIndex->Initialize((m_options.m_indexDirectory + FolderSep + m_sMetadataIndexFile).c_str(), std::ios::binary | std::ios::out))
+            return ErrorCode::FailedCreateFile;
+        result = m_pMetadata->SaveMetadata(metadata, metadataIndex);
+        metadata.reset();
+        metadataIndex.reset();
+        if (result != ErrorCode::Success) return result;
+        if ((result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + m_sMetadataFile)) != ErrorCode::Success) return result;
+        if ((result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + m_sMetadataIndexFile)) != ErrorCode::Success) return result;
+    }
+    auto config = f_createIO();
+    const auto pending = directory / "indexloader.ini";
+    if (!config || !config->Initialize(pending.string().c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
+    result = candidate.SaveIndexConfig(config);
+    config.reset();
+    if (result != ErrorCode::Success) return result;
+    for (const auto& file : *headFiles) {
+        if ((result = SyncLayerPath((directory / "HeadIndex" / file).string())) != ErrorCode::Success) return result;
+    }
+    if ((result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + candidate.m_options.m_headIDFile)) != ErrorCode::Success) return result;
+    if ((result = SyncLayerPath(pending.string())) != ErrorCode::Success) return result;
+    if (m_options.m_storage == Storage::FILEIO || !m_options.m_distributedVersionMap) {
+        for (int i = 0; i < layers; ++i) {
+            result = SyncLayerPath(m_options.m_indexDirectory + FolderSep + m_options.m_deleteIDFile + "_" + std::to_string(i));
+            if (result != ErrorCode::Success) return result;
+        }
+        if (m_options.m_storage == Storage::FILEIO) {
+            for (int i = 0; i < layers; ++i) {
+                if (i > 0 && m_options.m_shareDB &&
+                    candidate.LayerStoragePrefix(i) == candidate.LayerStoragePrefix(0)) continue;
+                const std::string mapping = m_options.m_indexDirectory + FolderSep +
+                    candidate.LayerStoragePrefix(i) + "_" + std::to_string(i);
+                for (const auto& file : {mapping, mapping + "_postings", mapping + "_postings_blockpool"}) {
+                    if ((result = SyncLayerPath(file)) != ErrorCode::Success) return result;
+                }
+            }
+        }
+    }
+    if ((result = SyncLayerPath((directory / "HeadIndex").string())) != ErrorCode::Success) return result;
+    if ((result = SyncLayerPath(directory.string())) != ErrorCode::Success) return result;
+    if ((result = SyncLayerPath(m_options.m_indexDirectory)) != ErrorCode::Success) return result;
+    std::unique_lock<LayerMutex> topology(m_layerMutex, std::defer_lock);
+    if (!topology.try_lock_for(std::chrono::seconds(m_options.m_layerResizeTimeoutSeconds))) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer timed out waiting for queries/iterators to release the old topology.\n");
+        return ErrorCode::Fail;
+    }
+    LayerReadLock exclusiveContext(m_layerMutex, true, true, true);
+    std::filesystem::rename(pending, std::filesystem::path(m_options.m_indexDirectory) / "indexloader.ini", filesystemError);
+    if (filesystemError) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot publish dynamic index manifest: %s.\n", filesystemError.message().c_str());
+        return ErrorCode::DiskIOFail;
+    }
+    published = true;
+    m_topIndex.swap(candidate.m_topIndex);
+    m_topLocalToGlobalID.Swap(candidate.m_topLocalToGlobalID);
+    m_topGlobalToLocalID.swap(candidate.m_topGlobalToLocalID);
+    m_extraSearchers.swap(candidate.m_extraSearchers);
+    m_options.m_headIndexFolder.swap(candidate.m_options.m_headIndexFolder);
+    m_options.m_headIDFile.swap(candidate.m_options.m_headIDFile);
+    m_options.m_headVectorFile.swap(candidate.m_options.m_headVectorFile);
+    m_options.m_layerStoragePrefixes.swap(candidate.m_options.m_layerStoragePrefixes);
+    m_options.m_layers = layers;
+    m_lastLayerResize = std::chrono::steady_clock::now();
+    for (auto& searcher : m_extraSearchers) {
+        auto dynamic = std::static_pointer_cast<ExtraDynamicSearcher<T>>(searcher);
+        if (dynamic->GetHeadIndex() != this) dynamic->RebindHeadIndex(this, m_options);
+    }
+    candidate.m_extraSearchers.clear();
+    result = SyncLayerPath(m_options.m_indexDirectory);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+        "[DYNAMIC-LAYER] posting layers %d -> %d, old head %zu vectors/%llu bytes, new head %d vectors/%llu bytes, prefix=%s, base vectors=%lld.\n",
+        oldLayers, layers, static_cast<size_t>(oldCount), (unsigned long long)oldMemory,
+        m_topIndex->GetNumSamples(), (unsigned long long)GetHeadMemoryUsage(), LayerStoragePrefix(layers - 1).c_str(),
+        (std::int64_t)m_extraSearchers.front()->GetNumSamples());
     return result;
 }
 
@@ -2397,6 +2624,7 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
     if (m_layerLockEnabled && !LayerReadLock::IsWriteHeld(m_layerMutex)) topology.lock();
     LayerReadLock exclusiveContext(m_layerMutex, m_layerLockEnabled, true, true);
     if (m_bReady && (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayers") ||
+        SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayerShrink") ||
         SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "LayerStoragePrefixes") ||
         (m_layerLockEnabled && (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "MaxID") ||
           SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "Layers") ||
@@ -2684,9 +2912,13 @@ template <typename T> ErrorCode Index<T>::DeleteIndex(const SizeType &p_id, int 
         {
             return ErrorCode::VectorNotFound;
         }
-        return m_topIndex->DeleteIndex(it->second);
+        auto ret = m_topIndex->DeleteIndex(it->second);
+        if (ret == ErrorCode::Success) RequestLayerResize();
+        return ret;
     }
-    return m_extraSearchers[tolayer]->DeleteIndex(p_id);
+    auto ret = m_extraSearchers[tolayer]->DeleteIndex(p_id);
+    if (ret == ErrorCode::Success) RequestLayerResize();
+    return ret;
 }
 
 template <typename T> ErrorCode Index<T>::ResetIndex(const SizeType& p_id, int tolayer)

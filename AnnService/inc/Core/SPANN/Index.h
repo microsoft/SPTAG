@@ -30,6 +30,7 @@
 #include "LayerReadLock.h"
 
 #include <functional>
+#include <chrono>
 #include <shared_mutex>
 #include <memory>
 #include <condition_variable>
@@ -99,6 +100,7 @@ namespace SPTAG
             std::condition_variable m_resizeRequestCV;
             std::thread m_resizeThread;
             bool m_stopResizeThread = false;
+            std::chrono::steady_clock::time_point m_lastLayerResize{};
 
             std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
@@ -278,6 +280,8 @@ namespace SPTAG
             inline bool NeedRefine() const
             {
                 LayerReadLock lock(m_layerMutex, m_layerLockEnabled);
+                // Coordinated checkpoints preserve head slots and mappings; topology rebuilds compact them.
+                if (m_layerLockEnabled) return false;
                 return m_topIndex->NeedRefine();
                 //return GetNumDeleted(0) > (size_t)(GetNumSamples(0) * m_options.m_fDeletePercentageForRefine);
             }
@@ -393,7 +397,11 @@ namespace SPTAG
             void StartLayerResizeWorker();
             void RequestLayerResize();
             bool PostingMaintenanceFinished();
+            ErrorCode ResizeTopLayer(bool shrink, bool automatic = false);
+            ErrorCode DrainLayerMaintenance(const std::chrono::steady_clock::time_point& deadline);
             ErrorCode GrowTopLayerInternal();
+            ErrorCode ShrinkTopLayerInternal(bool automatic);
+            ErrorCode PublishLayerCandidate(Index<T>& candidate, const std::string& directory, bool& published);
             std::string LayerStoragePrefix(int layer) const;
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);
@@ -409,6 +417,7 @@ namespace SPTAG
 
         public:
             ErrorCode GrowTopLayer();
+            ErrorCode ShrinkTopLayer();
             std::uint64_t GetHeadMemoryUsage() const;
             ErrorCode GetLayerResizeStatus() const { return m_layerResizeStatus.load(); }
             bool AllowSearchMaintenance() const { return !m_resizingLayers.load(); }

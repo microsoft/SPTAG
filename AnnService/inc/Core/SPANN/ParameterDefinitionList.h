@@ -233,10 +233,13 @@ DefineSSDParameter(m_resumeLayer, int, -1, "ResumeLayer")
 DefineSSDParameter(m_maxID, SizeType,  1000000000, "MaxID")
 DefineSSDParameter(m_shareDB, bool, true, "ShareDB")
 DefineSSDParameter(m_enableDynamicLayers, bool, false, "EnableDynamicLayers")
+DefineSSDParameter(m_enableDynamicLayerShrink, bool, false, "EnableDynamicLayerShrink")
 DefineSSDParameter(m_headMemoryHighWatermark, std::uint64_t, 0, "HeadMemoryHighWatermark")
 DefineSSDParameter(m_headMemoryTarget, std::uint64_t, 0, "HeadMemoryTarget")
+DefineSSDParameter(m_headMemoryLowWatermark, std::uint64_t, 0, "HeadMemoryLowWatermark")
 DefineSSDParameter(m_maxLayers, int, 16, "MaxLayers")
 DefineSSDParameter(m_layerResizeTimeoutSeconds, int, 300, "LayerResizeTimeoutSeconds")
+DefineSSDParameter(m_layerResizeCooldownSeconds, int, 60, "LayerResizeCooldownSeconds")
 DefineSSDParameter(m_layerStoragePrefixes, std::string, std::string(""), "LayerStoragePrefixes")
 
 #endif

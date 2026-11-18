@@ -525,6 +525,35 @@ namespace SPTAG
                 }
             }
 
+            ErrorCode ReadVersionsForMaintenance(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
+            {
+                if (vids.empty()) {
+                    versions.clear();
+                    return ErrorCode::Success;
+                }
+                std::vector<std::string> keys;
+                keys.reserve(vids.size());
+                for (SizeType vid : vids) keys.push_back(VersionKey(vid));
+                std::vector<std::string> values;
+                auto ret = m_db->MultiGet(keys, &values, MaxTimeout, nullptr);
+                if (ret != ErrorCode::Success || values.size() != vids.size()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "Cannot read complete maintenance versions for layer %d: error %d, expected %zu, received %zu.\n",
+                        m_layer, static_cast<int>(ret), vids.size(), values.size());
+                    return ret == ErrorCode::Success ? ErrorCode::DiskIOFail : ret;
+                }
+                versions.resize(vids.size());
+                for (size_t i = 0; i < values.size(); ++i) {
+                    if (values[i].size() > 1) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid maintenance version for VID %lld.\n",
+                            static_cast<long long>(vids[i]));
+                        return ErrorCode::DiskIOFail;
+                    }
+                    versions[i] = values[i].empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(values[i][0]);
+                }
+                return ErrorCode::Success;
+            }
+
         private:
             ErrorCode LoadMetadataFromTiKV()
             {
