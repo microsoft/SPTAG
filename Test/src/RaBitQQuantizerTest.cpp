@@ -720,7 +720,7 @@ BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsPreserveADCSDCAndPersistence)
             BOOST_CHECK_EQUAL(otherBits->LocalCentroidCount(), centerCount);
             for (auto model : {loaded, memoryLoaded, std::static_pointer_cast<COMMON::IQuantizer>(clone)}) {
                 model->SetEnableADC(true);
-                BOOST_CHECK_EQUAL(model->QuantizeSize(), (128 + 2 + centerCount) * sizeof(float));
+                BOOST_CHECK_EQUAL(model->QuantizeSize(), (128 + 3 + 2 * centerCount) * sizeof(float));
                 std::vector<std::uint8_t> query(model->QuantizeSize()), encoded(model->GetNumSubvectors());
                 model->QuantizeVector(raw->GetVector(0), query.data());
                 for (int i = 0; i < count; ++i) {

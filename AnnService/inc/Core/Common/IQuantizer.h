@@ -25,6 +25,10 @@ namespace SPTAG
 
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
 
+            virtual float InnerProductDistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
+
+            virtual float InnerProductDistance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
+
             template <typename T>
             std::function<float(const T*, const T*, DimensionType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method) const;
 

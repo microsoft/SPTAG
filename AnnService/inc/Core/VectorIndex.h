@@ -68,9 +68,9 @@ public:
         if (!m_pQuantizer) return ComputeDistance(pX, pY);
         const auto* x = static_cast<const std::uint8_t*>(pX);
         const auto* y = static_cast<const std::uint8_t*>(pY);
-        return GetDistCalcMethod() == DistCalcMethod::L2
-            ? m_pQuantizer->L2DistanceSDC(x, y)
-            : m_pQuantizer->CosineDistanceSDC(x, y);
+        if (GetDistCalcMethod() == DistCalcMethod::L2) return m_pQuantizer->L2DistanceSDC(x, y);
+        if (GetDistCalcMethod() == DistCalcMethod::InnerProduct) return m_pQuantizer->InnerProductDistanceSDC(x, y);
+        return m_pQuantizer->CosineDistanceSDC(x, y);
     }
     virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;

@@ -156,6 +156,12 @@ std::function<float(const std::uint8_t *, const std::uint8_t *, DimensionType)> 
             return L2Distance(pX, pY);
         });
     }
+    else if (p_method == SPTAG::DistCalcMethod::InnerProduct)
+    {
+        return ([this](const std::uint8_t *pX, const std::uint8_t *pY, DimensionType length) {
+            return InnerProductDistance(pX, pY);
+        });
+    }
     else
     {
         return ([this](const std::uint8_t *pX, const std::uint8_t *pY, DimensionType length) {

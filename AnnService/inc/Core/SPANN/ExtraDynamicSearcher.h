@@ -730,6 +730,29 @@ namespace SPTAG::SPANN {
                 std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
 
                 int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr);
+                const bool innerProduct = m_headIndex->GetDistCalcMethod() == DistCalcMethod::InnerProduct;
+                if (numClusters <= 1 && innerProduct && localIndices.size() > 1) {
+                    // A single IP cluster does not imply duplicate vectors; retain every live ID.
+                    std::sort(localIndices.begin(), localIndices.end());
+                    args.counts[0] = static_cast<SizeType>(localIndices.size() / 2);
+                    args.counts[1] = static_cast<SizeType>(localIndices.size()) - args.counts[0];
+                    SizeType begin = 0;
+                    for (int k = 0; k < 2; ++k) {
+                        args.clusterIdx[k] = localIndices[begin + args.counts[k] - 1];
+                        for (SizeType j = begin; j < begin + args.counts[k]; ++j) {
+                            if (*reinterpret_cast<const SizeType*>(postingP + localIndices[j] * m_vectorInfoSize) == headID) {
+                                args.clusterIdx[k] = localIndices[j];
+                                break;
+                            }
+                        }
+                        std::memcpy(args.centers + k * args._D, smallSample[args.clusterIdx[k]], m_vectorDataSize);
+                        begin += args.counts[k];
+                    }
+                    numClusters = 2;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "IP posting %lld has one cluster; preserving %zu live vectors in two partitions\n",
+                                 static_cast<long long>(headID), localIndices.size());
+                }
 
                 auto clusterEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(clusterEnd - clusterBegin).count();
@@ -776,7 +799,13 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
-                    if (!theSameHead && m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + k * args._D) < Epsilon) {
+                    const SizeType clusterHeadVID = *reinterpret_cast<const SizeType*>(
+                        postingP + args.clusterIdx[k] * m_vectorInfoSize);
+                    // IP scores may be negative for distinct vectors and cannot test identity.
+                    const bool sameHead = !theSameHead && (innerProduct ? clusterHeadVID == headID :
+                        m_headIndex->ComputeDistanceBetweenStoredVectors(
+                            headVec->c_str() + m_metaDataSize, args.centers + k * args._D) < Epsilon);
+                    if (sameHead) {
                         newHeadsID[k] = headID;
                         newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
@@ -796,7 +825,7 @@ namespace SPTAG::SPANN {
                         m_stat.m_splitSameHeadCount.fetch_add(1, std::memory_order_relaxed);
                     }
                     else {
-                        newHeadVID = *((SizeType*)(postingP + args.clusterIdx[k] * m_vectorInfoSize));
+                        newHeadVID = clusterHeadVID;
                         uint8_t version = *((uint8_t*)(postingP + args.clusterIdx[k] * m_vectorInfoSize + sizeof(SizeType)));
 
                         newHeadsID[k] = newHeadVID;

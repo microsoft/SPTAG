@@ -115,7 +115,7 @@ std::size_t RaBitQQuantizer::LocalCentroidCount() const
 ErrorCode RaBitQQuantizer::InitializeLocalCentroids(std::uint32_t p_count)
 {
     const std::uint64_t queryFloats =
-        static_cast<std::uint64_t>(m_padded_dimension) + kQueryFactorCount + p_count;
+        static_cast<std::uint64_t>(m_padded_dimension) + kQueryFactorCount + 1 + 2ULL * p_count;
     if (p_count == 0 || p_count > kMaxLocalCentroids ||
         queryFloats > static_cast<std::uint64_t>((std::numeric_limits<int>::max)()) / sizeof(float)) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid local RaBitQ centroid count: %u.\n", p_count);
@@ -212,15 +212,55 @@ float RaBitQQuantizer::ComputeL2Distance(
 float RaBitQQuantizer::CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                 "RaBitQ official full-code adapter supports L2 distance only.\n");
+                 "RaBitQ supports L2 and InnerProduct, not Cosine distance.\n");
     return std::numeric_limits<float>::infinity();
 }
 
 float RaBitQQuantizer::CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                 "RaBitQ official full-code adapter supports L2 distance only.\n");
+                 "RaBitQ supports L2 and InnerProduct, not Cosine distance.\n");
     return std::numeric_limits<float>::infinity();
+}
+
+float RaBitQQuantizer::InnerProductDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
+{
+    return ComputeInnerProductDistance(p_x, p_y, m_enable_adc);
+}
+
+float RaBitQQuantizer::InnerProductDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
+{
+    return ComputeInnerProductDistance(p_x, p_y, false);
+}
+
+float RaBitQQuantizer::ComputeInnerProductDistance(
+    const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const
+{
+    thread_local std::vector<float> reconstructed_query;
+    const float* query = reinterpret_cast<const float*>(p_x);
+    const auto centroidId = CentroidId(p_y);
+    float centroidDot, k1xsumq;
+    if (p_adc) {
+        const auto* factors = p_x + static_cast<std::size_t>(m_padded_dimension) * sizeof(float);
+        std::memcpy(&k1xsumq, factors + sizeof(float), sizeof(float));
+        const std::size_t dotOffset = kQueryFactorCount + LocalCentroidCount() +
+            (m_localCentroids.empty() ? 0 : 1 + centroidId);
+        std::memcpy(&centroidDot, factors + dotOffset * sizeof(float), sizeof(float));
+    } else {
+        Decode(p_x, reconstructed_query);
+        query = reconstructed_query.data();
+        centroidDot = rabitqlib::dot_product(query, Centroid(centroidId),
+                                            static_cast<std::size_t>(m_padded_dimension));
+        k1xsumq = -0.5F * std::accumulate(query, query + m_padded_dimension, 0.0F);
+    }
+
+    float f_add, f_rescale;
+    ReadDistanceFactors(p_y, f_add, f_rescale);
+    // L2's scale is -2 times the unbiased residual scale. Keep existing codes
+    // and estimate 1 - <q,c> - <q,x-c> without reconstructing the base vector.
+    return rabitqlib::quant::full_est_dist<float, std::uint8_t>(
+        p_y, query, m_ip_func, static_cast<std::size_t>(m_padded_dimension),
+        static_cast<std::size_t>(m_bits), 1.0F, 0.5F * f_rescale, -centroidDot, k1xsumq);
 }
 
 void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc) const
@@ -239,12 +279,21 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
             input, input + m_padded_dimension, 0.0F);
         std::memcpy(p_output + query_bytes, &g_add, sizeof(float));
         std::memcpy(p_output + query_bytes + sizeof(float), &k1xsumq, sizeof(float));
+        auto* dotFactors = p_output + query_bytes +
+            (kQueryFactorCount + LocalCentroidCount()) * sizeof(float);
+        const float centroidDot = rabitqlib::dot_product(
+            input, m_centroid.data(), static_cast<std::size_t>(m_padded_dimension));
+        std::memcpy(dotFactors, &centroidDot, sizeof(float));
         for (std::size_t id = 0; id < LocalCentroidCount(); ++id) {
             const float localNorm = rabitqlib::euclidean_sqr(
                 input, Centroid(static_cast<std::uint32_t>(id)),
                 static_cast<std::size_t>(m_padded_dimension));
             std::memcpy(p_output + query_bytes + (kQueryFactorCount + id) * sizeof(float),
                         &localNorm, sizeof(float));
+            const float localDot = rabitqlib::dot_product(
+                input, Centroid(static_cast<std::uint32_t>(id)),
+                static_cast<std::size_t>(m_padded_dimension));
+            std::memcpy(dotFactors + (1 + id) * sizeof(float), &localDot, sizeof(float));
         }
         return;
     }
@@ -352,7 +401,7 @@ int RaBitQQuantizer::QuantizeSize() const
     return m_enable_adc
         ? static_cast<int>(
               sizeof(float) *
-              (static_cast<std::size_t>(m_padded_dimension) + kQueryFactorCount + LocalCentroidCount()))
+              (static_cast<std::size_t>(m_padded_dimension) + kQueryFactorCount + 1 + 2 * LocalCentroidCount()))
         : static_cast<int>(CodeBytes());
 }
 

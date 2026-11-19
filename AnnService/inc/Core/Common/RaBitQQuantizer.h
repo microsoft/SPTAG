@@ -30,6 +30,8 @@ public:
 
     float L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float L2DistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
+    float InnerProductDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
+    float InnerProductDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     void QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc = true) const override;
@@ -81,6 +83,7 @@ private:
     const float* Centroid(std::uint32_t p_id) const;
     void Decode(const std::uint8_t* p_code, std::vector<float>& p_output) const;
     float ComputeL2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const;
+    float ComputeInnerProductDistance(const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const;
     void PrepareInput(const float* p_input, std::vector<float>& p_output) const;
     void UnpackCode(const std::uint8_t* p_code, std::uint8_t* p_output) const;
     void ReadCodeFactors(const std::uint8_t* p_code,
