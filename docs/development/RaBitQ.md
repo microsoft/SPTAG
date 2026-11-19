@@ -56,8 +56,9 @@ For training and index configuration commands, use the
 [user guide](../RaBitQ_Global_Quantizer.md#train-and-encode).
 
 The encoded vectors are stored in a `UInt8` container, but their code payload is
-packed at the configured bit width. Five Float factors follow each packed code,
-giving a global stored-code size of `paddedDimension * bits / 8 + 5 * sizeof(float)`.
+packed at the configured bit width. Six Float factors follow each new packed code:
+the five existing L2/reconstruction factors and the official IP additive factor.
+The global stored-code size is `paddedDimension * bits / 8 + 6 * sizeof(float)`.
 Queries remain raw Float vectors and are prepared through the loaded `IQuantizer`.
 
 The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
@@ -70,16 +71,30 @@ intentionally unsupported. Measurement protocols and results belong to the
 `DistCalcMethod=InnerProduct` means **1 - dot(query, base)**, with smaller
 scores preferred. Negative distances are valid. Use a model trained with
 `normalize=false`; normalizing base vectors changes maximum-inner-product
-ranking into a different problem. The original L2 codes and model versions
-2/3/4 are reused without conversion.
+ranking into a different problem. Only the corrected six-factor format is
+supported: version 6 for global models and version 7 for local models.
+Earlier model versions are rejected for both L2 and IP.
 
 For the rotated residual `r = x - c`, let `u` be the unpacked integer code
 minus its midpoint `(2^bits - 1)/2`. The stored L2 factor is
-`f_rescale = -2 * ||r||^2 / dot(r,u)`. The IP estimator is:
+`f_rescale = -2 * ||r||^2 / dot(r,u)`. The official IP estimator is:
 
 ```text
-1 - dot(q,c) + 0.5 * f_rescale * dot(q,u)
+ip_add = 1 - dot(r,c) + ||r||^2 * dot(c,u) / dot(r,u)
+distance = ip_add - dot(q,c) + 0.5 * f_rescale * dot(q,u)
 ```
+
+The encoder derives `ip_add = 1 - dot(r,c) + (f_add_L2 - ||r||^2)/2`
+from the original residual and the existing L2 factor, without repeating
+quantization. The original packed bits, L2 factors, and reconstruction are
+unchanged. The extra scalar is precomputed during encoding; no raw-vector
+reranking is needed at query time.
+
+The previous IP path used `ip_add=1`, omitting the centroid correction.
+For estimator residual error `e`, that path had error `-dot(q,e)` rather than
+the official `-dot(q-c,e)`. Historical IP measurements using that path do not
+establish the accuracy of the corrected estimator. The correction does not
+make IP a metric or guarantee that posting splits converge.
 
 The official packed-code inner-product kernel evaluates `dot(q,u)`; base
 vectors are not reconstructed or fetched for ADC. Zero residuals have
@@ -105,9 +120,14 @@ unchanged. Rebuild previously created IP trees to obtain this correction.
 The [single-cluster discussion](SingleCluster_Assumption.md) separates the
 underlying assumption, counterexamples and fallback tradeoffs.
 
-Stored models and codes are unchanged by IP support. Rebuild consumers of the
-C++ interface. A graph/posting index must still be rebuilt when changing its
-distance metric; reusing an L2 graph is not an IP index build.
+The corrected code adds four bytes per vector: global 128-dimensional 4-bit
+codes grow from 84 to 88 bytes. Existing codes do not contain the exact residual
+information needed to recover the correction. Old models cannot be loaded by
+this implementation: train a new model, re-encode the original vectors, and
+rebuild a separate index. Never resume an old index using a corrected model.
+For supported models, `CloneWithBits` retains rotation and centroids while
+changing bit width. A graph/posting index must also be rebuilt when changing
+its distance metric.
 
 ## ADC query buffer layout
 
@@ -135,11 +155,11 @@ New models apply the same random orthogonal rotation to training vectors,
 centroids, encoded vectors, and ADC queries. Reconstruction applies the inverse
 transform, and bit-width clones retain the original rotation.
 
-Global models store the rotation in version 3. Existing version-2 models retain
-their identity transform and serialization; loading them does not silently
-upgrade their codes. To use rotation with an old corpus, train a new model,
-re-encode the base vectors, and build a separate index. Do not replace only the
-model file under an existing index.
+Global models use version 6 and local models use version 7, both with a stored
+rotation and six-factor codes. There is no old-format compatibility path.
+Versions 2/3/4/5 and unknown versions fail explicitly at model loading, with
+instructions to retrain, re-encode, and rebuild. Do not replace only the model
+file under an existing index.
 
 ## Optional local residual quantization
 
@@ -165,8 +185,8 @@ retain those centers.
 Each base vector is assigned to its nearest center and its residual is encoded
 with upstream per-vector optimal scaling, rather than the shared expected scale.
 The model stores the centers; each code appends a `uint32` center ID after the
-existing packed payload and five Float factors. For 128-dimensional 7-bit
-vectors this is **136 bytes** (112 + 20 + 4), versus 132 for global quantization.
+packed payload and six Float factors. For 128-dimensional 7-bit
+vectors this is **140 bytes** (112 + 24 + 4), versus 136 for global quantization.
 Set the index's `Dim` to that encoded width. Center storage is additional to the
 7-bit payload; the bit count is not a claim about total index size.
 
@@ -174,9 +194,9 @@ ADC scoring selects the code's center-specific factors from the
 [query buffer](#adc-query-buffer-layout), without fetching or reranking raw
 base vectors. SDC and reconstruction likewise use each code's stored center.
 
-Local models use **version 4**: the version-3 payload is followed by a `uint32`
-center count and row-major rotated Float centers. Version-2/3 models keep their
-existing encoding, scoring, serialization, and fast quantization behavior.
+New local models use **version 7**: the rotated-global payload is followed by a
+`uint32` center count and row-major rotated Float centers. Old local version 4
+is not accepted; its codes lack the IP correction factor.
 Never replace a model beneath an existing encoded corpus/index: re-encode and
 build a separate index when enabling or changing local centers.
 

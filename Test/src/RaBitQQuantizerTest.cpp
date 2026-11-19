@@ -12,6 +12,9 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/SSDServing/SSDIndex.h"
 
+#include "rabitqlib/quantization/data_layout.hpp"
+#include "rabitqlib/quantization/pack_excode.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -21,6 +24,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -36,7 +40,7 @@ constexpr SizeType kVectorCount = 96;
 constexpr DimensionType kDimension = 128;
 constexpr int kRaBitQBits = 3;
 constexpr DimensionType kRaBitQCodeBytes =
-    kDimension * kRaBitQBits / 8 + 5 * sizeof(float);
+    kDimension * kRaBitQBits / 8 + 6 * sizeof(float);
 constexpr const char* kQuantizerFile = "rabitq_global_quantizer_test.bin";
 constexpr const char* kQueryFile = "rabitq_global_query_test.fvecs";
 constexpr SizeType kSearchQueryCount = 16;
@@ -428,7 +432,7 @@ BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQStoresRequestedBits)
         BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
         BOOST_CHECK_EQUAL(
             quantizer->GetNumSubvectors(),
-            kDimension * bits / 8 + 5 * sizeof(float));
+            kDimension * bits / 8 + 6 * sizeof(float));
 
         std::vector<std::uint8_t> code(quantizer->GetNumSubvectors());
         quantizer->QuantizeVector(raw->GetVector(0), code.data(), false);
@@ -571,7 +575,7 @@ BOOST_AUTO_TEST_CASE(RaBitQEncodedWidthMatchesSavedModel)
         dimension, bits, false);
     BOOST_REQUIRE(quantizer->Train(vectors) == ErrorCode::Success);
     BOOST_CHECK_EQUAL(
-        quantizer->GetNumSubvectors(), 128 * bits / 8 + 5 * sizeof(float));
+        quantizer->GetNumSubvectors(), 128 * bits / 8 + 6 * sizeof(float));
 
     const char* modelPath = "rabitq_width_model.bin";
     auto output = f_createIO();
@@ -655,27 +659,135 @@ BOOST_AUTO_TEST_CASE(RaBitQRotationPreservesGeometryAndPersistence)
     }
 }
 
-BOOST_AUTO_TEST_CASE(RaBitQLegacyModelKeepsIdentityTransform)
+BOOST_AUTO_TEST_CASE(RaBitQRejectsUnsupportedModelVersions)
 {
-    const std::uint32_t header[] = {0x32464252U, 2, 128, 128, 3, 0};
-    std::vector<std::uint8_t> payload(sizeof(header) + 128 * sizeof(float), 0);
-    std::memcpy(payload.data(), header, sizeof(header));
-    auto legacy = std::make_shared<COMMON::RaBitQQuantizer>();
-    BOOST_REQUIRE(legacy->LoadQuantizer(payload.data()) == ErrorCode::Success);
-    BOOST_CHECK_EQUAL(legacy->BufferSize(),
-                      sizeof(QuantizerType) + sizeof(VectorValueType) + payload.size());
-    const auto raw = MakeRawVectors();
-    legacy->SetEnableADC(true);
-    std::vector<std::uint8_t> query(legacy->QuantizeSize());
-    legacy->QuantizeVector(raw->GetVector(0), query.data());
-    BOOST_CHECK(std::memcmp(query.data(), raw->GetVector(0), 128 * sizeof(float)) == 0);
-    auto loaded = SaveAndLoad(legacy);
-    loaded->SetEnableADC(true);
-    std::vector<std::uint8_t> loadedQuery(loaded->QuantizeSize());
-    loaded->QuantizeVector(raw->GetVector(0), loadedQuery.data());
-    BOOST_CHECK_EQUAL_COLLECTIONS(query.begin(), query.end(), loadedQuery.begin(), loadedQuery.end());
-    BOOST_CHECK_EQUAL(loaded->BufferSize(), legacy->BufferSize());
+    for (std::uint32_t version : {2U, 3U, 4U, 5U, 99U}) {
+        const std::uint32_t header[] = {0x32464252U, version, 64, 64, 4, 0};
+        const std::size_t rotationBytes = (version == 3 || version == 4) ? 64 * 64 * sizeof(float) : 0;
+        const std::size_t localBytes = version == 4 ? sizeof(std::uint32_t) + 64 * sizeof(float) : 0;
+        std::vector<std::uint8_t> payload(sizeof(header) + 64 * sizeof(float) + rotationBytes + localBytes, 0);
+        std::memcpy(payload.data(), header, sizeof(header));
+        if (version == 4) {
+            const std::uint32_t count = 1;
+            std::memcpy(payload.data() + sizeof(header) + 64 * sizeof(float) + rotationBytes,
+                        &count, sizeof(count));
+        }
+        COMMON::RaBitQQuantizer model;
+        BOOST_CHECK(model.LoadQuantizer(payload.data()) == ErrorCode::FailedParseValue);
+        auto output = f_createIO();
+        BOOST_REQUIRE(output->Initialize(kQuantizerFile, std::ios::binary | std::ios::out));
+        BOOST_REQUIRE_EQUAL(output->WriteBinary(payload.size(), reinterpret_cast<const char*>(payload.data())),
+                            payload.size());
+        output->ShutDown();
+        auto input = f_createIO();
+        BOOST_REQUIRE(input->Initialize(kQuantizerFile, std::ios::binary | std::ios::in));
+        BOOST_CHECK(model.LoadQuantizer(input) == ErrorCode::FailedParseValue);
+        input->ShutDown();
+    }
     std::remove(kQuantizerFile);
+}
+
+BOOST_AUTO_TEST_CASE(InnerProductMatchesOfficialEstimator)
+{
+    constexpr SizeType count = 8;
+    ByteArray bytes = ByteArray::Alloc(count * kDimension * sizeof(float));
+    auto* values = reinterpret_cast<float*>(bytes.Data());
+    std::vector<float> mean(kDimension, 0.0F);
+    for (SizeType i = 0; i < count; ++i) {
+        for (DimensionType d = 0; d < kDimension; ++d) {
+            values[i * kDimension + d] = 4.0F + std::sin((i + 1.0F) * (d + 0.3F)) +
+                0.1F * i * (d % 5);
+            mean[d] += values[i * kDimension + d] / count;
+        }
+    }
+    auto raw = std::make_shared<BasicVectorSet>(
+        bytes, VectorValueType::Float, kDimension, count);
+    for (bool local : {false, true}) {
+        for (int bits : {1, 4, 8}) {
+            auto model = std::make_shared<COMMON::RaBitQQuantizer>(kDimension, bits, false);
+            BOOST_REQUIRE(model->Train(raw) == ErrorCode::Success);
+            if (local) {
+                auto centers = std::make_shared<BasicVectorSet>(
+                    bytes, VectorValueType::Float, kDimension, 2);
+                BOOST_REQUIRE(model->SetLocalCentroids(centers) == ErrorCode::Success);
+            }
+            auto loaded = SaveAndLoad(model);
+            ByteArray saved = ByteArray::Alloc(model->BufferSize());
+            std::ifstream file(kQuantizerFile, std::ios::binary);
+            file.read(reinterpret_cast<char*>(saved.Data()), saved.Length());
+            BOOST_REQUIRE(file.good());
+            file.close();
+            auto memoryLoaded = COMMON::IQuantizer::LoadIQuantizer(saved);
+            BOOST_REQUIRE(memoryLoaded != nullptr);
+            const std::size_t headerOffset = sizeof(QuantizerType) + sizeof(VectorValueType);
+            const std::size_t centerOffset = headerOffset + 6 * sizeof(std::uint32_t) +
+                (local ? (kDimension + kDimension * kDimension) * sizeof(float) +
+                             sizeof(std::uint32_t) : 0);
+            const std::size_t packedBytes = kDimension * bits / 8;
+            auto config = local ? rabitqlib::quant::RabitqConfig() :
+                rabitqlib::quant::faster_config(kDimension, bits);
+            model->SetEnableADC(true);
+            std::vector<std::uint8_t> code(model->GetNumSubvectors());
+            std::vector<std::uint8_t> query(model->QuantizeSize()), prepared(model->QuantizeSize());
+            std::vector<float> rotatedBase(kDimension), centroid(kDimension);
+            std::vector<std::uint8_t> officialCode(kDimension), packed(packedBytes);
+            // Include exact centers, nonzero residuals, and queries in the centroid direction.
+            for (SizeType i : {0, 3, 7}) {
+                model->QuantizeVector(raw->GetVector(i), code.data(), false);
+                model->QuantizeVector(raw->GetVector(i), prepared.data());
+                std::memcpy(rotatedBase.data(), prepared.data(), kDimension * sizeof(float));
+                std::uint32_t centerId = 0;
+                if (local) std::memcpy(&centerId, code.data() + code.size() - sizeof(centerId), sizeof(centerId));
+                BOOST_REQUIRE(centerId < (local ? 2U : 1U));
+                std::memcpy(centroid.data(), saved.Data() + centerOffset +
+                            centerId * kDimension * sizeof(float), kDimension * sizeof(float));
+                float add = 1.0F, scale = 0.0F, error = 0.0F;
+                if (rotatedBase != centroid) {
+                    if (bits == 1) {
+                        std::vector<char> binData(rabitqlib::BinDataMap<float>::data_bytes(kDimension));
+                        rabitqlib::quant::quantize_compact_one_bit(
+                            rotatedBase.data(), centroid.data(), kDimension, binData.data(),
+                            rabitqlib::METRIC_IP);
+                        rabitqlib::ConstBinDataMap<float> bin(binData.data(), kDimension);
+                        add = bin.f_add();
+                        scale = bin.f_rescale();
+                        for (DimensionType d = 0; d < kDimension; ++d)
+                            officialCode[d] = rotatedBase[d] >= centroid[d] ? 1 : 0;
+                    } else {
+                        rabitqlib::quant::quantize_full_single<float, std::uint8_t>(
+                            rotatedBase.data(), centroid.data(), kDimension, bits,
+                            officialCode.data(), add, scale, error, rabitqlib::METRIC_IP, config);
+                    }
+                    rabitqlib::quant::rabitq_impl::ex_bits::packing_rabitqplus_code(
+                        officialCode.data(), packed.data(), kDimension, bits);
+                    BOOST_CHECK_EQUAL_COLLECTIONS(packed.begin(), packed.end(),
+                                                  code.begin(), code.begin() + packedBytes);
+                }
+                for (const float* q : {static_cast<const float*>(mean.data()),
+                                      static_cast<const float*>(raw->GetVector(2))}) {
+                    model->QuantizeVector(q, query.data());
+                    const auto* rotatedQuery = reinterpret_cast<const float*>(query.data());
+                    const float sum = std::accumulate(rotatedQuery, rotatedQuery + kDimension, 0.0F);
+                    const float expected = rabitqlib::quant::full_est_dist<float, std::uint8_t>(
+                        packed.data(), rotatedQuery, rabitqlib::select_excode_ipfunc(bits),
+                        kDimension, bits, add, scale,
+                        -rabitqlib::dot_product(rotatedQuery, centroid.data(), kDimension), -0.5F * sum);
+                    for (auto checked : {std::static_pointer_cast<COMMON::IQuantizer>(model), loaded, memoryLoaded}) {
+                        checked->SetEnableADC(true);
+                        BOOST_CHECK_SMALL(checked->InnerProductDistance(query.data(), code.data()) - expected,
+                                          std::max(0.003F, std::abs(expected) * 0.00002F));
+                    }
+                }
+            }
+
+            auto clone = model->CloneWithBits(bits);
+            BOOST_REQUIRE(clone != nullptr);
+            std::vector<std::uint8_t> clonedCode(clone->GetNumSubvectors());
+            clone->QuantizeVector(raw->GetVector(7), clonedCode.data(), false);
+            BOOST_CHECK_EQUAL_COLLECTIONS(clonedCode.begin(), clonedCode.end(), code.begin(), code.end());
+            std::remove(kQuantizerFile);
+        }
+    }
 }
 
 BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsPreserveADCSDCAndPersistence)
@@ -701,7 +813,7 @@ BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsPreserveADCSDCAndPersistence)
             const auto globalSize = quantizer->BufferSize();
             BOOST_REQUIRE(quantizer->SetLocalCentroids(centers) == ErrorCode::Success);
             BOOST_CHECK_EQUAL(quantizer->LocalCentroidCount(), centerCount);
-            BOOST_CHECK_EQUAL(quantizer->GetNumSubvectors(), 128 * bits / 8 + 24);
+            BOOST_CHECK_EQUAL(quantizer->GetNumSubvectors(), 128 * bits / 8 + 28);
             BOOST_CHECK_EQUAL(quantizer->BufferSize(), globalSize + sizeof(std::uint32_t) +
                               centerCount * 128 * sizeof(float));
             auto codes = QuantizeVectors(raw, quantizer);
@@ -752,8 +864,13 @@ BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsPreserveADCSDCAndPersistence)
                 model->ReconstructVector(first, reconstructed.data());
                 model->QuantizeVector(reconstructed.data(), query.data());
                 const float adc = model->L2Distance(query.data(), second);
+                const float ipAdc = model->InnerProductDistance(query.data(), second);
+                const float ipSdc = model->InnerProductDistanceSDC(first, second);
                 model->SetEnableADC(false);
                 BOOST_CHECK_CLOSE(model->L2Distance(first, second), adc, 0.001F);
+                BOOST_CHECK_SMALL(model->InnerProductDistance(first, second) - ipAdc,
+                                  std::max(0.003F, std::abs(ipAdc) * 0.00002F));
+                BOOST_CHECK_EQUAL(model->InnerProductDistanceSDC(first, second), ipSdc);
                 std::memcpy(encoded.data(), second, encoded.size());
                 const std::uint32_t invalidId = centerCount;
                 std::memcpy(encoded.data() + encoded.size() - sizeof(invalidId), &invalidId, sizeof(invalidId));

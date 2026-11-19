@@ -101,7 +101,7 @@ directory and appends `.quan` to the input vector path for the encoded corpus.
 For this recipe that is `base.fbin.quan`; do not run it against a protected
 or shared dataset location or reuse a directory containing published artifacts.
 The builder changes the encoded value type/dimension internally; do not guess
-the resulting code width or reuse a manually chosen `Dim=68`.
+the resulting code width or reuse a manually chosen `Dim=72`.
 The requested saved index is under `index/`.
 
 Failure to meet the target in the supported bit range, encoding/build errors,
@@ -137,18 +137,22 @@ as an advanced example and adjust all input/output paths to your dataset.
 It uses STATIC postings and a global 3-bit model.
 
 - Encoded vectors use the `UInt8` container.
-- For this 128-dimensional 3-bit example, `Dim=68`: 48 packed bytes plus
-  five Float factors. This is not the original Float dimension.
+- For this 128-dimensional 3-bit example, `Dim=72`: 48 packed bytes plus
+  six Float factors. This is not the original Float dimension.
 - Set `QuantizerFilePath` to the matching model.
 - Queries remain raw Float vectors; enable ADC for query evaluation.
 
 Consult [the SPANN command examples](GettingStart.md) for build/search invocation.
 The encoded dimension depends on bit width, padding, and model mode; do not
-reuse `Dim=68` for another configuration.
+reuse `Dim=72` for another configuration.
 
 ## Compatibility and evaluation
 
 Never replace only the model beneath an existing encoded corpus or index.
+New models include the official IP correction and add four bytes per code.
+Only the corrected format (global version 6/local version 7) is supported.
+Old models are rejected for both L2 and IP; train a new model, re-encode from
+original vectors, and build a separate index.
 Rotation and optional local-centroid models require matching codes; changing
 them requires re-encoding and a separate index build. The
 [developer contract](development/RaBitQ.md) records model versions, ADC/SDC

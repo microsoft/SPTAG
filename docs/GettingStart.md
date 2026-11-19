@@ -259,7 +259,7 @@ RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the
 official model and encode base vectors with `Release/quantizer`, then
 use the generated model through `QuantizerFilePath` in the normal SPANN
 workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
-`Dim=68` at 3 bits (48 compact code bytes plus five Float factors).
+`Dim=72` at 3 bits (48 compact code bytes plus six Float factors).
 
 Train and encode SIFT1M:
 
@@ -279,7 +279,7 @@ The recommended SIFT1M SPANN configuration uses STATIC posting storage:
 ValueType=UInt8
 DistCalcMethod=L2
 IndexAlgoType=BKT
-Dim=68
+Dim=72
 VectorPath=sift1m/sift_base.rabitq3.u8bin
 VectorType=DEFAULT
 VectorSize=1000000
@@ -358,7 +358,9 @@ trade-off after query-factor preprocessing is:
 | 64 | 0.811 ms | 0.957 ms | 1231 | 0.6781 |
 
 Adjust `NumberOfThreads` to the build machine. Queries remain raw 128-dimensional
-Float vectors; `Dim=68` describes the encoded base-vector width.
+Float vectors; `Dim=72` describes the new encoded base-vector width.
+The historical measurements above used the older 68-byte encoding, without
+the extra IP correction factor; they are not measurements of the new format.
 
 See [`RaBitQ_Global_Quantizer.md`](RaBitQ_Global_Quantizer.md) and
 `Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini`.

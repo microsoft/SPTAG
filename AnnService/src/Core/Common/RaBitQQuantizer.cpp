@@ -256,11 +256,11 @@ float RaBitQQuantizer::ComputeInnerProductDistance(
 
     float f_add, f_rescale;
     ReadDistanceFactors(p_y, f_add, f_rescale);
-    // L2's scale is -2 times the unbiased residual scale. Keep existing codes
-    // and estimate 1 - <q,c> - <q,x-c> without reconstructing the base vector.
+    std::memcpy(&f_add, p_y + PackedCodeBytes() + kIPAddFactorIndex * sizeof(float),
+                sizeof(float));
     return rabitqlib::quant::full_est_dist<float, std::uint8_t>(
         p_y, query, m_ip_func, static_cast<std::size_t>(m_padded_dimension),
-        static_cast<std::size_t>(m_bits), 1.0F, 0.5F * f_rescale, -centroidDot, k1xsumq);
+        static_cast<std::size_t>(m_bits), f_add, 0.5F * f_rescale, -centroidDot, k1xsumq);
 }
 
 void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc) const
@@ -391,6 +391,17 @@ void RaBitQQuantizer::QuantizeVector(const void* p_vector, std::uint8_t* p_outpu
     std::memcpy(factors + 2 * sizeof(float), &f_error, sizeof(f_error));
     std::memcpy(factors + 3 * sizeof(float), &delta, sizeof(delta));
     std::memcpy(factors + 4 * sizeof(float), &lower_value, sizeof(lower_value));
+    thread_local std::vector<float> residual;
+    residual.resize(static_cast<std::size_t>(m_padded_dimension));
+    for (DimensionType i = 0; i < m_padded_dimension; ++i) {
+        residual[i] = input[i] - centroid[i];
+    }
+    // Official F_add(IP) = 1 - <r,c> + (F_add(L2) - ||r||^2) / 2.
+    // Retain the L2 factors and packed bits unchanged.
+    const float ip_add = 1.0F - rabitqlib::dot_product(
+        residual.data(), centroid, residual.size()) +
+        0.5F * (f_add - rabitqlib::l2norm_sqr(residual.data(), residual.size()));
+    std::memcpy(factors + kIPAddFactorIndex * sizeof(float), &ip_add, sizeof(ip_add));
     if (!m_localCentroids.empty()) {
         std::memcpy(factors + kCodeFactorCount * sizeof(float), &centroidId, sizeof(centroidId));
     }
@@ -447,8 +458,7 @@ ErrorCode RaBitQQuantizer::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_outpu
     VectorValueType reconstruct_type = VectorValueType::Float;
     ModelHeader header{
         kModelMagic,
-        !m_localCentroids.empty() ? kLocalModelVersion :
-            (m_rotation.empty() ? kLegacyModelVersion : kModelVersion),
+        m_localCentroids.empty() ? kModelVersion : kLocalModelVersion,
         m_dimension,
         m_padded_dimension,
         m_bits,
@@ -598,16 +608,20 @@ bool RaBitQQuantizer::Ready() const
 
 ErrorCode RaBitQQuantizer::LoadHeader(const ModelHeader& p_header)
 {
+    if (p_header.version != kModelVersion && p_header.version != kLocalModelVersion) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Unsupported RaBitQ model version %u; expected 6 (global) or 7 (local). Retrain, re-encode raw vectors, and rebuild the index.\n",
+                    p_header.version);
+        return ErrorCode::FailedParseValue;
+    }
     if (p_header.magic != kModelMagic ||
-        (p_header.version != kLegacyModelVersion && p_header.version != kModelVersion &&
-         p_header.version != kLocalModelVersion) ||
         p_header.dimension <= 0 || p_header.paddedDimension < p_header.dimension ||
         p_header.paddedDimension % 64 != 0 || p_header.bits < 1 || p_header.bits > 8) {
         return ErrorCode::FailedParseValue;
     }
     const ErrorCode status =
         Initialize(p_header.dimension, p_header.bits, p_header.normalize != 0);
-    if (status == ErrorCode::Success && p_header.version != kLegacyModelVersion) {
+    if (status == ErrorCode::Success) {
         m_rotation.resize(static_cast<std::size_t>(m_dimension) * m_padded_dimension);
     }
     return status == ErrorCode::Success && m_padded_dimension == p_header.paddedDimension

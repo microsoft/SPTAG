@@ -69,11 +69,11 @@ private:
     };
 
     static constexpr std::uint32_t kModelMagic = 0x32464252U; // RBF2
-    static constexpr std::uint32_t kLegacyModelVersion = 2U;
-    static constexpr std::uint32_t kModelVersion = 3U;
-    static constexpr std::uint32_t kLocalModelVersion = 4U;
+    static constexpr std::uint32_t kModelVersion = 6U;
+    static constexpr std::uint32_t kLocalModelVersion = 7U;
     static constexpr std::uint32_t kMaxLocalCentroids = 65536U;
-    static constexpr std::size_t kCodeFactorCount = 5;
+    static constexpr std::size_t kCodeFactorCount = 6;
+    static constexpr std::size_t kIPAddFactorIndex = 5;
     static constexpr std::size_t kQueryFactorCount = 2;
 
     ErrorCode Initialize(DimensionType p_dimension, int p_bits, bool p_normalize);
