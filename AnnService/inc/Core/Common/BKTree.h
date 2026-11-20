@@ -642,15 +642,7 @@ break;
                             }
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
-                            if (numClusters <= 1 && distMethod == DistCalcMethod::InnerProduct) {
-                                // With unnormalized IP, one high-norm center can attract distinct vectors.
-                                // Keep them as separate leaves instead of treating them as duplicates.
-                                for (SizeType j = item.first; j < item.last; ++j) {
-                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
-                                    m_pTreeRoots.emplace_back(cid);
-                                }
-                            }
-                            else if (numClusters <= 1) {
+                            if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
                                 m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
@@ -790,13 +782,7 @@ break;
                                         int numClusters = KmeansClustering(data, localindices, item.first, item.last, localArgs,
                                             m_iSamples, m_fBalanceFactor, false, abort);
 
-                                        if (numClusters <= 1 && distMethod == DistCalcMethod::InnerProduct) {
-                                            result.isLeaf = true;
-                                            for (SizeType j = item.first; j < item.last; ++j) {
-                                                SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
-                                                result.childCenters.push_back(cid);
-                                            }
-                                        } else if (numClusters <= 1) {
+                                        if (numClusters <= 1) {
                                             result.singleCluster = true;
                                             SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                             std::sort(localindices.begin() + item.first, localindices.begin() + end);
