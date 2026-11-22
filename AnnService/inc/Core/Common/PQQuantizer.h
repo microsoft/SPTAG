@@ -92,7 +92,7 @@ namespace SPTAG
             DimensionType m_DimPerSubvector;
             int m_BlockSize;
             bool m_EnableADC;
-            DistCalcMethod m_distCalcMethod;
+            DistCalcMethod m_distCalcMethod = DistCalcMethod::L2;
             const int m_base = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>();
 
             inline int m_DistIndexCalc(int i, int j, int k) const;
@@ -219,7 +219,9 @@ namespace SPTAG
             }
             else 
             {
-                auto distCalc = COMMON::DistanceCalcSelector<T>(m_distCalcMethod);
+                // Encoding minimizes reconstruction error; max-dot assignment
+                // instead favors large-norm codewords, even for an exact input.
+                auto distCalc = COMMON::DistanceCalcSelector<T>(DistCalcMethod::L2);
                 T* subvec = (T*)vec;
                 T* subcodebooks = m_codebooks.get();
                 for (int i = 0; i < m_NumSubvectors; i++) {
