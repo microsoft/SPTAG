@@ -604,8 +604,214 @@ namespace SPTAG::SPANN {
             }
         }
 
+    private:
+        ErrorCode CommitInnerProductSplit(ExtraWorkSpace* workspace, SizeType headID,
+            const std::string& source, const std::vector<SizeType>& indices,
+            const COMMON::KmeansArgs<ValueType>& args, std::vector<SizeType>& headIDs,
+            std::vector<std::shared_ptr<std::string>>& headVectors,
+            std::vector<std::string>& partitions, bool& sameHead,
+            uint64_t& createdHeads, bool& committed)
+        {
+            struct Target
+            {
+                SizeType id = -1;
+                std::uint8_t version = 0;
+                bool existing = false;
+                std::string posting;
+            };
+            struct Candidate
+            {
+                SizeType row;
+                SizeType id;
+                float distance;
+                bool existing;
+            };
+            committed = false;
+            std::vector<Target> targets(2);
+            std::vector<std::unique_lock<std::shared_timed_mutex>> locks;
+            std::unordered_set<decltype(m_rwLocks.hash_func(headID))> heldLocks{
+                m_rwLocks.hash_func(headID)};
+            const std::size_t hardLimit =
+                static_cast<std::size_t>(m_postingSizeLimit + m_bufferSizeLimit) * m_vectorInfoSize;
+            SizeType first = 0;
+            for (int k = 0; k < 2; ++k) {
+                std::vector<Candidate> candidates;
+                for (SizeType j = 0; j < args.counts[k]; ++j) {
+                    const SizeType row = indices[first + j];
+                    const char* record = source.data() + row * m_vectorInfoSize;
+                    partitions[k].append(record, m_vectorInfoSize);
+                    SizeType id;
+                    std::memcpy(&id, record, sizeof(id));
+                    const float distance = m_headIndex->ComputeDistanceBetweenStoredVectors(
+                        record + m_metaDataSize, args.centers + k * args._D);
+                    if (!std::isfinite(distance)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "IP split %lld has a nonfinite head distance for VID %lld.\n",
+                            (std::int64_t)headID, (std::int64_t)id);
+                        return ErrorCode::Fail;
+                    }
+                    candidates.push_back({row, id, distance,
+                        m_headIndex->ContainSample(id, m_layer + 1)});
+                }
+                first += args.counts[k];
+                std::stable_sort(candidates.begin(), candidates.end(), [&](const Candidate& a, const Candidate& b) {
+                    const bool preferredA = a.row == args.clusterIdx[k];
+                    const bool preferredB = b.row == args.clusterIdx[k];
+                    if (preferredA != preferredB) return preferredA;
+                    if (a.existing != b.existing) return !a.existing;
+                    if (a.distance != b.distance) return a.distance < b.distance;
+                    return a.id < b.id;
+                });
+
+                for (const auto& candidate : candidates) {
+                    if (k && candidate.id == targets[0].id) continue;
+                    const auto lockID = m_rwLocks.hash_func(candidate.id);
+                    std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[candidate.id], std::defer_lock);
+                    if (heldLocks.count(lockID) == 0) {
+                        for (int retry = 0; retry < 20 && !lock.try_lock(); ++retry)
+                            std::this_thread::sleep_for(std::chrono::milliseconds(3 * (retry + 1)));
+                        if (!lock.owns_lock()) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "IP split %lld deferred: target %lld is locked; source is unchanged.\n",
+                                (std::int64_t)headID, (std::int64_t)candidate.id);
+                            SplitAsync(headID, static_cast<int>(indices.size()));
+                            return ErrorCode::Success;
+                        }
+                    }
+                    if (candidate.id != headID && m_versionMap->Deleted(candidate.id)) continue;
+                    const bool existing = m_headIndex->ContainSample(candidate.id, m_layer + 1);
+                    std::string current;
+                    if (existing && candidate.id != headID) {
+                        const auto ret = db->Get(DBKey(candidate.id), &current, MaxTimeout, &workspace->m_diskRequests);
+                        if (ret != ErrorCode::Success) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split cannot read target %lld.\n",
+                                (std::int64_t)candidate.id);
+                            return ret;
+                        }
+                    }
+
+                    std::string anchor = source.substr(candidate.row * m_vectorInfoSize, m_vectorInfoSize);
+                    const auto version = m_versionMap->GetVersion(candidate.id);
+                    anchor[sizeof(SizeType)] = static_cast<char>(version);
+                    std::string merged = anchor;
+                    std::unordered_set<SizeType> seen{candidate.id};
+                    auto appendCurrent = [&](const std::string& posting) {
+                        if (posting.size() % m_vectorInfoSize != 0) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                "IP split target %lld contains a partial record.\n", (std::int64_t)candidate.id);
+                            return false;
+                        }
+                        for (std::size_t offset = 0; offset < posting.size(); offset += m_vectorInfoSize) {
+                            SizeType id;
+                            std::memcpy(&id, posting.data() + offset, sizeof(id));
+                            if (id < 0) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                    "IP split target %lld contains invalid VID %lld.\n",
+                                    (std::int64_t)candidate.id, (std::int64_t)id);
+                                return false;
+                            }
+                            const auto recordVersion = static_cast<std::uint8_t>(posting[offset + sizeof(id)]);
+                            if (m_versionMap->Deleted(id) || m_versionMap->GetVersion(id) != recordVersion) continue;
+                            if (seen.insert(id).second) merged.append(posting, offset, m_vectorInfoSize);
+                        }
+                        return true;
+                    };
+                    if (!appendCurrent(current) || !appendCurrent(partitions[k])) return ErrorCode::DiskIOFail;
+                    if (m_opt->m_storage == Storage::FILEIO && merged.size() > hardLimit) continue;
+
+                    targets[k] = {candidate.id, version, existing, std::move(merged)};
+                    headIDs[k] = candidate.id;
+                    headVectors[k] = std::make_shared<std::string>(anchor.data() + m_metaDataSize, m_vectorDataSize);
+                    if (lock.owns_lock()) {
+                        heldLocks.insert(lockID);
+                        locks.emplace_back(std::move(lock));
+                    }
+                    break;
+                }
+                if (targets[k].id < 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "IP split %lld has no capacity-preserving head for partition %d; source is unchanged.\n",
+                        (std::int64_t)headID, k);
+                    return ErrorCode::Posting_OverFlow;
+                }
+            }
+
+            auto put = [&](const Target& target) {
+                const auto begin = std::chrono::high_resolution_clock::now();
+                const auto ret = db->Put(DBKey(target.id), target.posting, MaxTimeout, &workspace->m_diskRequests);
+                m_stat.m_putCost += std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - begin).count();
+                if (ret != ErrorCode::Success)
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split cannot write target %lld.\n",
+                        (std::int64_t)target.id);
+                return ret;
+            };
+            // Keep every source record reachable until both destination heads are published.
+            for (int k = 0; k < 2; ++k) {
+                const auto& target = targets[k];
+                if (target.id == headID) continue;
+                auto ret = put(target);
+                if (ret != ErrorCode::Success) return ret;
+                if (target.existing) {
+                    m_stat.m_splitExistingHeadMergeCount.fetch_add(1, std::memory_order_relaxed);
+                }
+                else {
+                    const auto begin = std::chrono::high_resolution_clock::now();
+                    ret = m_headIndex->AddHeadIndex(headVectors[k]->data(), target.id, target.version,
+                        m_opt->m_dim, m_layer + 1, workspace);
+                    const bool published = m_headIndex->ContainSample(target.id, m_layer + 1);
+                    if (ret != ErrorCode::Success || !published) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split cannot publish head %lld.\n",
+                            (std::int64_t)target.id);
+                        if (!published && db->Delete(DBKey(target.id)) != ErrorCode::Success)
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split cannot remove unpublished posting %lld.\n",
+                                (std::int64_t)target.id);
+                        return ret == ErrorCode::Success ? ErrorCode::Fail : ret;
+                    }
+                    ++createdHeads;
+                    m_stat.m_splitCreatedNewHeadCount.fetch_add(1, std::memory_order_relaxed);
+                    m_stat.m_updateHeadCost += std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::high_resolution_clock::now() - begin).count();
+                }
+            }
+            sameHead = false;
+            for (const auto& target : targets) {
+                if (target.id != headID) continue;
+                const auto ret = put(target);
+                if (ret != ErrorCode::Success) return ret;
+                sameHead = true;
+                ++m_stat.m_theSameHeadNum;
+                m_stat.m_splitSameHeadCount.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (!sameHead) {
+                auto ret = m_headIndex->DeleteIndex(headID, m_layer + 1);
+                if (ret != ErrorCode::Success || m_headIndex->ContainSample(headID, m_layer + 1)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split cannot retire source head %lld.\n",
+                        (std::int64_t)headID);
+                    return ret == ErrorCode::Success ? ErrorCode::Fail : ret;
+                }
+                ret = db->Delete(DBKey(headID));
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split cannot remove retired posting %lld.\n",
+                        (std::int64_t)headID);
+                    return ret;
+                }
+            }
+            for (const auto& target : targets) {
+                const auto size = target.posting.size() / m_vectorInfoSize;
+                if (target.id != headID && target.existing && size > m_postingSizeLimit) {
+                    m_stat.m_splitExistingHeadMergeResplitCount.fetch_add(1, std::memory_order_relaxed);
+                    SplitAsync(target.id, static_cast<int>(size));
+                }
+            }
+            committed = true;
+            return ErrorCode::Success;
+        }
+
+    public:
         ErrorCode Split(ExtraWorkSpace* p_exWorkSpace, const SizeType headID, bool requirelock = true)
         {
+            const bool innerProduct = m_headIndex->GetDistCalcMethod() == DistCalcMethod::InnerProduct;
             auto splitBegin = std::chrono::high_resolution_clock::now();
             std::vector<SizeType> newHeadsID(2, -1);
             std::vector<std::shared_ptr<std::string>> newHeadsVec(2, nullptr);
@@ -650,14 +856,17 @@ namespace SPTAG::SPANN {
                 auto splitGetEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitGetEnd - splitGetBegin).count();
                 m_stat.m_getCost += elapsedMSeconds;
+                if (innerProduct && postingList.size() % m_vectorInfoSize != 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "IP split posting %lld contains a partial record.\n",
+                        (std::int64_t)headID);
+                    return ErrorCode::DiskIOFail;
+                }
                 // reinterpret postingList to vectors and IDs
                 uint8_t* postingP = reinterpret_cast<uint8_t*>(postingList.data());
                 SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
                 splitPostingVectors = static_cast<uint64_t>(postVectorNum);
                
                 //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: db get Posting %lld successfully with length %d real length:%d vectorNum:%d\n", (std::int64_t)headID, (int)(postingList.size()), m_postingSizes.GetSize(headID), postVectorNum);
-                COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, m_headIndex->m_iDataBlockSize, m_headIndex->m_iDataCapacity, (ValueType*)postingP, true, nullptr, m_metaDataSize, m_vectorInfoSize);
-
                 std::vector<SizeType> localIndices;
                 localIndices.reserve(postVectorNum);
                 uint8_t* vectorId = postingP;
@@ -695,10 +904,32 @@ namespace SPTAG::SPANN {
                 } else {
                     *((uint8_t*)(headVec->data() + sizeof(SizeType))) = m_versionMap->GetVersion(headID);
                 }
+                if (innerProduct) {
+                    std::string currentPosting;
+                    std::unordered_set<SizeType> currentIDs;
+                    for (SizeType row : localIndices) {
+                        const char* record = postingList.data() + row * m_vectorInfoSize;
+                        SizeType id;
+                        std::memcpy(&id, record, sizeof(id));
+                        if (!currentIDs.insert(id).second) continue;
+                        currentPosting.append(id == headID ? headVec->data() : record, m_vectorInfoSize);
+                    }
+                    if (currentIDs.count(headID) == 0) currentPosting += *headVec;
+                    postingList.swap(currentPosting);
+                    postingP = reinterpret_cast<std::uint8_t*>(postingList.data());
+                    postVectorNum = static_cast<SizeType>(postingList.size() / m_vectorInfoSize);
+                    localIndices.resize(postVectorNum);
+                    std::iota(localIndices.begin(), localIndices.end(), 0);
+                    hasHead = true;
+                }
+                COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, m_headIndex->m_iDataBlockSize,
+                    m_headIndex->m_iDataCapacity, reinterpret_cast<ValueType*>(postingP), true,
+                    nullptr, m_metaDataSize, m_vectorInfoSize);
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
 		
-                if (localIndices.size() < m_postingSizeLimit)
+                if (localIndices.size() < m_postingSizeLimit ||
+                    (innerProduct && localIndices.size() == m_postingSizeLimit))
                 {
                     char* ptr = (char*)(postingList.data());
                     for (int j = 0; j < localIndices.size(); j++, ptr += m_vectorInfoSize)
@@ -730,6 +961,22 @@ namespace SPTAG::SPANN {
                 std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
 
                 int numClusters = SPTAG::COMMON::KmeansClustering(smallSample, localIndices, 0, (SizeType)localIndices.size(), args, 1000, 100.0F, false, nullptr);
+                if (innerProduct && numClusters <= 1 && localIndices.size() > 1) {
+                    std::sort(localIndices.begin(), localIndices.end(), [&](SizeType left, SizeType right) {
+                        SizeType leftID, rightID;
+                        std::memcpy(&leftID, postingP + left * m_vectorInfoSize, sizeof(leftID));
+                        std::memcpy(&rightID, postingP + right * m_vectorInfoSize, sizeof(rightID));
+                        return leftID < rightID;
+                    });
+                    args.counts[0] = static_cast<SizeType>(localIndices.size() / 2);
+                    args.counts[1] = static_cast<SizeType>(localIndices.size()) - args.counts[0];
+                    args.clusterIdx[0] = localIndices[args.counts[0] - 1];
+                    args.clusterIdx[1] = localIndices.back();
+                    for (int k = 0; k < 2; ++k)
+                        std::memcpy(args.centers + k * args._D, smallSample[args.clusterIdx[k]],
+                            sizeof(ValueType) * args._D);
+                    numClusters = 2;
+                }
 
                 auto clusterEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(clusterEnd - clusterBegin).count();
@@ -737,6 +984,12 @@ namespace SPTAG::SPANN {
                 // int numClusters = ClusteringSPFresh(smallSample, localIndices, 0, localIndices.size(), args, 10, false, m_opt->m_virtualHead);
                 if (numClusters <= 1)
                 {
+                    if (innerProduct) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "IP split %lld cannot form two nonempty partitions; source is unchanged.\n",
+                            (std::int64_t)headID);
+                        return ErrorCode::Fail;
+                    }
                     int cut = (m_opt->m_oneClusterCutMax)? m_postingSizeLimit: 1;
                     std::string newpostingList(cut * m_vectorInfoSize, '\0');
                     char* ptr = (char*)(newpostingList.data());
@@ -757,15 +1010,24 @@ namespace SPTAG::SPANN {
                     return ErrorCode::Success;
                 }
 
-                std::vector<int> ks(2, 0);
-                if (m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers) < m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + args._D)) {
-                    ks[0] = 1;
-                } else {
-                    ks[1] = 1;
+                std::vector<int> legacyOrder;
+                if (innerProduct) {
+                    bool committed = false;
+                    ret = CommitInnerProductSplit(p_exWorkSpace, headID, postingList, localIndices, args,
+                        newHeadsID, newHeadsVec, newPostingLists, theSameHead, splitNewHeadCount, committed);
+                    if (ret != ErrorCode::Success || !committed) return ret;
+                }
+                else {
+                    legacyOrder.assign(2, 0);
+                    if (m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers) < m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + args._D)) {
+                        legacyOrder[0] = 1;
+                    } else {
+                        legacyOrder[1] = 1;
+                    }
                 }
                 SizeType newHeadVID = -1;
                 int first = 0;
-                for (int k : ks) {
+                for (int k : legacyOrder) {
                     if (args.counts[k] == 0)	continue;
                     first = (k == 0) ? 0 : args.counts[0];
                     newPostingLists[k].resize(args.counts[k] * m_vectorInfoSize);
@@ -944,7 +1206,7 @@ namespace SPTAG::SPANN {
                     }
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %lld split into : %lld, length: %d\n", (std::int64_t)headID, (std::int64_t)newHeadVID, args.counts[k]);
                 }
-                if (!theSameHead) {
+                if (!innerProduct && !theSameHead) {
                     if (m_headIndex->DeleteIndex(headID, m_layer + 1) != ErrorCode::Success || m_headIndex->ContainSample(headID, m_layer + 1)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old head index in Split: %lld\n", (std::int64_t)headID);
                     }
@@ -1070,9 +1332,11 @@ namespace SPTAG::SPANN {
             m_headIndex->SearchHeadIndex(queryResults, m_layer + 1, p_exWorkSpace);
 
             std::string nextPostingList;
-            for (int i = 1; i < queryResults.GetResultNum(); ++i)
+            const bool innerProduct = m_headIndex->GetDistCalcMethod() == DistCalcMethod::InnerProduct;
+            for (int i = innerProduct ? 0 : 1; i < queryResults.GetResultNum(); ++i)
             {
                 BasicResult* queryResult = queryResults.GetResult(i);
+                if (innerProduct && (queryResult->VID < 0 || queryResult->VID == headID)) continue;
   
                 int dedupLength = 0;
                 SizeType nextHeadID = -1;
