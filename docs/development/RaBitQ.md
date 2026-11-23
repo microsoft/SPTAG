@@ -64,7 +64,7 @@ Queries remain raw Float vectors and are prepared through the loaded `IQuantizer
 The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
 multiple of 64. The adapter supports L2 and InnerProduct; cosine distance is
 intentionally unsupported. Measurement protocols and results belong to the
-[normalized RaBitQ4 IP evaluation](../../evaluation/2026-11-18-sift10m-rabitq-ip/normalized-ip.md).
+[normalized RaBitQ4 L2/IP and OPQ64 IP evaluation](../../evaluation/2026-11-18-sift10m-rabitq-ip/README.md).
 
 ## InnerProduct distance
 

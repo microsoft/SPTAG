@@ -597,6 +597,34 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
 }
 
 
+float EvaluateSourceIdRecall(const std::shared_ptr<VectorIndex>& index,
+                             const std::vector<QueryResult>& results,
+                             const std::shared_ptr<VectorSet>& truth, int k, int searchK, int phase)
+{
+    BOOST_REQUIRE(truth && truth->Dimension() >= k && searchK >= k && !results.empty() && phase >= 0);
+    BOOST_REQUIRE(static_cast<size_t>(truth->Count()) >= 2 * (phase + 1) * results.size());
+    size_t hits = 0;
+    for (size_t query = 0; query < results.size(); ++query) {
+        std::vector<SizeType> sources;
+        for (int rank = 0; rank < searchK; ++rank) {
+            const auto vid = results[query].GetResult(rank)->VID;
+            if (vid < 0) continue;
+            auto bytes = index->GetMetadata(vid);
+            BOOST_REQUIRE_MESSAGE(bytes.Length() > 0, "Missing source-ID metadata for benchmark result");
+            const std::string metadata(reinterpret_cast<const char*>(bytes.Data()), bytes.Length());
+            size_t parsed = 0;
+            const auto source = std::stoi(metadata, &parsed);
+            BOOST_REQUIRE(parsed == metadata.size() && source >= 0);
+            sources.push_back(source);
+        }
+        const auto* expected = reinterpret_cast<const SizeType*>(truth->GetData()) +
+                               (phase * results.size() + query) * truth->Dimension();
+        for (int rank = 0; rank < k; ++rank)
+            hits += std::find(sources.begin(), sources.end(), expected[rank]) != sources.end();
+    }
+    return static_cast<float>(hits) / (results.size() * k);
+}
+
 template <typename T>
 void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_ptr<VectorSet> &queryset,
                                std::shared_ptr<VectorSet> &truth, const std::string &truthPath,
@@ -802,12 +830,15 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
     BOOST_TEST_MESSAGE("Checking for truth file: " << truthPath);
     std::shared_ptr<VectorSet> pvecset, paddvecset;
     float avgRecall = TestUtils::TestDataGenerator<T>::EvaluateRecall(results, truth, topK, searchK, batches, totalbatches);
+    const float sourceRecall = EvaluateSourceIdRecall(index, results, truth, topK, searchK, batches);
     BOOST_TEST_MESSAGE("  Recall" << topK << "@" << searchK << " = " << (avgRecall * 100.0f) << "%");
     BOOST_TEST_MESSAGE("  (Evaluated on " << numQueries << " queries against base vectors)");
     benchmarkData << std::fixed << std::setprecision(4);
     benchmarkData << prefix << "      \"recall\": {\n";
     benchmarkData << prefix << "        \"recallAtK\": " << avgRecall << ",\n";
+    benchmarkData << prefix << "        \"sourceRecallAtK\": " << sourceRecall << ",\n";
     benchmarkData << prefix << "        \"k\": " << topK << ",\n";
+    benchmarkData << prefix << "        \"searchK\": " << searchK << ",\n";
     benchmarkData << prefix << "        \"numQueries\": " << numQueries << "\n";
     benchmarkData << prefix << "      }\n";
     benchmarkData << prefix << "    }";
@@ -839,12 +870,12 @@ void LogCheckpointLayerStats(const std::shared_ptr<VectorIndex>& index, int laye
 
 ErrorCode QuantizeVectors(const std::shared_ptr<COMMON::IQuantizer>& quantizer,
                      const std::shared_ptr<VectorSet>& srcVectors,
-                     ByteArray& quantizedBytes)
+                     ByteArray& quantizedBytes, int threadNum = 0)
 {
     if (!quantizer || !srcVectors)
         return ErrorCode::Fail;
 
-    int maxthreads = std::thread::hardware_concurrency();
+    int maxthreads = threadNum > 0 ? threadNum : std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
     threads.reserve(maxthreads);
     std::atomic_size_t vectorsSent(0);
@@ -896,6 +927,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     // Generate test data
     bool generateTruth = !(truthPath.empty() || truthPath == "none");
     bool enableQuantization = !quantizerFilePath.empty();
+    const int encodingThreads = iniReader.GetParameter("Benchmark", "NumBuildThreads", 0);
     std::string pvecset, paddset, pqueryset, ptruth, pmeta, pmetaidx, paddmeta, paddmetaidx;
     TestUtils::TestDataGenerator<T> generator(N, queries, M, K, dist, insertVectorCount, false, vectorPath, queryPath);
     generator.RunLargeBatches(pvecset, pmeta, pmetaidx, paddset, paddmeta, paddmetaidx, pqueryset, N, insertBatchSize,
@@ -942,7 +974,8 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     jsonFile << "  },\n";
     jsonFile << "  \"results\": {\n";
 
-    int SearchK = enableQuantization? topK * 4 : topK;
+    int SearchK = iniReader.GetParameter("Benchmark", "SearchK", enableQuantization ? topK * 4 : topK);
+    BOOST_REQUIRE_MESSAGE(SearchK >= topK, "SearchK must be at least TopK");
     std::shared_ptr<VectorIndex> index;
     std::shared_ptr<COMMON::IQuantizer> quantizer;
     
@@ -968,7 +1001,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
             std::string pquanvecset = "perftest_quanvectors.bin";
             {
                 ByteArray quantizedBaseBytes = ByteArray::Alloc((size_t)baseVectorCount * (size_t)quantizer->GetNumSubvectors());
-                BOOST_REQUIRE(QuantizeVectors(quantizer, baseVectorsFloat, quantizedBaseBytes) == ErrorCode::Success);
+                BOOST_REQUIRE(QuantizeVectors(quantizer, baseVectorsFloat, quantizedBaseBytes, encodingThreads) == ErrorCode::Success);
                 auto quantizedBase = std::make_shared<BasicVectorSet>(quantizedBaseBytes, VectorValueType::UInt8, quantizer->GetNumSubvectors(), baseVectorCount);
                 quantizedBase->Save(pquanvecset);
             }
@@ -1044,7 +1077,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     jsonFile << "    \"benchmark0b_query_before_insert_round2\": ";
     BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                  numSearchThreads, numQueries, 0, batches, jsonFile);
-    jsonFile << ",\n";
+    jsonFile << (insertBatchSize > 0 ? ",\n" : "\n");
     jsonFile.flush();
 
     BOOST_REQUIRE(index->SaveIndex(indexPath) == ErrorCode::Success);
@@ -1138,7 +1171,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                         auto addFloat = ConvertToFloatVectorSet(addset);
                         BOOST_REQUIRE(addFloat != nullptr);
                         quantizedAddBytes = ByteArray::Alloc((size_t)addFloat->Count() * (size_t)(quantizer->GetNumSubvectors()));
-                        BOOST_REQUIRE(QuantizeVectors(quantizer, addFloat, quantizedAddBytes) == ErrorCode::Success);
+                        BOOST_REQUIRE(QuantizeVectors(quantizer, addFloat, quantizedAddBytes, encodingThreads) == ErrorCode::Success);
                         addset = std::make_shared<BasicVectorSet>(quantizedAddBytes,
                                                                  VectorValueType::UInt8,
                                                                  quantizer->GetNumSubvectors(),
@@ -1146,8 +1179,20 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                     }
                     std::shared_ptr<MetadataSet> addmetaset = TestUtils::TestDataGenerator<T>::LoadMetadataSet(paddmeta, paddmetaidx, insertStart, insertBatchSize);
                     start = std::chrono::high_resolution_clock::now();
-                    InsertVectors<T>(static_cast<SPANN::Index<T> *>(cloneIndex.get()), numInsertThreads, insertBatchSize,
-                                     addset, addmetaset, 0, numSearchDuringInsertThreads, queryset, numQueries, SearchK, &jsonFile);
+                    if (enableQuantization)
+                    {
+                        auto* packedIndex = dynamic_cast<SPANN::Index<uint8_t>*>(cloneIndex.get());
+                        BOOST_REQUIRE(packedIndex != nullptr);
+                        InsertVectors<uint8_t>(packedIndex, numInsertThreads, insertBatchSize,
+                                               addset, addmetaset, 0, numSearchDuringInsertThreads, queryset, numQueries, SearchK, &jsonFile);
+                    }
+                    else
+                    {
+                        auto* nativeIndex = dynamic_cast<SPANN::Index<T>*>(cloneIndex.get());
+                        BOOST_REQUIRE(nativeIndex != nullptr);
+                        InsertVectors<T>(nativeIndex, numInsertThreads, insertBatchSize,
+                                         addset, addmetaset, 0, numSearchDuringInsertThreads, queryset, numQueries, SearchK, &jsonFile);
+                    }
                     end = std::chrono::high_resolution_clock::now();
                 }
                 seconds =
