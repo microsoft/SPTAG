@@ -219,7 +219,7 @@ namespace SPTAG
             }
             else 
             {
-                auto distCalc = COMMON::DistanceCalcSelector<T>(m_distCalcMethod);
+                auto distCalc = COMMON::DistanceCalcSelector<T>(DistCalcMethod::L2);
                 T* subvec = (T*)vec;
                 T* subcodebooks = m_codebooks.get();
                 for (int i = 0; i < m_NumSubvectors; i++) {
