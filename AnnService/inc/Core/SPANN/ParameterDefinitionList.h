@@ -107,7 +107,7 @@ DefineSSDParameter(m_checksumFile, std::string, std::string("checksum"), "Checks
 DefineSSDParameter(m_useDirectIO, bool, false, "UseDirectIO")
 DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
 DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
-DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
+DefineSSDParameter(m_disableCheckpoint, bool, true, "DisableCheckpoint")
 
 // Multi-chunk posting
 DefineSSDParameter(m_useMultiChunkPosting, bool, false, "UseMultiChunkPosting")
@@ -206,7 +206,7 @@ DefineSSDParameter(m_stressTest, bool, false, "StressTest")
 // SPANN
 DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
 DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
-DefineSSDParameter(m_reassignK, int, 0, "ReassignK")
+DefineSSDParameter(m_reassignK, int, 64, "ReassignK")
 DefineSSDParameter(m_recovery, bool, false, "Recovery")
 DefineSSDParameter(m_maxFileSize, int, 300, "MaxFileSizeGB")
 DefineSSDParameter(m_startFileSize, int, 10, "StartFileSizeGB")

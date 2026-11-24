@@ -640,7 +640,6 @@ def train_opq(args):
     subvector_bits = 8
     numData, data = datareader.readbatch()
     data = data.astype(np.float32)
-    args.data_type = 'float32'
     faiss.omp_set_num_threads(args.T)
 
     dist_method = faiss.METRIC_L2
