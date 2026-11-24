@@ -643,7 +643,8 @@ break;
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
                             if (numClusters <= 1 && distMethod == DistCalcMethod::InnerProduct) {
-                                // With unnormalized IP, one high-norm center can attract distinct vectors.
+                                // Under IP, a single cluster does not imply duplicate vectors:
+                                // quantized reconstructions can have unequal norms even for normalized inputs.
                                 // Keep them as separate leaves instead of treating them as duplicates.
                                 for (SizeType j = item.first; j < item.last; ++j) {
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
@@ -791,6 +792,9 @@ break;
                                             m_iSamples, m_fBalanceFactor, false, abort);
 
                                         if (numClusters <= 1 && distMethod == DistCalcMethod::InnerProduct) {
+                                            // Under IP, a single cluster does not imply duplicate vectors:
+                                            // quantized reconstructions can have unequal norms even for normalized inputs.
+                                            // Keep them as separate leaves instead of treating them as duplicates.
                                             result.isLeaf = true;
                                             for (SizeType j = item.first; j < item.last; ++j) {
                                                 SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);

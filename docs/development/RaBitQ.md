@@ -32,7 +32,7 @@ the quantizer model and stored codes do not need conversion.
 Graph construction/refinement and posting replica selection compare **two stored
 codes**, not a query buffer and a code. They use
 `VectorIndex::ComputeDistanceBetweenStoredVectors` and the quantizer's explicit
-`L2DistanceSDC` or `InnerProductDistanceSDC` entry point, independently of `EnableADC`. Do not pass a stored
+`L2DistanceSDC` entry point, independently of `EnableADC`. Do not pass a stored
 code as the first operand of the ADC query-distance API or toggle a shared
 quantizer's mode inside a parallel build. Quantized indexes previously built
 with ADC enabled must have their head graph and postings rebuilt to correct
@@ -52,102 +52,27 @@ replicas. Both batched split reassign and individual reassign check the update
 result. Unconditional increments (`expectedOld=0xff`) and 7-bit wraparound
 remain supported; the existing TiKV idempotent-update behavior is unchanged.
 
-For training and index configuration commands, use the
-[user guide](../RaBitQ_Global_Quantizer.md#train-and-encode).
+Train the model and encode Float base vectors with `Release/quantizer`:
 
-The encoded vectors are stored in a `UInt8` container, but their code payload is
-packed at the configured bit width. Six Float factors follow each new packed code:
-the five existing L2/reconstruction factors and the official IP additive factor.
-The global stored-code size is `paddedDimension * bits / 8 + 6 * sizeof(float)`.
-Queries remain raw Float vectors and are prepared through the loaded `IQuantizer`.
-
-The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
-multiple of 64. The adapter supports L2 and InnerProduct; cosine distance is
-intentionally unsupported. Measurement protocols and results belong to the
-[RaBitQ4 growth evaluation](../../evaluation/2026-11-18-sift10m-rabitq-ip/README.md).
-
-## InnerProduct distance
-
-`DistCalcMethod=InnerProduct` means **1 - dot(query, base)**, with smaller
-scores preferred. Negative distances are valid. Use a model trained with
-`normalize=false`; normalizing base vectors changes maximum-inner-product
-ranking into a different problem. Only the corrected six-factor format is
-supported: version 6 for global models and version 7 for local models.
-Earlier model versions are rejected for both L2 and IP.
-
-For the rotated residual `r = x - c`, let `u` be the unpacked integer code
-minus its midpoint `(2^bits - 1)/2`. The stored L2 factor is
-`f_rescale = -2 * ||r||^2 / dot(r,u)`. The official IP estimator is:
-
-```text
-ip_add = 1 - dot(r,c) + ||r||^2 * dot(c,u) / dot(r,u)
-distance = ip_add - dot(q,c) + 0.5 * f_rescale * dot(q,u)
+```bash
+Release/quantizer \
+  -d 128 -v Float -f XVEC \
+  -i sift/sift_base.fvecs \
+  -o sift/sift_base.rabitq3.u8bin \
+  -oq sift/official_rabitq3_global.bin \
+  -qt RaBitQQuantizer -qd 3 -ts 1000000
 ```
 
-The encoder derives `ip_add = 1 - dot(r,c) + (f_add_L2 - ||r||^2)/2`
-from the original residual and the existing L2 factor, without repeating
-quantization. The original packed bits, L2 factors, and reconstruction are
-unchanged. The extra scalar is precomputed during encoding; no raw-vector
-reranking is needed at query time.
+The encoded vectors are stored in a `UInt8` container, but their code payload is
+packed at the configured bit width. Five Float factors follow each packed code,
+so 128-dimensional 3-bit SIFT vectors use `Dim=68`
+(`128 * 3 / 8 + 5 * sizeof(float)`). Configure the encoded base-vector file and
+`QuantizerFilePath` in the regular SPANN build configuration. Queries remain
+raw Float vectors and are prepared through the loaded global `IQuantizer`.
 
-The previous IP path used `ip_add=1`, omitting the centroid correction.
-For estimator residual error `e`, that path had error `-dot(q,e)` rather than
-the official `-dot(q-c,e)`. Historical IP measurements using that path do not
-establish the accuracy of the corrected estimator. The correction does not
-make IP a metric or guarantee that posting splits converge.
-
-The official packed-code inner-product kernel evaluates `dot(q,u)`; base
-vectors are not reconstructed or fetched for ADC. Zero residuals have
-`f_rescale=0`, so their score is exactly `1-dot(q,c)`. Query-to-centroid dot
-products are computed once during query preparation. SDC reconstructs only
-its first operand and uses the same estimator, independently of the ADC flag.
-The SDC estimator remains directional.
-
-`IQuantizer` declares pure virtual InnerProduct entry points, so each concrete
-quantizer must implement them. PQ explicitly reuses its legacy cosine-named
-methods, which evaluate `m_base-dot` without normalization for IP-configured
-tables; OPQ inherits this implementation. RaBitQ supplies its own estimator
-without enabling its unsupported Cosine API. Both `VectorIndex` stored-code
-comparisons and BKTree clustering dispatch the requested metric. Auto-tuning
-uses the same metric for ground truth and candidate scoring, and rejects
-Cosine rather than silently evaluating candidates with L2.
-
-For InnerProduct, a one-cluster BKTree partition is stored as an ordinary leaf,
-not a duplicate-vector group. Collinear vectors with different magnitudes can
-all choose the same IP center while having different query scores. Both serial
-and parallel tree builders retain those candidates; L2/Cosine grouping is
-unchanged. Rebuild previously created IP trees to obtain this correction.
-The [single-cluster discussion](SingleCluster_Assumption.md) separates the
-underlying assumption, counterexamples and fallback tradeoffs.
-
-The corrected code adds four bytes per vector: global 128-dimensional 4-bit
-codes grow from 84 to 88 bytes. Existing codes do not contain the exact residual
-information needed to recover the correction. Old models cannot be loaded by
-this implementation: train a new model, re-encode the original vectors, and
-rebuild a separate index. Never resume an old index using a corrected model.
-For supported models, `CloneWithBits` retains rotation and centroids while
-changing bit width. A graph/posting index must also be rebuilt when changing
-its distance metric.
-
-## ADC query buffer layout
-
-L2 and IP share one transient layout. With padded dimension `D` and local
-centroid count `N`, the following Float blocks appear in order:
-
-| Block | Float count |
-| --- | --- |
-| Rotated, padded query | D |
-| Global squared L2 distance and query-sum factor | 2 |
-| Squared L2 distances to local centroids | N |
-| Inner product with the global centroid | 1 |
-| Inner products with local centroids | N |
-
-Allocate with `QuantizeSize()`, not a hard-coded length: ADC needs
-`sizeof(float) * (D + 3 + 2*N)` bytes; global models have `N=0`.
-Both sets of factors are currently prepared even for L2-only queries.
-Compared with the old L2 layout, IP adds `1+N` floats and centroid dot products
-per query preparation, not per candidate. This does not change stored-code size.
-SDC takes stored codes instead of this query buffer.
+The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
+multiple of 64. The current adapter supports the official L2 estimator; cosine
+distance is intentionally unsupported.
 
 ## Rotation and model compatibility
 
@@ -155,11 +80,11 @@ New models apply the same random orthogonal rotation to training vectors,
 centroids, encoded vectors, and ADC queries. Reconstruction applies the inverse
 transform, and bit-width clones retain the original rotation.
 
-Global models use version 6 and local models use version 7, both with a stored
-rotation and six-factor codes. There is no old-format compatibility path.
-Versions 2/3/4/5 and unknown versions fail explicitly at model loading, with
-instructions to retrain, re-encode, and rebuild. Do not replace only the model
-file under an existing index.
+Global models store the rotation in version 3. Existing version-2 models retain
+their identity transform and serialization; loading them does not silently
+upgrade their codes. To use rotation with an old corpus, train a new model,
+re-encode the base vectors, and build a separate index. Do not replace only the
+model file under an existing index.
 
 ## Optional local residual quantization
 
@@ -185,24 +110,29 @@ retain those centers.
 Each base vector is assigned to its nearest center and its residual is encoded
 with upstream per-vector optimal scaling, rather than the shared expected scale.
 The model stores the centers; each code appends a `uint32` center ID after the
-packed payload and six Float factors. For 128-dimensional 7-bit
-vectors this is **140 bytes** (112 + 24 + 4), versus 136 for global quantization.
+existing packed payload and five Float factors. For 128-dimensional 7-bit
+vectors this is **136 bytes** (112 + 20 + 4), versus 132 for global quantization.
 Set the index's `Dim` to that encoded width. Center storage is additional to the
 7-bit payload; the bit count is not a claim about total index size.
 
-ADC scoring selects the code's center-specific factors from the
-[query buffer](#adc-query-buffer-layout), without fetching or reranking raw
-base vectors. SDC and reconstruction likewise use each code's stored center.
+ADC query preparation computes the query norm relative to every center once,
+alongside the rotated query and existing factors. Its buffer uses
+`4 * (paddedDimension + 2 + centerCount)` bytes. Scoring selects the matching
+center's norm without fetching or reranking raw base vectors. SDC and vector
+reconstruction likewise use each code's stored center.
 
-New local models use **version 7**: the rotated-global payload is followed by a
-`uint32` center count and row-major rotated Float centers. Old local version 4
-is not accepted; its codes lack the IP correction factor.
+Local models use **version 4**: the version-3 payload is followed by a `uint32`
+center count and row-major rotated Float centers. Version-2/3 models keep their
+existing encoding, scoring, serialization, and fast quantization behavior.
 Never replace a model beneath an existing encoded corpus/index: re-encode and
 build a separate index when enabling or changing local centers.
 
 Local quantization reduces distance-estimation error, but does not guarantee
 a fixed recall. Search candidate coverage remains an independent requirement;
 validate the complete query set and report any changed search parameters.
+
+`Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini` is the canonical
+SIFT1M example. It uses STATIC postings containing the global RaBitQ codes.
 
 STATIC search workspaces must use one asynchronous read request per posting,
 pointing to the start of that posting's buffer. Dynamic storage instead uses
