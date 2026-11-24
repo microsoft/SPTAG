@@ -10,6 +10,7 @@ construction. It was originally released by Microsoft Research and Microsoft Bin
 
 **Start with:** [choose a capability](#choose-a-capability) |
 [quick start](docs/QuickStart.md) |
+[multi-tenant quick start](docs/MultiTenantQuickStart.md) |
 [reproduce FILEIO/TiKV benchmarks](evaluation/2026-10-28-sift1m/Reproduce.md) |
 [API and data contracts](docs/SDK.md) |
 [platform and feature status](docs/SupportMatrix.md).
@@ -33,6 +34,7 @@ the engine, not interchangeable index types or equally validated configurations.
 | Maintain a changing corpus | SPFresh incremental insert/delete and split/reassign | [Dynamic indexing](docs/Architecture.md#dynamic-index-maintenance) | Implemented; affected visibility paths have a known correctness blocker |
 | Reduce vector storage cost | PQ/OPQ and RaBitQ; native RaBitQ bit-width tuning | [Quantization and tuning](docs/RaBitQ_Global_Quantizer.md) | Opt-in; accuracy and compatibility require separate validation |
 | Put dynamic postings in a storage cluster | TiKV RawKV backend | [TiKV integration](docs/TiKV-Integration.md) | Implemented integration; cluster behavior not certified by baseline tests |
+| Isolate tenant indexes in one node | Opt-in multi-tenant SPANN with RocksDB/FILEIO/TiKV postings | [Multi-tenant quick start](docs/MultiTenantQuickStart.md), [configuration and recovery](docs/MultiTenantDesign.md) | Linux tenant/backend recovery tests; trusted callers, single-node ownership |
 | Scale index construction across machines | Distributed partition/build workflows; SPIRE research lineage | [Construction architecture](docs/Architecture.md#construction-and-multi-layer-indexes) | Multi-host workflow requires dedicated validation |
 
 Capability importance and readiness are separate: core development directions
