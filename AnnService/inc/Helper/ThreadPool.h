@@ -21,7 +21,7 @@ namespace SPTAG
             class Abort : public IAbortOperation
             {
             private:
-                bool m_stopped;
+              std::atomic<bool> m_stopped;
 
             public:
                 Abort(bool p_status = true) { m_stopped = p_status; }
@@ -43,41 +43,33 @@ namespace SPTAG
 
             ~ThreadPool() 
             {
-                m_abort.SetAbort(true);
+                std::vector<std::thread> threads;
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    m_abort.SetAbort(true);
+                    threads.swap(m_threads);
+                }
                 m_cond.notify_all();
-                for (auto&& t : m_threads) t.join();
-                m_threads.clear();
+                for (auto&& t : threads) t.join();
+                while (!m_jobs.empty())
+                {
+                    delete m_jobs.front();
+                    m_jobs.pop_front();
+                }
             }
 
             void init(int numberOfThreads = 1)
             {
+                std::lock_guard<std::mutex> lock(m_lock);
                 m_abort.SetAbort(false);
-                for (int i = 0; i < numberOfThreads; i++)
-                {
-                    m_threads.emplace_back([this] {
-                        Job *j;
-                        while (get(j))
-                        {
-                            try
-                            {
-                                j->exec(&m_abort);
-                            }
-                            catch (std::exception &e)
-                            {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n",
-                                             typeid(*j).name(), e.what());
-                            }
-                            delete j;
-                            currentJobs--;
-                        }   
-                    });
-                }
+                m_desiredThreads = (numberOfThreads > 0) ? numberOfThreads : 0;
             }
 
             void add(Job* j)
             {
                 {
                     std::lock_guard<std::mutex> lock(m_lock);
+                    ensureThreadsLocked();
                     m_jobs.push_back(j);
                 }
                 m_cond.notify_one();
@@ -87,6 +79,7 @@ namespace SPTAG
             {
                 {
                     std::lock_guard<std::mutex> lock(m_lock);
+                    ensureThreadsLocked();
                     m_jobs.push_front(j);
                 }
                 m_cond.notify_one();
@@ -112,16 +105,53 @@ namespace SPTAG
             }
 
             inline uint32_t runningJobs() { return currentJobs; }
+            bool hasFailed() const
+            {
+                return m_failed.load();
+            }
 
             inline bool allClear() {
-                size_t totaljobs = jobsize();
-                if (totaljobs % 10000 == 0)
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "jobsize: %zu\n", totaljobs);
-                return currentJobs == 0 && totaljobs == 0; 
+                std::lock_guard<std::mutex> lock(m_lock);
+                return currentJobs == 0 && m_jobs.empty();
             }
 
         protected:
+            virtual void startThreadsLocked(int count)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    m_threads.emplace_back([this] {
+                        Job *j;
+                        while (get(j))
+                        {
+                            try
+                            {
+                                j->exec(&m_abort);
+                            }
+                            catch (std::exception &e)
+                            {
+                                m_failed = true;
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n",
+                                             typeid(*j).name(), e.what());
+                            }
+                            delete j;
+                            currentJobs--;
+                        }
+                    });
+                }
+            }
+
+            void ensureThreadsLocked()
+            {
+                if (!m_abort.ShouldAbort() && static_cast<int>(m_threads.size()) < m_desiredThreads)
+                {
+                    startThreadsLocked(m_desiredThreads - static_cast<int>(m_threads.size()));
+                }
+            }
+
+            int m_desiredThreads = 0;
             std::atomic_uint32_t currentJobs{ 0 };
+            std::atomic<bool> m_failed{false};
             std::deque<Job*> m_jobs;
             Abort m_abort;
             std::mutex m_lock;

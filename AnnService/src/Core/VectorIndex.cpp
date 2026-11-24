@@ -198,6 +198,9 @@ void listdir(std::string path, std::vector<std::string> &files)
 
 VectorIndex::VectorIndex()
 {
+    m_residentNames.Assign(m_sMetadataFile, "metadata.bin");
+    m_residentNames.Assign(m_sMetadataIndexFile, "metadataIndex.bin");
+    m_residentNames.Assign(m_sQuantizerFile, "quantizer.bin");
 }
 
 VectorIndex::~VectorIndex()
@@ -257,14 +260,17 @@ ErrorCode VectorIndex::LoadIndexConfig(Helper::IniReader &p_reader)
     std::string metadataSection("MetaData");
     if (p_reader.DoesSectionExist(metadataSection))
     {
-        m_sMetadataFile = p_reader.GetParameter(metadataSection, "MetaDataFilePath", std::string());
-        m_sMetadataIndexFile = p_reader.GetParameter(metadataSection, "MetaDataIndexPath", std::string());
+        m_residentNames.Assign(m_sMetadataFile,
+                               p_reader.GetParameter(metadataSection, "MetaDataFilePath", std::string()));
+        m_residentNames.Assign(m_sMetadataIndexFile,
+                               p_reader.GetParameter(metadataSection, "MetaDataIndexPath", std::string()));
     }
 
     std::string quantizerSection("Quantizer");
     if (p_reader.DoesSectionExist(quantizerSection))
     {
-        m_sQuantizerFile = p_reader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
+        m_residentNames.Assign(m_sQuantizerFile,
+                               p_reader.GetParameter(quantizerSection, "QuantizerFilePath", std::string()));
     }
     return LoadConfig(p_reader);
 }
@@ -386,15 +392,21 @@ ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteAr
 
 ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<SizeType>* p_mapping)
 {
+    return SaveIndex(p_folderPath, p_mapping, false);
+}
+
+ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<SizeType> *p_mapping,
+                                 bool p_allowFullyDeleted)
+{
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SaveIndex(%s) begin...ready:%d GetNumSamples():%d GetNumDeleted():%d\n",
                  p_folderPath.c_str(), m_bReady, GetNumSamples(), GetNumDeleted());
-    if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
+    if (!m_bReady || GetNumSamples() == 0 || (!p_allowFullyDeleted && GetNumSamples() - GetNumDeleted() == 0))
         return ErrorCode::EmptyIndex;
 
     if (GetIndexAlgoType() == IndexAlgoType::SPANN && GetParameter("IndexDirectory", "Base") != p_folderPath)
     {
         std::string oldFolder = GetParameter("IndexDirectory", "Base");
-        ErrorCode ret = SaveIndex(oldFolder);
+        ErrorCode ret = SaveIndex(oldFolder, nullptr, p_allowFullyDeleted);
         if (ret != ErrorCode::Success || !copydirectory(oldFolder, p_folderPath))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to copy index directory contents to %s!\n",
@@ -749,7 +761,7 @@ std::shared_ptr<VectorIndex> VectorIndex::CreateInstance(IndexAlgoType p_algo, V
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        return std::shared_ptr<VectorIndex>(new BKT::Index<Type>);
+        return std::allocate_shared<BKT::Index<Type>>(COMMON::ResidentAllocator<BKT::Index<Type>>());
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
@@ -764,7 +776,7 @@ std::shared_ptr<VectorIndex> VectorIndex::CreateInstance(IndexAlgoType p_algo, V
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        return std::shared_ptr<VectorIndex>(new KDT::Index<Type>);
+        return std::allocate_shared<KDT::Index<Type>>(COMMON::ResidentAllocator<KDT::Index<Type>>());
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
@@ -779,7 +791,7 @@ std::shared_ptr<VectorIndex> VectorIndex::CreateInstance(IndexAlgoType p_algo, V
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        return std::shared_ptr<VectorIndex>(new SPANN::Index<Type>);
+        return std::allocate_shared<SPANN::Index<Type>>(COMMON::ResidentAllocator<SPANN::Index<Type>>());
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
@@ -792,6 +804,12 @@ std::shared_ptr<VectorIndex> VectorIndex::CreateInstance(IndexAlgoType p_algo, V
 }
 
 ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::shared_ptr<VectorIndex> &p_vectorIndex)
+{
+    return LoadIndex(p_loaderFilePath, p_vectorIndex, nullptr);
+}
+
+ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::shared_ptr<VectorIndex> &p_vectorIndex,
+                                 std::shared_ptr<Helper::KeyValueIO> p_postingStore)
 {
     std::string folderPath(p_loaderFilePath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
@@ -813,6 +831,18 @@ ErrorCode VectorIndex::LoadIndex(const std::string &p_loaderFilePath, std::share
 
     ErrorCode ret = ErrorCode::Success;
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success)
+        return ret;
+
+    if (p_postingStore && p_postingStore->GetStorageType() == Storage::TIKVIO)
+    {
+        // A managed checkpoint always persisted its mode, including legacy false.
+        // Never guess a representation from the default for a new index.
+        bool distributed;
+        if (!Helper::Convert::ConvertStringTo<bool>(
+                iniReader.GetParameter("BuildSSDIndex", "DistributedVersionMap", std::string()).c_str(), distributed))
+            return ErrorCode::FailedParseValue;
+    }
+    if (p_postingStore && (ret = p_vectorIndex->SetPostingStore(std::move(p_postingStore))) != ErrorCode::Success)
         return ret;
 
     std::shared_ptr<std::vector<std::string>> indexfiles = p_vectorIndex->GetIndexFiles();

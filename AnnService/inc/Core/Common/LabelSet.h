@@ -39,6 +39,10 @@ namespace SPTAG
             }
 
             inline size_t Count() const { return m_inserted.load(); }
+            uint64_t ResidentGrowthBytes(SizeType target) const
+            {
+                return m_data.ResidentGrowthBytes(target);
+            }
 
             inline bool Contains(const SizeType& key) const
             {

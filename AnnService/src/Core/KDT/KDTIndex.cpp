@@ -119,16 +119,23 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
 
 template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
 {
+    auto hashTableExp = m_iHashTableExp;
     auto workspace = m_workSpaceFactory->GetWorkSpace();
     if (workspace)
     {
-        m_iHashTableExp = workspace->HashTableExponent();
+        hashTableExp = workspace->HashTableExponent();
     }
     m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
+    if (!m_instanceWorkspaces)
+        m_iHashTableExp = hashTableExp;
 
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr)                                               \
     IOSTRING(p_configOut, WriteString,                                                                                 \
-             (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
+             (RepresentStr + std::string("=") +                                                                        \
+              (std::string(RepresentStr) == "HashTableExponent" ? Helper::Convert::ConvertToString(hashTableExp)       \
+                                                                : GetParameter(RepresentStr)) +                        \
+              std::string("\n"))                                                                                       \
+                 .c_str());
 
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
@@ -820,7 +827,7 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
 
     if (end - m_pTrees.sizePerTree() >= m_addCountForRebuild && m_threadPool.jobsize() == 0)
     {
-        m_threadPool.add(new RebuildJob(&m_pSamples, &m_pTrees, &m_pGraph));
+        m_threadPool.add(new RebuildJob(&m_pSamples, &m_pTrees, &m_pGraph, end));
     }
 
     for (SizeType node = begin; node < end; node++)
@@ -900,7 +907,7 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
         VarType tmp;                                                                                                   \
         if (SPTAG::Helper::Convert::ConvertStringTo<VarType>(p_value, tmp))                                            \
         {                                                                                                              \
-            VarName = tmp;                                                                                             \
+            AssignParameter(VarName, std::move(tmp));                                                                  \
         }                                                                                                              \
     }
 

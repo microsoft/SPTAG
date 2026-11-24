@@ -18,7 +18,7 @@
 #endif
 
 #ifdef ROCKSDB
-#include "ExtraRocksDBController.h"
+#include "inc/Core/SPANN/ExtraRocksDBController.h"
 // enable rocksdb io_uring
 extern "C" bool RocksDbIOUringEnable() { return true; }
 #endif
@@ -54,6 +54,8 @@ template <typename T> bool Index<T>::CheckHeadIndexType()
 
 template <typename T> void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
 {
+    if (m_options.m_postingStore && quantizer && quantizer->GetQuantizerType() == QuantizerType::RaBitQQuantizer)
+        throw std::invalid_argument("Managed resident accounting does not support RaBitQ");
     m_pQuantizer = quantizer;
     if (m_pQuantizer)
     {
@@ -146,7 +148,8 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
         }
         else
         {
-            m_extraSearchers[i] = std::make_shared<ExtraDynamicSearcher<T>>(m_options, i, this, m_db);
+            m_extraSearchers[i] = std::allocate_shared<ExtraDynamicSearcher<T>>(
+                COMMON::ResidentAllocator<ExtraDynamicSearcher<T>>(), m_options, i, this, m_db);
         }
 
         if (!m_extraSearchers[i]->LoadIndex(m_options))
@@ -226,7 +229,8 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
         }
         else
         {
-            m_extraSearchers[i] = std::make_shared<ExtraDynamicSearcher<T>>(m_options, i, this, m_db);
+            m_extraSearchers[i] = std::allocate_shared<ExtraDynamicSearcher<T>>(
+                COMMON::ResidentAllocator<ExtraDynamicSearcher<T>>(), m_options, i, this, m_db);
         }
 
         if (m_options.m_storage != Storage::STATIC && !m_extraSearchers[i]->Available())
@@ -244,10 +248,13 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
 
 template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
 {
+    auto savedOptions = m_options;
+    if (m_options.m_postingStore)
+        savedOptions.m_vectorSize = m_managedNextID.load();
     IOSTRING(p_configOut, WriteString, "[Base]\n");
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr)                                             \
     IOSTRING(p_configOut, WriteString,                                                                                 \
-             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(m_options.VarName) +           \
+             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(savedOptions.VarName) +        \
               std::string("\n"))                                                                                       \
                  .c_str());
 
@@ -276,11 +283,14 @@ template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::Dis
 
     m_topIndex->SaveConfig(p_configOut);
 
-    Helper::Convert::ConvertStringTo<int>(m_topIndex->GetParameter("HashTableExponent").c_str(), m_options.m_hashExp);
+    Helper::Convert::ConvertStringTo<int>(m_topIndex->GetParameter("HashTableExponent").c_str(),
+                                          savedOptions.m_hashExp);
+    if (!m_options.m_postingStore)
+        m_options.m_hashExp = savedOptions.m_hashExp;
     IOSTRING(p_configOut, WriteString, "[BuildSSDIndex]\n");
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr)                                               \
     IOSTRING(p_configOut, WriteString,                                                                                 \
-             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(m_options.VarName) +           \
+             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(savedOptions.VarName) +        \
               std::string("\n"))                                                                                       \
                  .c_str());
 
@@ -323,7 +333,13 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
         if ((ret = searcher->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
             return ret;
     }
-    if (m_options.m_shareDB) { m_db->Checkpoint(m_options.m_indexDirectory); }
+    if (m_options.m_shareDB && !m_options.m_postingStore && m_options.m_storage != Storage::STATIC)
+    {
+        if (!m_db)
+            return ErrorCode::Fail;
+        if ((ret = m_db->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
+            return ret;
+    }
     return ErrorCode::Success;
 }
 
@@ -625,7 +641,7 @@ std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool
     extraWorkspace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     extraWorkspace->m_relaxedMono = false;
     extraWorkspace->m_loadedPostingNum = 0;
-    extraWorkspace->m_deduper.clear();
+    extraWorkspace->Deduper().clear();
     extraWorkspace->m_postingIDs.clear();
     extraWorkspace->ResetIteratorState(static_cast<int>(m_extraSearchers.size()), m_options.m_maxCheck, m_options.m_hashExp);
     std::shared_ptr<ResultIterator> resultIterator = std::make_shared<SPANNResultIterator<T>>(
@@ -761,7 +777,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         const bool isTargetLayer = (layer == p_tolayer);
 
         auto setupStart = std::chrono::high_resolution_clock::now();
-        p_exWorkSpace->m_deduper.clear();
+        p_exWorkSpace->Deduper().clear();
         p_exWorkSpace->m_postingIDs.clear();
 
         if (layer < m_extraSearchers.size() - 1 && needInternalSort) localResults.SortResult();
@@ -797,7 +813,8 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         {
             auto res = &remainResults[i];
             if (res->VID == -1) break;
-            if (p_exWorkSpace->m_deduper.CheckAndSet(res->VID)) continue;
+            if (p_exWorkSpace->Deduper().CheckAndSet(res->VID))
+                continue;
             localResults.AddPoint(res->VID, res->Dist, res->Vec);
         }
     }
@@ -892,7 +909,7 @@ ErrorCode Index<T>::DebugSearchDiskIndex(QueryResult &p_query, int p_subInternal
     {
         InitWorkSpace(workSpace.get(), true);
     }
-    workSpace->m_deduper.clear();
+    workSpace->Deduper().clear();
 
     int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
     float limitDist = p_query.GetResult(0)->Dist * m_options.m_maxDistRatio;
@@ -1360,13 +1377,21 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
 
         m_topIndex->UpdateIndex();
 
+        if (m_options.m_postingStore)
+        {
+            auto status = m_topIndex->UseInstanceWorkspaces();
+            if (status != ErrorCode::Success)
+                return status;
+        }
+
         if (m_options.m_storage == Storage::STATIC)
         {
             m_extraSearchers.emplace_back(std::make_shared<ExtraStaticSearcher<T>>(m_extraSearchers.size(), this));
         }
         else
         {
-            m_extraSearchers.emplace_back(std::make_shared<ExtraDynamicSearcher<T>>(m_options, m_extraSearchers.size(), this, m_db));
+            m_extraSearchers.emplace_back(std::allocate_shared<ExtraDynamicSearcher<T>>(
+                COMMON::ResidentAllocator<ExtraDynamicSearcher<T>>(), m_options, m_extraSearchers.size(), this, m_db));
         }
 
         {
@@ -1460,13 +1485,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         auto setLayerPaths = [&](int layer) {
             if (m_options.m_layers > 1 && layer < m_options.m_layers - 1) {
                 std::string suffix = "_layer" + std::to_string(layer);
-                m_options.m_headIDFile = origHeadIDFile + suffix;
-                m_options.m_headVectorFile = origHeadVectorFile + suffix;
-                m_options.m_headIndexFolder = origHeadIndexFolder + suffix;
+                m_options.Assign(m_options.m_headIDFile, origHeadIDFile + suffix);
+                m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile + suffix);
+                m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder + suffix);
             } else {
-                m_options.m_headIDFile = origHeadIDFile;
-                m_options.m_headVectorFile = origHeadVectorFile;
-                m_options.m_headIndexFolder = origHeadIndexFolder;
+                m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
             }
         };
 
@@ -1479,9 +1504,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         // Load head index from disk
         if (LoadIndex(headIndexPath, m_topIndex) != ErrorCode::Success) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load head index for resume from %s\n", headIndexPath.c_str());
-            m_options.m_headIDFile = origHeadIDFile;
-            m_options.m_headVectorFile = origHeadVectorFile;
-            m_options.m_headIndexFolder = origHeadIndexFolder;
+            m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+            m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+            m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
             return ErrorCode::Fail;
         }
         m_topIndex->SetQuantizer(m_pQuantizer);
@@ -1510,7 +1535,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             if (m_options.m_storage == Storage::STATIC) {
                 m_extraSearchers.push_back(std::make_shared<ExtraStaticSearcher<T>>(i, this));
             } else {
-                m_extraSearchers.push_back(std::make_shared<ExtraDynamicSearcher<T>>(m_options, i, this, m_db));
+                m_extraSearchers.push_back(std::allocate_shared<ExtraDynamicSearcher<T>>(
+                    COMMON::ResidentAllocator<ExtraDynamicSearcher<T>>(), m_options, i, this, m_db));
             }
             if (!m_extraSearchers.back()->LoadIndex(m_options)) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load existing index for layer %d\n", i);
@@ -1536,9 +1562,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to resume build for layer 0.\n");
                     m_options.m_selectHead = origSelectHead;
                     m_options.m_buildHead = origBuildHead;
-                    m_options.m_headIDFile = origHeadIDFile;
-                    m_options.m_headVectorFile = origHeadVectorFile;
-                    m_options.m_headIndexFolder = origHeadIndexFolder;
+                    m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                    m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                    m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
                     return ret;
                 }
             } else {
@@ -1552,9 +1578,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read headvector file for layer %d from %s.\n", layer, prevHeadVectors.c_str());
                     m_options.m_selectHead = origSelectHead;
                     m_options.m_buildHead = origBuildHead;
-                    m_options.m_headIDFile = origHeadIDFile;
-                    m_options.m_headVectorFile = origHeadVectorFile;
-                    m_options.m_headIndexFolder = origHeadIndexFolder;
+                    m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                    m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                    m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
                     return ErrorCode::Fail;
                 }
                 auto ret = BuildIndexInternalLayer(vectorReader);
@@ -1562,9 +1588,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to resume build for layer %d.\n", layer);
                     m_options.m_selectHead = origSelectHead;
                     m_options.m_buildHead = origBuildHead;
-                    m_options.m_headIDFile = origHeadIDFile;
-                    m_options.m_headVectorFile = origHeadVectorFile;
-                    m_options.m_headIndexFolder = origHeadIndexFolder;
+                    m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                    m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                    m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
                     return ret;
                 }
             }
@@ -1572,9 +1598,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
         m_options.m_selectHead = origSelectHead;
         m_options.m_buildHead = origBuildHead;
-        m_options.m_headIDFile = origHeadIDFile;
-        m_options.m_headVectorFile = origHeadVectorFile;
-        m_options.m_headIndexFolder = origHeadIndexFolder;
+        m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+        m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+        m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
     } else {
         // Normal build path
         // Save original file path options for per-layer suffixing
@@ -1585,13 +1611,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         auto setLayerPaths = [&](int layer) {
             if (m_options.m_layers > 1 && layer < m_options.m_layers - 1) {
                 std::string suffix = "_layer" + std::to_string(layer);
-                m_options.m_headIDFile = origHeadIDFile + suffix;
-                m_options.m_headVectorFile = origHeadVectorFile + suffix;
-                m_options.m_headIndexFolder = origHeadIndexFolder + suffix;
+                m_options.Assign(m_options.m_headIDFile, origHeadIDFile + suffix);
+                m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile + suffix);
+                m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder + suffix);
             } else {
-                m_options.m_headIDFile = origHeadIDFile;
-                m_options.m_headVectorFile = origHeadVectorFile;
-                m_options.m_headIndexFolder = origHeadIndexFolder;
+                m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
             }
         };
 
@@ -1602,9 +1628,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         if (ret != ErrorCode::Success)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build index layer 0.\n");
-            m_options.m_headIDFile = origHeadIDFile;
-            m_options.m_headVectorFile = origHeadVectorFile;
-            m_options.m_headIndexFolder = origHeadIndexFolder;
+            m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+            m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+            m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
             return ret;
         }
         for (int layer = 1; layer < m_options.m_layers; layer++)
@@ -1633,9 +1659,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             if (ErrorCode::Success != vectorReader->LoadFile(prevHeadVectors))
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read headvector file for layer %d from %s.\n", layer, prevHeadVectors.c_str());
-                m_options.m_headIDFile = origHeadIDFile;
-                m_options.m_headVectorFile = origHeadVectorFile;
-                m_options.m_headIndexFolder = origHeadIndexFolder;
+                m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
                 return ErrorCode::Fail;
             }
             m_topIndex = nullptr;
@@ -1643,17 +1669,17 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             if (ret != ErrorCode::Success)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build index layer %d.\n", layer);
-                m_options.m_headIDFile = origHeadIDFile;
-                m_options.m_headVectorFile = origHeadVectorFile;
-                m_options.m_headIndexFolder = origHeadIndexFolder;
+                m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+                m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+                m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
                 return ret;
             }
         }
 
         // Restore original options
-        m_options.m_headIDFile = origHeadIDFile;
-        m_options.m_headVectorFile = origHeadVectorFile;
-        m_options.m_headIndexFolder = origHeadIndexFolder;
+        m_options.Assign(m_options.m_headIDFile, origHeadIDFile);
+        m_options.Assign(m_options.m_headVectorFile, origHeadVectorFile);
+        m_options.Assign(m_options.m_headIndexFolder, origHeadIndexFolder);
     } // end of normal vs resume path
 
     // Clean up last layer's head vector file (not needed at runtime)
@@ -1691,6 +1717,8 @@ template <typename T> ErrorCode Index<T>::BuildIndex(bool p_normalized)
         m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
     }
 
+    if (m_options.m_postingStore)
+        m_managedNextID = m_options.m_vectorSize;
     return BuildIndexInternal(vectorReader, vectorOptions);
 }
 
@@ -1731,6 +1759,8 @@ ErrorCode Index<T>::BuildIndex(const void *p_data, SizeType p_vectorNum, Dimensi
     m_options.m_valueType = GetEnumValueType<T>();
     m_options.m_dim = p_dimension;
     m_options.m_vectorSize = p_vectorNum;
+    if (m_options.m_postingStore)
+        m_managedNextID = p_vectorNum;
 
     return BuildIndexInternal(vectorReader, vectorOptions);
 }
@@ -1813,7 +1843,11 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
         if (m_topIndex != nullptr)
             return m_topIndex->SetParameter(p_param, p_value);
         else
-            m_topParameters[p_param] = p_value;
+        {
+            const auto account = m_topParameters.get_allocator().Account();
+            m_topParameters[COMMON::ResidentString(p_param, COMMON::ResidentAllocator<char>(account))] =
+                COMMON::ResidentString(p_value, COMMON::ResidentAllocator<char>(account));
+        }
     }
     else
     {
@@ -1852,9 +1886,9 @@ template <typename T> std::string Index<T>::GetParameter(const char *p_param, co
             return m_topIndex->GetParameter(p_param);
         else
         {
-            auto iter = m_topParameters.find(p_param);
+            auto iter = m_topParameters.find(COMMON::ResidentString(p_param));
             if (iter != m_topParameters.end())
-                return iter->second;
+                return COMMON::UnmanagedString(iter->second);
             return "Undefined!";
         }
     }
@@ -1862,6 +1896,114 @@ template <typename T> std::string Index<T>::GetParameter(const char *p_param, co
     {
         return m_options.GetParameter(p_section, p_param);
     }
+}
+
+template <typename T> uint64_t Index<T>::ResidentGrowthBytes(SizeType count) const
+{
+    const auto maximum = (std::numeric_limits<uint64_t>::max)();
+    const auto next = static_cast<uint64_t>(m_managedNextID.load());
+    if (!m_options.m_postingStore || !m_topIndex || count <= 0 ||
+        next + static_cast<uint64_t>(count) > static_cast<uint64_t>(m_options.m_maxID))
+        return maximum;
+    const auto target = static_cast<SizeType>(next + count);
+    if (target < m_topIndex->GetNumSamples())
+        return maximum;
+    try
+    {
+        auto result = m_topIndex->ResidentGrowthBytes(target - m_topIndex->GetNumSamples());
+        result = COMMON::ResidentAddBytes(result, m_topLocalToGlobalID.ResidentGrowthBytes(target));
+        result = COMMON::ResidentAddBytes(result, m_topGlobalToLocalID.GrowthBytes(target));
+        for (const auto &layer : m_extraSearchers)
+            result = COMMON::ResidentAddBytes(result, layer->ResidentGrowthBytes(target));
+        return result;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return maximum;
+    }
+}
+
+template <typename T> ErrorCode Index<T>::PrepareResidentGrowth(SizeType count)
+{
+    if (!m_options.m_postingStore || count <= 0)
+        return ErrorCode::FailedParseValue;
+    const auto target = static_cast<int64_t>(m_managedNextID.load()) + count;
+    if (!m_topIndex || target > m_options.m_maxID || target < m_topIndex->GetNumSamples())
+        return ErrorCode::MemoryOverFlow;
+    auto status = GetUpdateStatus();
+    if (status != ErrorCode::Success)
+        return status;
+    // Reserve credit, not future head rows. Cascades may promote any admitted
+    // VID; backing is allocated only when a distinct head is actually promoted.
+    return m_topIndex->PrepareResidentGrowth(static_cast<SizeType>(target) - m_topIndex->GetNumSamples());
+}
+
+template <typename T> ErrorCode Index<T>::PrepareResidentReads()
+{
+    if (!m_options.m_postingStore || m_extraSearchers.empty())
+        return ErrorCode::Undefined;
+    std::vector<SizeType> heads;
+    for (size_t layer = 0; layer < m_extraSearchers.size(); ++layer)
+    {
+        heads.clear();
+        if (layer + 1 < m_extraSearchers.size())
+        {
+            auto status = m_extraSearchers[layer + 1]->GetContainedIDs(heads);
+            if (status != ErrorCode::Success)
+                return status;
+        }
+        else
+        {
+            heads.reserve(m_topGlobalToLocalID.size());
+            m_topGlobalToLocalID.ForEach([&](SizeType id, SizeType) { heads.push_back(id); });
+        }
+        auto status = m_extraSearchers[layer]->PrepareResidentReads(heads);
+        if (status != ErrorCode::Success)
+            return status;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::ReserveVectorIDs(SizeType count, SizeType limit, SizeType &first)
+{
+    if (!m_options.m_postingStore || m_extraSearchers.empty() || count <= 0)
+        return ErrorCode::FailedParseValue;
+    std::lock_guard<std::mutex> lock(m_dataAddLock);
+    const auto begin = m_managedNextID.load();
+    if (static_cast<int64_t>(begin) + count > limit || static_cast<int64_t>(begin) + count > m_options.m_maxID)
+        return ErrorCode::MemoryOverFlow;
+    first = begin;
+    m_managedNextID = begin + count;
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::InsertAt(const void *data, SizeType count, DimensionType dimension, SizeType first)
+{
+    if (!m_options.m_postingStore || m_extraSearchers.empty() || !data || count <= 0 || first < 0 ||
+        dimension != GetFeatureDim() || static_cast<int64_t>(first) + count > m_managedNextID.load())
+        return ErrorCode::FailedParseValue;
+    auto copy = ByteArray::Alloc(static_cast<size_t>(count) * dimension * sizeof(T));
+    memcpy(copy.Data(), data, copy.Length());
+    std::shared_ptr<VectorSet> vectors =
+        std::make_shared<BasicVectorSet>(copy, GetEnumValueType<T>(), dimension, count);
+    if (m_options.m_distCalcMethod == DistCalcMethod::Cosine)
+        vectors->Normalize(1);
+    auto workspace = m_workSpaceFactory->GetWorkSpace();
+    if (!workspace)
+    {
+        workspace = std::make_unique<ExtraWorkSpace>();
+        InitWorkSpace(workspace.get(), false);
+    }
+    else
+    {
+        InitWorkSpace(workspace.get(), true);
+    }
+    workspace->Deduper().clear();
+    workspace->m_postingIDs.clear();
+    auto status = m_extraSearchers[0]->AddIndex(workspace.get(), vectors, first);
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
+    return status;
 }
 
 // Add insert entry to persistent buffer
@@ -1996,7 +2138,7 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     {
         InitWorkSpace(workSpace.get(), true);
     }
-    workSpace->m_deduper.clear();
+    workSpace->Deduper().clear();
     workSpace->m_postingIDs.clear();
     return m_extraSearchers[0]->AddIndex(workSpace.get(), vectorSet, begin);
 }
@@ -2131,6 +2273,11 @@ template <typename T> ErrorCode Index<T>::DeleteIndex(const void *p_vectors, Siz
 
 template <typename T> void Index<T>::PrepareDB(std::shared_ptr<Helper::KeyValueIO>& db, int layer)
 {
+    if (m_options.m_postingStore)
+    {
+        db = m_options.m_postingStore;
+        return;
+    }
     if(m_options.m_storage == Storage::FILEIO) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:UseFileIO\n");
         db.reset(new FileIO(m_options, layer));

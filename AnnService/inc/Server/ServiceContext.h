@@ -9,6 +9,9 @@
 
 #include <memory>
 #include <map>
+#ifdef MULTITENANT
+#include "inc/Core/SPANN/TenantIndexManager.h"
+#endif
 
 namespace SPTAG
 {
@@ -27,13 +30,22 @@ public:
     const std::shared_ptr<ServiceSettings>& GetServiceSettings() const;
 
     bool IsInitialized() const;
+#ifdef MULTITENANT
+    SPANN::TenantIndexManager *GetTenantManager() const
+    {
+        return m_tenantManager.get();
+    }
+#endif
 
-private:
+  private:
     bool m_initialized;
 
     std::shared_ptr<ServiceSettings> m_settings;
 
     std::map<std::string, std::shared_ptr<VectorIndex>> m_fullIndexList;
+#ifdef MULTITENANT
+    std::unique_ptr<SPANN::TenantIndexManager> m_tenantManager;
+#endif
 };
 
 
@@ -41,4 +53,3 @@ private:
 } // namespace AnnService
 
 #endif // _SPTAG_SERVER_SERVICECONTEX_H_
-

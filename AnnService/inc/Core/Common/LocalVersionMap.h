@@ -5,6 +5,7 @@
 #define _SPTAG_COMMON_LOCALVERSIONMAP_H_
 
 #include "IVersionMap.h"
+#include "ResidentHashMap.h"
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -61,6 +62,14 @@ namespace SPTAG
                 if (iter == m_label.end()) return 0xfe;
                 return iter->second; 
             }
+            using IVersionMap::BatchGetVersions;
+            void BatchGetVersions(const std::vector<SizeType> &ids, std::vector<uint8_t> &versions,
+                                  VersionReadPolicy) override
+            {
+                versions.resize(ids.size());
+                for (size_t i = 0; i < ids.size(); ++i)
+                    versions[i] = ids[i] < 0 ? 0xfe : GetVersion(ids[i]);
+            }
             void SetVersion(SizeType& key, uint8_t& version) override { 
                 m_label.insert_or_assign(std::forward<SizeType>(key), std::forward<uint8_t>(version));
             }
@@ -110,6 +119,149 @@ namespace SPTAG
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return Load(ptr, blockSize, capacity);
+            }
+        };
+
+        // The managed cache uses explicitly sized nodes. Keep the legacy
+        // ConcurrentHashMap implementation and its unmanaged behavior unchanged.
+        class ManagedLocalVersionMap : public IVersionMap
+        {
+            ResidentHashMap<SizeType, uint8_t> m_label;
+            uint8_t m_default = 0xff;
+            // Only exclusive snapshot load widens this proven live range.
+            std::atomic<SizeType> m_livePrefix{0};
+
+          public:
+            uint64_t ResidentGrowthBytes(SizeType target) const
+            {
+                // A cascade can erase an old-credit node and re-promote its VID.
+                // Reserve its replacement even when the live count does not grow.
+                return ResidentAddBytes(m_label.GrowthBytes(target),
+                                        ResidentMultiplyBytes(m_label.size(), decltype(m_label)::NodeBytes()));
+            }
+            void DeleteAll() override
+            {
+                m_livePrefix.store(0);
+                m_label.clear();
+            }
+            uint8_t &Default() override
+            {
+                return m_default;
+            }
+            SizeType Count() override
+            {
+                return static_cast<SizeType>(m_label.size());
+            }
+            SizeType GetDeleteCount() override
+            {
+                return 0;
+            }
+            std::uint64_t BufferSize() override
+            {
+                return m_label.size() * (sizeof(SizeType) + sizeof(uint8_t));
+            }
+            bool Deleted(const SizeType &key) override
+            {
+                if (key >= 0 && key < m_livePrefix.load())
+                    return false;
+                uint8_t value;
+                return !m_label.Get(key, value);
+            }
+            bool Delete(const SizeType &key) override
+            {
+                if (key >= 0)
+                {
+                    auto prefix = m_livePrefix.load();
+                    while (key < prefix && !m_livePrefix.compare_exchange_weak(prefix, key)) {}
+                }
+                return m_label.erase(key);
+            }
+            ErrorCode GetContainedIDs(std::vector<SizeType> &ids) override
+            {
+                ids.clear();
+                m_label.ForEach([&](SizeType key, uint8_t) { ids.push_back(key); });
+                return ErrorCode::Success;
+            }
+            uint8_t GetVersion(const SizeType &key) override
+            {
+                uint8_t value = 0xfe;
+                m_label.Get(key, value);
+                return value;
+            }
+            using IVersionMap::BatchGetVersions;
+            void BatchGetVersions(const std::vector<SizeType> &ids, std::vector<uint8_t> &versions,
+                                  VersionReadPolicy) override
+            {
+                versions.resize(ids.size());
+                for (size_t i = 0; i < ids.size(); ++i)
+                    versions[i] = ids[i] < 0 ? 0xfe : GetVersion(ids[i]);
+            }
+            void SetVersion(SizeType &key, uint8_t &version) override
+            {
+                m_label.Set(key, version);
+            }
+            bool IncVersion(SizeType &key, uint8_t *result, uint8_t expected = 0xff) override
+            {
+                return m_label.Update(key, [&](uint8_t &version) {
+                    if (expected != 0xff && expected != version)
+                        return false;
+                    version = (version + 1) & 0x7f;
+                    *result = version;
+                    return true;
+                });
+            }
+            ErrorCode Save(std::shared_ptr<Helper::DiskIO> ptr) override
+            {
+                SizeType count = Count();
+                IOBINARY(ptr, WriteBinary, sizeof(count), (char *)&count);
+                for (const auto &entry : m_label)
+                {
+                    IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char *)&entry.first);
+                    IOBINARY(ptr, WriteBinary, sizeof(uint8_t), (char *)&entry.second);
+                }
+                return ErrorCode::Success;
+            }
+            ErrorCode Save(const std::string &filename) override
+            {
+                auto ptr = f_createIO();
+                if (!ptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out))
+                    return ErrorCode::FailedCreateFile;
+                return Save(ptr);
+            }
+            ErrorCode Load(std::shared_ptr<Helper::DiskIO> ptr, SizeType, SizeType capacity) override
+            {
+                SizeType count;
+                IOBINARY(ptr, ReadBinary, sizeof(count), (char *)&count);
+                if (count < 0 || count > capacity)
+                    return ErrorCode::MemoryOverFlow;
+                m_livePrefix.store(0);
+                m_label.clear();
+                bool dense = true;
+                for (SizeType i = 0; i < count; ++i)
+                {
+                    SizeType key;
+                    uint8_t value;
+                    IOBINARY(ptr, ReadBinary, sizeof(key), (char *)&key);
+                    IOBINARY(ptr, ReadBinary, sizeof(value), (char *)&value);
+                    if (key < 0 || key >= capacity || (value >= 0x80 && value != m_default) || !Deleted(key))
+                        return ErrorCode::FailedParseValue;
+                    m_label.Set(key, value);
+                    dense = dense && key >= 0 && key < count;
+                }
+                if (dense && m_label.size() == static_cast<size_t>(count))
+                    m_livePrefix.store(count);
+                return ErrorCode::Success;
+            }
+            ErrorCode Load(const std::string &filename, SizeType blockSize, SizeType capacity) override
+            {
+                auto ptr = f_createIO();
+                if (!ptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in))
+                    return ErrorCode::FailedOpenFile;
+                auto status = Load(ptr, blockSize, capacity);
+                char trailing;
+                if (status == ErrorCode::Success && ptr->ReadBinary(1, &trailing) != 0)
+                    return ErrorCode::FailedParseValue;
+                return status;
             }
         };
 

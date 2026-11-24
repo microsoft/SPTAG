@@ -19,6 +19,11 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
         return ret;
     if (p_in->ReadBinary(sizeof(VectorValueType), (char *)&reconstructType) != sizeof(VectorValueType))
         return ret;
+    if (quantizerType == QuantizerType::RaBitQQuantizer && ResidentMemory::CurrentAccount())
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Managed resident accounting does not support RaBitQ\n");
+        return ret;
+    }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n",
                  Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(),
                  Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
@@ -34,7 +39,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        ret.reset(new PQQuantizer<Type>());                                                                            \
+        ret = std::allocate_shared<PQQuantizer<Type>>(ResidentAllocator<PQQuantizer<Type>>());                         \
         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -52,7 +57,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        ret.reset(new OPQQuantizer<Type>());                                                                           \
+        ret = std::allocate_shared<OPQQuantizer<Type>>(ResidentAllocator<OPQQuantizer<Type>>());                       \
         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -87,6 +92,11 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
 
     VectorValueType reconstructType = *(VectorValueType *)raw_bytes;
     raw_bytes += sizeof(VectorValueType);
+    if (quantizerType == QuantizerType::RaBitQQuantizer && ResidentMemory::CurrentAccount())
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Managed resident accounting does not support RaBitQ\n");
+        return nullptr;
+    }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n",
                  Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(),
                  Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
@@ -103,7 +113,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        ret.reset(new PQQuantizer<Type>());                                                                            \
+        ret = std::allocate_shared<PQQuantizer<Type>>(ResidentAllocator<PQQuantizer<Type>>());                         \
         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -120,7 +130,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
         {
 #define DefineVectorValueType(Name, Type)                                                                              \
     case VectorValueType::Name:                                                                                        \
-        ret.reset(new OPQQuantizer<Type>());                                                                           \
+        ret = std::allocate_shared<OPQQuantizer<Type>>(ResidentAllocator<OPQQuantizer<Type>>());                       \
         break;
 
 #include "inc/Core/DefinitionList.h"

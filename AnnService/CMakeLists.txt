@@ -188,6 +188,12 @@ install(TARGETS SPTAGLib SPTAGLibStatic
   LIBRARY DESTINATION lib)
 
 if (NOT LIBRARYONLY)
+    if (MULTITENANT)
+        add_executable(tenanttool src/TenantTool/main.cpp)
+        target_link_libraries(tenanttool SPTAGLibStatic ${Boost_LIBRARIES})
+        install(TARGETS tenanttool RUNTIME DESTINATION bin)
+    endif()
+
     file(GLOB SERVER_HDR_FILES ${AnnService}/inc/Server/*.h ${AnnService}/inc/Socket/*.h)
     file(GLOB SERVER_FILES ${AnnService}/src/Server/*.cpp ${AnnService}/src/Socket/*.cpp)
     add_executable (server ${SERVER_FILES} ${SERVER_HDR_FILES})

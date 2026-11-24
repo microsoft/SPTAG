@@ -53,13 +53,18 @@ namespace SPTAG
         private:
             std::shared_ptr<VectorIndex> m_topIndex;
 	        COMMON::Dataset<SizeType> m_topLocalToGlobalID;
-            Helper::Concurrent::ConcurrentMap<SizeType, SizeType> m_topGlobalToLocalID;
+            COMMON::ResidentHashMap<SizeType, SizeType> m_topGlobalToLocalID;
+            std::mutex m_topHeadAddLock;
             std::shared_timed_mutex m_topLocalToGlobalIDLock;
-            std::unordered_map<std::string, std::string> m_topParameters;
+            std::unordered_map<
+                COMMON::ResidentString, COMMON::ResidentString, COMMON::ResidentStringHash,
+                std::equal_to<COMMON::ResidentString>,
+                COMMON::ResidentAllocator<std::pair<const COMMON::ResidentString, COMMON::ResidentString>>>
+                m_topParameters;
 
             std::shared_ptr<Helper::KeyValueIO> m_db;
-            std::vector<std::shared_ptr<IExtraSearcher>> m_extraSearchers;
-            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
+            COMMON::ResidentVector<std::shared_ptr<IExtraSearcher>> m_extraSearchers;
+            std::shared_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
 
             Options m_options;
 
@@ -67,6 +72,7 @@ namespace SPTAG
             int m_iBaseSquare;
 
             std::mutex m_dataAddLock;
+            std::atomic<SizeType> m_managedNextID{0};
             std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
@@ -86,13 +92,99 @@ namespace SPTAG
         public:
             Index()
             {
-                m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
+                m_workSpaceFactory = std::allocate_shared<COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>(
+                    COMMON::ResidentAllocator<COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>());
                 //m_workSpaceFactory = std::make_unique<SPTAG::COMMON::SharedPoolWorkSpaceFactory<ExtraWorkSpace>>();
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
                 m_iBaseSquare = (m_options.m_distCalcMethod != DistCalcMethod::L2) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
-            ~Index() {}
+            ~Index()
+            {
+                if (m_options.m_postingStore)
+                {
+                    if (!m_extraSearchers.empty())
+                        DrainUpdates();
+                    m_workSpaceFactory.reset();
+                    m_extraSearchers.clear();
+                    m_topIndex.reset();
+                }
+            }
+
+            ErrorCode SetPostingStore(std::shared_ptr<Helper::KeyValueIO> store) override
+            {
+                if (m_pQuantizer && m_pQuantizer->GetQuantizerType() == QuantizerType::RaBitQQuantizer)
+                    return ErrorCode::FailedParseValue;
+                if (!m_extraSearchers.empty() || !store || !store->Available() || m_options.m_layers < 1 ||
+                    m_options.m_maxID <= 0 ||
+                    m_options.m_layers > MaxSize / m_options.m_maxID)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Posting storage must be injected before loading/building\n");
+                    return ErrorCode::Fail;
+                }
+                const auto storage = store->GetStorageType();
+#ifndef TIKV
+                if (storage == Storage::TIKVIO)
+                    return ErrorCode::Fail;
+#endif
+                m_options.m_postingStore = std::move(store);
+                m_options.m_storage = storage == Storage::Undefined ? Storage::ROCKSDBIO : storage;
+                m_options.m_shareDB = true;
+                m_options.m_enableWAL = false;
+                m_options.m_recovery = false;
+                if (storage != Storage::TIKVIO)
+                    m_options.m_distributedVersionMap = false;
+                m_options.m_useMultiChunkPosting = false;
+                m_options.m_update = true;
+                m_options.m_asyncMergeInSearch = false;
+                m_options.m_asyncAppendQueueSize = 0;
+                m_options.m_fDeletePercentageForRefine = 2.0f;
+                m_managedNextID = m_options.m_vectorSize;
+                m_workSpaceFactory = std::allocate_shared<COMMON::InstanceThreadLocalWorkSpaceFactory<ExtraWorkSpace>>(
+                    COMMON::ResidentAllocator<COMMON::InstanceThreadLocalWorkSpaceFactory<ExtraWorkSpace>>());
+                if (m_topIndex)
+                    return m_topIndex->UseInstanceWorkspaces();
+                return ErrorCode::Success;
+            }
+
+            ErrorCode DrainUpdates() override
+            {
+                if (m_extraSearchers.empty())
+                    return ErrorCode::EmptyIndex;
+                while (!AllFinished())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                if (m_options.m_postingStore && m_topIndex)
+                {
+                    const auto status = m_topIndex->DrainUpdates();
+                    if (status != ErrorCode::Success)
+                        return status;
+                }
+                return GetUpdateStatus();
+            }
+
+            ErrorCode GetUpdateStatus() const override
+            {
+                if (m_extraSearchers.empty())
+                    return ErrorCode::EmptyIndex;
+                if (m_options.m_postingStore && (!m_topIndex || m_topIndex->GetUpdateStatus() != ErrorCode::Success))
+                    return ErrorCode::Fail;
+                for (const auto &searcher : m_extraSearchers)
+                {
+                    if (!searcher)
+                        return ErrorCode::EmptyIndex;
+                    auto status = searcher->UpdateStatus();
+                    if (status != ErrorCode::Success)
+                        return status;
+                }
+                return ErrorCode::Success;
+            }
+
+            ErrorCode ReserveVectorIDs(SizeType count, SizeType limit, SizeType &first) override;
+            uint64_t ResidentGrowthBytes(SizeType count) const override;
+            ErrorCode PrepareResidentGrowth(SizeType count) override;
+            ErrorCode PrepareResidentReads() override;
+            ErrorCode InsertAt(const void *data, SizeType count, DimensionType dimension, SizeType first) override;
 
             void SetQuantizerADC(bool p_enableADC) override
             {
@@ -107,11 +199,25 @@ namespace SPTAG
             {
                 // STATIC reads whole postings; dynamic storage addresses individual pages.
                 const bool blockIO = m_options.m_storage != Storage::STATIC;
+                if (m_options.m_postingStore)
+                    p_exWorkSpace->UseWorkerScratch(m_options.m_maxCheck, m_options.m_hashExp);
+                const bool reuseBuffers =
+                    m_options.m_postingStore && m_options.m_postingStore->CompletesRequestsBeforeReturn();
+                if (reuseBuffers)
+                    p_exWorkSpace->EnableWorkerBuffers(true);
                 if (clear) {
-                    p_exWorkSpace->Clear(m_options.m_searchInternalResultNum, (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, blockIO, m_options.m_enableDataCompression);
+                    p_exWorkSpace->Clear(reuseBuffers ? max(m_options.m_searchInternalResultNum, m_options.m_reassignK)
+                                                      : m_options.m_searchInternalResultNum,
+                                         (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) +
+                                          m_options.m_bufferLength)
+                                             << PageSizeEx,
+                                         blockIO, m_options.m_enableDataCompression);
                 }
                 else {
                     p_exWorkSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, max(m_options.m_searchInternalResultNum, m_options.m_reassignK), (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, blockIO, m_options.m_enableDataCompression);
+                    if (reuseBuffers) {
+                        return;
+                    }
                     int wid = 0;
                     if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
                     {
@@ -133,7 +239,10 @@ namespace SPTAG
             inline std::shared_ptr<IExtraSearcher> GetDiskIndex(int layer = 0) { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]; else return nullptr; }
             inline Options* GetOptions() { return &m_options; }
 
-            inline SizeType GetNumSamples() const { return GetNumSamples(0); }
+            inline SizeType GetNumSamples() const
+            {
+                return m_options.m_postingStore ? m_managedNextID.load() : GetNumSamples(0);
+            }
             inline SizeType GetNumSamples(int layer) const { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumSamples(); else return m_topIndex->GetNumSamples(); }
             inline DimensionType GetFeatureDim() const { return m_topIndex->GetFeatureDim(); }
             inline SizeType GetValueSize() const { return m_options.m_dim * sizeof(T); }
@@ -241,6 +350,7 @@ namespace SPTAG
                     return m_extraSearchers[tolayer]->AddIndex(extraWorkspace, vectorSet, VID);
                 }
 
+                std::unique_lock<std::mutex> headAdmission(m_topHeadAddLock);
                 auto it = m_topGlobalToLocalID.find(VID);
                 if (it != m_topGlobalToLocalID.end()) {
                     m_topIndex->ResetIndex(it->second);
@@ -257,10 +367,13 @@ namespace SPTAG
 
                 {
                     std::unique_lock<std::shared_timed_mutex> tmplock(m_topLocalToGlobalIDLock);
-                    m_topLocalToGlobalID.AddBatch(1);
+                    ret = m_topLocalToGlobalID.AddBatch(1);
+                    if (ret != ErrorCode::Success)
+                        return ret;
                     *(m_topLocalToGlobalID.At(begin)) = VID;
                     m_topGlobalToLocalID[VID] = begin;
                 }
+                headAdmission.unlock();
                 return m_topIndex->AddIndexIdx(begin, end);
             }
             

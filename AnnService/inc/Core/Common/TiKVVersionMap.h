@@ -38,8 +38,10 @@ namespace SPTAG
             std::atomic<SizeType> m_count{0};
             std::atomic<SizeType> m_deleted{0};
             uint8_t m_defaultVersion{0xff};
-            std::atomic<bool> m_metadataDirty{false};
-            SizeType m_lastPersistedCount{0};
+            std::atomic<SizeType> m_lastPersistedCount{0};
+            std::mutex m_metadataMutex;
+            bool m_managed{false};
+            mutable std::atomic<bool> m_failed{false};
 
             static constexpr SizeType kMetadataFlushInterval = 65536;
 
@@ -51,13 +53,15 @@ namespace SPTAG
 
             std::string CountKey() const
             {
-                return "vc:" + std::to_string(m_layer);
+                // A managed view aliases four-byte strings to numeric postings.
+                // Keep all version keys in its archived string-key family.
+                return (m_managed ? "version/vc:" : "vc:") + std::to_string(m_layer);
             }
 
             std::string VersionKey(SizeType vid) const
             {
                 std::ostringstream key;
-                key << "v:" << m_layer << ':' << std::setw(10) << std::setfill('0') << vid;
+                key << (m_managed ? "version/v:" : "v:") << m_layer << ':' << std::setw(10) << std::setfill('0') << vid;
                 return key.str();
             }
 
@@ -82,7 +86,7 @@ namespace SPTAG
             {
                 std::string data;
                 auto ret = m_db->Get(key, &data, MaxTimeout, nullptr);
-                if (ret == ErrorCode::Success && data.size() >= sizeof(SizeType)) {
+                if (ret == ErrorCode::Success && data.size() == sizeof(SizeType)) {
                     std::memcpy(&value, data.data(), sizeof(SizeType));
                     return true;
                 }
@@ -93,7 +97,7 @@ namespace SPTAG
             {
                 std::string data;
                 auto ret = m_db->Get(key, &data, MaxTimeout, nullptr);
-                if (ret == ErrorCode::Success) {
+                if (ret == ErrorCode::Success && (!m_managed || data.size() == 1)) {
                     value = data.empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(data[0]);
                     return true;
                 }
@@ -105,24 +109,19 @@ namespace SPTAG
                     "TiKVVersionMap::ReadByte failed key=%s layer=%d ret=%d; treating as deleted.\n",
                     key.c_str(), m_layer, static_cast<int>(ret));
                 value = 0xfe;
+                if (m_managed) m_failed = true;
                 return false;
             }
 
-            void SaveCount()
+            ErrorCode SaveMetadata()
             {
-                PutSizeType(CountKey(), m_count.load());
-            }
-
-            void SaveMetadata()
-            {
-                SaveCount();
-                m_lastPersistedCount = m_count.load();
-                m_metadataDirty.store(false, std::memory_order_release);
-            }
-
-            void MarkMetadataDirty()
-            {
-                m_metadataDirty.store(true, std::memory_order_release);
+                std::lock_guard<std::mutex> lock(m_metadataMutex);
+                if (m_failed) return ErrorCode::Fail;
+                auto count = m_count.load();
+                auto status = PutSizeType(CountKey(), count);
+                if (status == ErrorCode::Success) m_lastPersistedCount = count;
+                else if (m_managed) m_failed = true;
+                return status;
             }
 
             void MaybeFlushMetadata()
@@ -144,8 +143,7 @@ namespace SPTAG
                     }
                 }
                 if (updated) {
-                    MarkMetadataDirty();
-                    MaybeFlushMetadata();
+                    if (!m_managed) MaybeFlushMetadata();
                 }
             }
 
@@ -160,7 +158,7 @@ namespace SPTAG
             {
                 std::string data;
                 auto ret = m_db->Get(VersionKey(vid), &data, MaxTimeout, nullptr);
-                if (ret == ErrorCode::Success) {
+                if (ret == ErrorCode::Success && (!m_managed || data.size() == 1)) {
                     notExist = false;
                     value = data.empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(data[0]);
                     return true;
@@ -175,6 +173,7 @@ namespace SPTAG
                     vid, m_layer, static_cast<int>(ret));
                 notExist = true;
                 value = 0xfe;
+                if (m_managed) m_failed = true;
                 return false;
             }
 
@@ -187,6 +186,7 @@ namespace SPTAG
 
                 auto ret = PutByte(VersionKey(vid), newVal);
                 if (ret != ErrorCode::Success) {
+                    if (m_managed) m_failed = true;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                         "TiKVVersionMap::WriteVersionByte failed vid=%d layer=%d ret=%d\n",
                         vid, m_layer, static_cast<int>(ret));
@@ -205,7 +205,17 @@ namespace SPTAG
             }
 
         public:
-            TiKVVersionMap() = default;
+            explicit TiKVVersionMap(bool managed = false) : m_managed(managed) {}
+            bool Failed() const { return m_failed.load(); }
+
+            ErrorCode CheckpointManagedCount(SizeType next)
+            {
+                // Upper layers need not have promoted the latest leaf VID.
+                if (next < m_count || (m_layer == 0 && next != m_count))
+                    return ErrorCode::Fail;
+                m_count = next;
+                return ErrorCode::Success;
+            }
 
             void SetDB(std::shared_ptr<Helper::KeyValueIO> db) { m_db = db; }
             void SetLayer(int layer) { m_layer = layer; }
@@ -213,10 +223,10 @@ namespace SPTAG
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr)
+            ErrorCode Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr)
             {
                 (void)blockSize;
-                (void)capacity;
+                if (size < 0 || (m_managed && size > capacity)) return ErrorCode::MemoryOverFlow;
 
                 m_count = size;
 
@@ -231,13 +241,12 @@ namespace SPTAG
                     }
 
                     m_deleted = size;
-                    SaveMetadata();
 
                     SizeType written = 0;
                     for (SizeType globalID : aliveIDs) {
                         if (PutByte(VersionKey(globalID), 0x00) == ErrorCode::Success) {
                             written++;
-                        }
+                        } else return ErrorCode::Fail;
                     }
                     m_deleted = size - written;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
@@ -245,11 +254,11 @@ namespace SPTAG
                         m_layer, size, static_cast<int>(aliveIDs.size()), written, m_deleted.load());
                 } else {
                     m_deleted = (m_layer != 0) ? size : 0;
-                    SaveMetadata();
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=%s, deleted=%d\n",
                         m_layer, size, (m_layer != 0) ? "deleted" : "alive", m_deleted.load());
                 }
+                return SaveMetadata();
             }
 
             ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override
@@ -264,8 +273,9 @@ namespace SPTAG
                 std::vector<std::string> values;
                 keys.reserve(kBatchSize);
 
-                for (SizeType batchStart = 0; batchStart < count; batchStart += kBatchSize) {
-                    const SizeType batchEnd = (std::min)(batchStart + kBatchSize, count);
+                for (SizeType batchEnd = 0; batchEnd < count;) {
+                    const SizeType batchStart = batchEnd;
+                    batchEnd += (std::min)(kBatchSize, count - batchStart);
                     keys.clear();
                     for (SizeType vid = batchStart; vid < batchEnd; vid++) {
                         keys.emplace_back(VersionKey(vid));
@@ -273,7 +283,7 @@ namespace SPTAG
 
                     values.clear();
                     auto ret = m_db->MultiGet(keys, &values, MaxTimeout, nullptr);
-                    if (ret != ErrorCode::Success) {
+                    if (ret != ErrorCode::Success || (m_managed && values.size() != keys.size())) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "TiKVVersionMap::GetContainedIDs: MultiGet failed (layer=%d, ret=%d, range=[%d,%d)); treating this range as deleted.\n",
                             m_layer, static_cast<int>(ret), batchStart, batchEnd);
@@ -283,6 +293,7 @@ namespace SPTAG
 
                     for (SizeType vid = batchStart; vid < batchEnd; vid++) {
                         size_t index = static_cast<size_t>(vid - batchStart);
+                        if (m_managed && values[index].size() > 1) return ErrorCode::Fail;
                         uint8_t version = (index < values.size() && !values[index].empty())
                             ? static_cast<uint8_t>(values[index][0])
                             : DefaultVersionForLayer();
@@ -298,10 +309,13 @@ namespace SPTAG
             void DeleteAll() override
             {
                 m_deleted = m_count.load();
-                SaveMetadata();
                 for (SizeType vid = 0; vid < m_count.load(); vid++) {
-                    PutByte(VersionKey(vid), 0xfe);
+                    if (PutByte(VersionKey(vid), 0xfe) != ErrorCode::Success && m_managed) {
+                        m_failed = true;
+                        return;
+                    }
                 }
+                SaveMetadata();
             }
 
             SizeType Count() override { return m_count.load(); }
@@ -316,6 +330,7 @@ namespace SPTAG
             bool Deleted(const SizeType& key, VersionReadPolicy policy) override
             {
                 (void)policy;
+                if (m_managed && key >= m_count) return true;
                 if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Deleted: invalid key %d (max %d)\n", key, m_count.load());
                     return true;
@@ -325,7 +340,7 @@ namespace SPTAG
 
             bool Delete(const SizeType& key) override
             {
-                if (key < 0) {
+                if (key < 0 || (m_managed && key >= m_count)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Delete: invalid key %d (max %d)\n", key, m_count.load());
                     return false;
                 }
@@ -344,7 +359,7 @@ namespace SPTAG
             uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) override
             {
                 (void)policy;
-                if (key < 0) {
+                if (key < 0 || (m_managed && key >= m_count)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::GetVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return 0xfe;
                 }
@@ -355,7 +370,7 @@ namespace SPTAG
 
             void SetVersion(SizeType& key, uint8_t& version) override
             {
-                if (key < 0) {
+                if (key < 0 || key == MaxSize || m_failed) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::SetVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return;
                 }
@@ -368,7 +383,7 @@ namespace SPTAG
 
             bool IncVersion(SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
             {
-                if (key < 0) {
+                if (key < 0 || (m_managed && key >= m_count) || m_failed) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::IncVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return false;
                 }
@@ -402,6 +417,7 @@ namespace SPTAG
                         currentNotExist, expectedValue, MaxTimeout, nullptr,
                         &swapped, &actualNotExist, &actualValue);
                     if (ret != ErrorCode::Success) {
+                        if (m_managed) m_failed = true;
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "TiKVVersionMap::IncVersion: CAS failed for key %d, ret=%d\n",
                             key, static_cast<int>(ret));
@@ -413,6 +429,10 @@ namespace SPTAG
                     }
 
                     currentNotExist = actualNotExist;
+                    if (m_managed && !actualNotExist && actualValue.size() != 1) {
+                        m_failed = true;
+                        return false;
+                    }
                     current = actualNotExist || actualValue.empty() ? DefaultVersionForLayer() : static_cast<uint8_t>(actualValue[0]);
                 }
 
@@ -425,31 +445,27 @@ namespace SPTAG
             ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) override
             {
                 (void)output;
-                SaveMetadata();
-                return ErrorCode::Success;
+                return SaveMetadata();
             }
 
             ErrorCode Save(const std::string& filename) override
             {
                 (void)filename;
-                SaveMetadata();
-                return ErrorCode::Success;
+                return SaveMetadata();
             }
 
             ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity) override
             {
                 (void)input;
                 (void)blockSize;
-                (void)capacity;
-                return LoadMetadataFromTiKV();
+                return LoadMetadataFromTiKV(capacity);
             }
 
             ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) override
             {
                 (void)filename;
                 (void)blockSize;
-                (void)capacity;
-                return LoadMetadataFromTiKV();
+                return LoadMetadataFromTiKV(capacity);
             }
 
             void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
@@ -469,7 +485,7 @@ namespace SPTAG
                 keys.reserve(vids.size());
 
                 for (size_t i = 0; i < vids.size(); i++) {
-                    if (vids[i] >= 0) {
+                    if (vids[i] >= 0 && (!m_managed || vids[i] < m_count)) {
                         validIndices.push_back(i);
                         keys.push_back(VersionKey(vids[i]));
                     }
@@ -478,7 +494,8 @@ namespace SPTAG
 
                 std::vector<std::string> values;
                 auto ret = m_db->MultiGet(keys, &values, MaxTimeout, nullptr);
-                if (ret != ErrorCode::Success) {
+                if (ret != ErrorCode::Success || (m_managed && values.size() != keys.size())) {
+                    if (m_managed) m_failed = true;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                         "TiKVVersionMap::BatchGetVersions: MultiGet failed (layer=%d, ret=%d, keys=%d). Unresolved versions are treated as deleted.\n",
                         m_layer, static_cast<int>(ret), static_cast<int>(keys.size()));
@@ -486,6 +503,10 @@ namespace SPTAG
                 }
 
                 for (size_t i = 0; i < validIndices.size(); i++) {
+                    if (m_managed && values[i].size() > 1) {
+                        m_failed = true;
+                        return;
+                    }
                     if (i < values.size() && !values[i].empty()) {
                         versions[validIndices[i]] = static_cast<uint8_t>(values[i][0]);
                     } else {
@@ -495,22 +516,19 @@ namespace SPTAG
             }
 
         private:
-            ErrorCode LoadMetadataFromTiKV()
+            ErrorCode LoadMetadataFromTiKV(SizeType capacity)
             {
                 SizeType count = 0;
-                if (!ReadSizeType(CountKey(), count)) {
-                    m_count = 0;
-                    m_deleted = 0;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                        "TiKVVersionMap: failed to read count key '%s' (layer=%d); set count=0.\n",
+                if (!ReadSizeType(CountKey(), count) || count < 0 || (m_managed && count > capacity)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVVersionMap: missing or invalid count key '%s' (layer=%d).\n",
                         CountKey().c_str(), m_layer);
-                    return ErrorCode::Success;
+                    return ErrorCode::Fail;
                 }
                 m_count = count;
 
                 m_deleted = (m_layer != 0) ? m_count.load() : 0;
                 m_lastPersistedCount = m_count.load();
-                m_metadataDirty.store(false, std::memory_order_release);
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "TiKVVersionMap: loaded per-VID metadata layer=%d count=%d deleted=%d default=%u\n",

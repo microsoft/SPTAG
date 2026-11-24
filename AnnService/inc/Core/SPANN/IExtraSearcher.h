@@ -430,17 +430,21 @@ namespace SPTAG {
             ExtraWorkSpace() {}
 
             ~ExtraWorkSpace() {
+                ReleaseScratch();
                 if (m_callback) {
                     m_callback();
                 }
             }
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
-                Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()), other.m_blockIO, other.m_enableDataCompression);
+                Initialize(other.Deduper().MaxCheck(), other.Deduper().HashTableExponent(),
+                           (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()),
+                           other.m_blockIO, other.m_enableDataCompression);
             }
 
             void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
-                m_deduper.Init(p_maxCheck, p_hashExp);
+                if (!m_workerDeduper)
+                    m_deduper.Init(p_maxCheck, p_hashExp);
                 Clear(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
                 m_relaxedMono = false;
                 m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
@@ -457,6 +461,12 @@ namespace SPTAG {
             }
 
             void Clear(int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
+                if (m_reuseBuffers)
+                {
+                    ClearWorkerBuffers(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
+                    m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
+                    return;
+                }
                 if (p_internalResultNum > m_pageBuffers.size() || p_maxPages > m_pageBuffers[0].GetPageSize()) {
                     m_postingIDs.reserve(p_internalResultNum);
                     m_pageBuffers.resize(p_internalResultNum);
@@ -516,12 +526,49 @@ namespace SPTAG {
             std::vector<SizeType> m_postingIDs;
 
             COMMON::OptHashPosVector m_deduper;
+            std::unique_ptr<COMMON::OptHashPosVector> m_workerDeduper;
+
+            void EnableWorkerBuffers(bool skipDiskRequests = false)
+            {
+                m_reuseBuffers = true;
+                m_skipDiskRequests = skipDiskRequests;
+            }
+
+            void UseWorkerScratch(int maxCheck, int hashExp)
+            {
+                if (!m_workerDeduper)
+                {
+                    m_workerDeduper = COMMON::WorkerSizeClassPool<COMMON::OptHashPosVector>::Rent(
+                        COMMON::OptHashPosVector::RequiredStorageBytes(maxCheck, hashExp));
+                    if (!m_workerDeduper)
+                        m_workerDeduper = std::make_unique<COMMON::OptHashPosVector>();
+                    m_workerDeduper->EnableStorageReuse();
+                }
+                m_workerDeduper->Prepare(maxCheck, hashExp);
+            }
+
+            void ReleaseScratch()
+            {
+                ReleaseWorkerBuffers();
+                if (m_workerDeduper)
+                {
+                    const auto bytes = m_workerDeduper->StorageBytes();
+                    COMMON::WorkerSizeClassPool<COMMON::OptHashPosVector>::Return(std::move(m_workerDeduper), bytes);
+                }
+            }
 
             COMMON::OptHashPosVector* m_deduperOverride = nullptr;
 
             COMMON::OptHashPosVector& Deduper()
             {
-                return (m_deduperOverride == nullptr) ? m_deduper : *m_deduperOverride;
+                return (m_deduperOverride != nullptr) ? *m_deduperOverride
+                                                      : (m_workerDeduper ? *m_workerDeduper : m_deduper);
+            }
+
+            const COMMON::OptHashPosVector &Deduper() const
+            {
+                return (m_deduperOverride != nullptr) ? *m_deduperOverride
+                                                      : (m_workerDeduper ? *m_workerDeduper : m_deduper);
             }
 
             Helper::RequestQueue m_processIocp;
@@ -614,6 +661,146 @@ namespace SPTAG {
             std::function<bool(const ByteArray&)> m_filterFunc;
 
             std::function<void()> m_callback;
+
+          private:
+            struct WorkerPageBuffers
+            {
+                std::vector<Helper::PageBuffer<std::uint8_t>> buffers;
+
+                std::size_t StorageBytes() const
+                {
+                    std::size_t bytes = 0;
+                    for (const auto &buffer : buffers)
+                        bytes += buffer.GetPageSize();
+                    return bytes;
+                }
+            };
+
+            struct WorkerDecompressionBuffer
+            {
+                Helper::PageBuffer<std::uint8_t> buffer;
+            };
+
+            bool m_reuseBuffers = false;
+            bool m_skipDiskRequests = false;
+            std::unique_ptr<WorkerPageBuffers> m_workerPages;
+            std::unique_ptr<WorkerDecompressionBuffer> m_workerDecompression;
+
+            void ClearWorkerBuffers(int count, int bytes, bool blockIO, bool compression)
+            {
+                if (!m_workerPages)
+                {
+                    m_workerPages = COMMON::WorkerSizeClassPool<WorkerPageBuffers>::Rent(std::size_t(count) * bytes);
+                    if (!m_workerPages)
+                        m_workerPages = std::make_unique<WorkerPageBuffers>();
+                    m_pageBuffers.clear();
+                    m_pageBuffers.swap(m_workerPages->buffers);
+                }
+                m_postingIDs.reserve(count);
+                m_pageBuffers.resize(count);
+                for (auto &buffer : m_pageBuffers)
+                {
+                    buffer.ReservePageBuffer(bytes);
+                    buffer.SetAvailableSize(0);
+                }
+
+                if (!m_skipDiskRequests)
+                {
+                    const int status = m_diskRequests.empty() ? 0 : m_diskRequests.front().m_status;
+                    const int pages = blockIO ? (bytes >> PageSizeEx) : 1;
+                    m_diskRequests.resize(std::size_t(count) * pages);
+                    for (int pi = 0; pi < count; ++pi)
+                    {
+                        for (int pg = 0; pg < pages; ++pg)
+                        {
+                            auto &request = m_diskRequests[std::size_t(pi) * pages + pg];
+                            request.m_buffer = reinterpret_cast<char *>(m_pageBuffers[pi].GetBuffer()) +
+                                               (blockIO ? (std::size_t(pg) << PageSizeEx) : 0);
+                            request.m_status = status;
+                            request.m_extension = &m_processIocp;
+                            request.m_callback = nullptr;
+                            request.m_payload = nullptr;
+                            request.m_ctrl = nullptr;
+                            request.m_offset = 0;
+                            request.m_readSize = 0;
+                            request.m_success = false;
+#ifdef _MSC_VER
+                            memset(&(request.myres.m_col), 0, sizeof(OVERLAPPED));
+                            request.myres.m_col.m_data = &request;
+#else
+                            memset(&(request.myiocb), 0, sizeof(struct iocb));
+                            request.myiocb.aio_buf = reinterpret_cast<uint64_t>(request.m_buffer);
+                            request.myiocb.aio_data = reinterpret_cast<uintptr_t>(&request);
+#endif
+                        }
+                    }
+                }
+                else if (!m_diskRequests.empty())
+                {
+                    m_diskRequests.clear();
+                    m_diskRequests.shrink_to_fit();
+                }
+                m_blockIO = blockIO;
+                m_enableDataCompression = compression;
+                if (compression)
+                {
+                    if (!m_workerDecompression)
+                    {
+                        m_workerDecompression = COMMON::WorkerSizeClassPool<WorkerDecompressionBuffer>::Rent(bytes);
+                        if (!m_workerDecompression)
+                            m_workerDecompression = std::make_unique<WorkerDecompressionBuffer>();
+                        m_decompressBuffer = {};
+                        std::swap(m_decompressBuffer, m_workerDecompression->buffer);
+                    }
+                    m_decompressBuffer.ReservePageBuffer(bytes);
+                    m_decompressBuffer.SetAvailableSize(0);
+                }
+            }
+
+            void ReleaseWorkerBuffers()
+            {
+                if (!m_workerPages && !m_workerDecompression)
+                    return;
+                // Only audited synchronous stores enable this path; all callbacks have completed.
+                for (auto &request : m_diskRequests)
+                {
+                    request.m_buffer = nullptr;
+                    request.m_callback = nullptr;
+                    request.m_payload = nullptr;
+                    request.m_ctrl = nullptr;
+                    request.m_readSize = 0;
+#ifndef _MSC_VER
+                    request.myiocb.aio_buf = 0;
+                    request.myiocb.aio_data = 0;
+#endif
+                }
+                Helper::AsyncReadRequest *completed;
+                while (m_processIocp.try_pop(completed))
+                {
+                }
+                if (m_workerPages)
+                {
+                    m_pageBuffers.swap(m_workerPages->buffers);
+                    bool unique = true;
+                    for (const auto &buffer : m_workerPages->buffers)
+                        unique = unique && buffer.IsUnique();
+                    const auto bytes = m_workerPages->StorageBytes();
+                    if (unique)
+                        COMMON::WorkerSizeClassPool<WorkerPageBuffers>::Return(std::move(m_workerPages), bytes);
+                    else
+                        m_workerPages.reset();
+                }
+                if (m_workerDecompression)
+                {
+                    std::swap(m_workerDecompression->buffer, m_decompressBuffer);
+                    const auto bytes = m_workerDecompression->buffer.GetPageSize();
+                    if (m_workerDecompression->buffer.IsUnique())
+                        COMMON::WorkerSizeClassPool<WorkerDecompressionBuffer>::Return(std::move(m_workerDecompression),
+                                                                                       bytes);
+                    else
+                        m_workerDecompression.reset();
+                }
+            }
         };
 
         class IExtraSearcher
@@ -627,6 +814,14 @@ namespace SPTAG {
             {
             }
             virtual bool Available() = 0;
+            virtual uint64_t ResidentGrowthBytes(SizeType) const
+            {
+                return 0;
+            }
+            virtual ErrorCode PrepareResidentReads(const std::vector<SizeType> &)
+            {
+                return ErrorCode::Undefined;
+            }
 
             virtual bool LoadIndex(Options& p_options) = 0;
 
@@ -648,10 +843,12 @@ namespace SPTAG {
             virtual ErrorCode SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
                 QueryResult& p_queryResults) = 0;
 
-            virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
-                std::shared_ptr<VectorIndex> p_index, 
-                Options& p_opt, COMMON::Dataset<SizeType>& p_headtoLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) = 0;
-            
+            virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader> &p_reader,
+                                    std::shared_ptr<VectorIndex> p_index, Options &p_opt,
+                                    COMMON::Dataset<SizeType> &p_headtoLocal,
+                                    COMMON::ResidentHashMap<SizeType, SizeType> &p_headGlobaltoLocal,
+                                    COMMON::Dataset<SizeType> &p_localToGlobal, SizeType upperBound = -1) = 0;
+
             virtual ErrorCode RefineIndex()
             {
                 return ErrorCode::Undefined;
@@ -692,6 +889,10 @@ namespace SPTAG {
             }
 
             virtual bool AllFinished() { return false; }
+            virtual ErrorCode UpdateStatus() const
+            {
+                return ErrorCode::Success;
+            }
             virtual void GetDBStats() { return; }
             virtual int64_t GetNumBlocks() { return 0; }
             virtual void GetIndexStats(int finishedInsert, bool cost, bool reset) { return; }
