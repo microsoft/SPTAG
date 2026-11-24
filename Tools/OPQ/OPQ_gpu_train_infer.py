@@ -25,7 +25,7 @@ def get_config():
     parser.add_argument('--B', type= int, default = -1, help='batch data size')
     parser.add_argument('--Q', type= int, default = 10000, help='batch query size')
     parser.add_argument('--S', type= int, default = 1000, help='data split size')
-    parser.add_argument('--D', type= str, default = "L2", help='distance type')
+    parser.add_argument('--D', type= str, default = "ip", help='distance type')
     parser.add_argument('--output_truth', type = str, default = "truth.txt", help='output truth file')
     parser.add_argument('--data_format', type = str, default = "DEFAULT", help='data format')
     parser.add_argument('--task', type = int, default = 0, help='task id')
@@ -150,7 +150,7 @@ def gpusearch(args):
         co.shard = True
         co.useFloat16 = False if args.target_type == 'float32' else True
         co.useFloat16CoarseQuantizer = False
-        if args.D != 'Cosine':
+        if args.D == 'l2':
             cpu_index = faiss.IndexFlatL2(args.dim)
         else:
             cpu_index = faiss.IndexFlatIP(args.dim)
@@ -166,6 +166,9 @@ def gpusearch(args):
 
         for query in dataQ:
             D, I = gpu_index.search(query, args.k)
+            if args.D != 'l2':
+                print (D[0])
+                D = 1.0 - D
             foutd.write(D.tobytes())
             for i in range(I.shape[0]):
                 for j in range(I.shape[1]):
@@ -199,6 +202,88 @@ def gpusearch(args):
 
     fout = open(args.output_truth, 'w')
     foutd = open(args.output_truth + '.dist\\dist.bin.' + str(args.task), 'wb')
+    foutd.write(pack('i', RQ))
+    foutd.write(pack('i', args.k))
+    for i in range(RQ):
+        for j in range(args.k):
+            fout.write(str(truth[i][j][0]) + " ")
+            foutd.write(pack('i', truth[i][j][0]))
+            foutd.write(pack('f', truth[i][j][1]))
+        fout.write('\n')
+    fout.close()
+    foutd.close()
+
+def cpusearch(args):
+    import faiss
+
+    datareader = DataReader(args.data_file, args.dim, args.B, args.data_normalize, args.data_type, args.target_type)
+    queryreader = DataReader(args.query_file, args.dim, args.Q, args.query_normalize, args.data_type, args.target_type)
+    RQ, dataQ = queryreader.readallbatches()
+    faiss.omp_set_num_threads(args.T)
+
+    batch = 0
+    totaldata = 0
+    while True:
+        numData, data = datareader.readbatch()
+        if numData == 0:
+            datareader.close()
+            break
+
+        totaldata += numData
+        batch += 1
+        print ("Begin batch %d" % batch)
+
+        if args.D == 'l2':
+            cpu_index = faiss.IndexFlatL2(args.dim)
+        else:
+            cpu_index = faiss.IndexFlatIP(args.dim)
+
+        cpu_index.add(data)
+
+        fout = open('truth.txt.%d' % batch, 'w')
+        foutd = open('dist.bin.%d' % batch, 'wb')
+
+        foutd.write(pack('i', RQ))
+        foutd.write(pack('i', args.k))
+
+        for query in dataQ:
+            D, I = cpu_index.search(query, args.k)
+            if args.D != 'l2':
+                print (D[0])
+                D = 1.0 - D
+            foutd.write(D.tobytes())
+            for i in range(I.shape[0]):
+                for j in range(I.shape[1]):
+                    fout.write(str(I[i][j]) + " ")
+                fout.write('\n')
+
+        fout.close()
+        foutd.close()
+
+    if args.B <= 0 or args.B >= totaldata: args.B = totaldata
+
+    truth = [[] for j in range(RQ)]
+    for i in range(1, batch + 1):
+        f = open('truth.txt.%d' % i, 'r')
+        fd = open('dist.bin.%d' % i, 'rb')
+        r = unpack('i', fd.read(4))[0]
+        c = unpack('i', fd.read(4))[0]
+        print ('batch %d: r:%d c:%d RQ:%d k:%d' % (i, r, c, RQ, args.k))
+        currdist = np.frombuffer(fd.read(4 * RQ * args.k), dtype=np.float32).reshape((RQ, args.k))
+        fd.close()
+
+        for j in range(RQ):
+            items = f.readline()[0:-1].split()
+            truth[j].extend([(int(items[k]) + args.B * (i-1), currdist[j][k]) for k in range(args.k)])
+            truth[j].sort(key=itemgetter(1, 0))
+            truth[j] = truth[j][0:args.k]
+        f.close()
+
+    if not os.path.exists(args.output_truth + '.dist'):
+        os.mkdir(args.output_truth + '.dist')
+
+    fout = open(args.output_truth, 'w')
+    foutd = open(os.path.join(args.output_truth + '.dist', 'dist.bin.' + str(args.task)), 'wb')
     foutd.write(pack('i', RQ))
     foutd.write(pack('i', args.k))
     for i in range(RQ):
@@ -303,7 +388,12 @@ def train_rabitq(args):
     faiss.omp_set_num_threads(args.T)
     nbytes = int(args.quan_dim * 8 // args.dim)
     print (f'nbytes:{nbytes}')
-    faiss_index = faiss.index_factory(len(data[0]), f"RaBitQ{nbytes}", faiss.METRIC_L2)
+
+    dist_method = faiss.METRIC_L2
+    if args.D != 'l2':
+        dist_method = faiss.METRIC_INNER_PRODUCT
+    
+    faiss_index = faiss.index_factory(len(data[0]), f"RaBitQ{nbytes}", dist_method)
     print('Training the index with doc embeddings')
 
     faiss_index.train(data[0:args.train_samples])
@@ -414,10 +504,13 @@ def train_pq(args):
     subvector_num = args.quan_dim
     subvector_bits = 8
     numData, data = datareader.readbatch()
-
     faiss.omp_set_num_threads(args.T)
+    
+    dist_method = faiss.METRIC_L2
+    if args.D != 'l2':
+        dist_method = faiss.METRIC_INNER_PRODUCT
 
-    faiss_index = faiss.index_factory(len(data[0]), f"PQ{subvector_num}x{subvector_bits}", faiss.METRIC_L2)
+    faiss_index = faiss.index_factory(len(data[0]), f"PQ{subvector_num}x{subvector_bits}", dist_method)
     print('Training the index with doc embeddings')
 
     t1 = time.perf_counter()
@@ -435,6 +528,13 @@ def train_pq(args):
     elif args.data_type == 'float32':
         rtype = np.uint8(3)
 
+    disttype = np.uint8(0) # L2
+    if args.D == 'cosine':
+        disttype = np.uint8(1)
+    elif args.D == 'ip':
+        disttype = np.uint8(2)
+    print ('dist type:' + str(disttype))
+
     ivf_index = faiss.downcast_index(faiss_index)
     centroid_embedings = faiss.vector_to_array(ivf_index.pq.centroids)
     codebooks = centroid_embedings.reshape(ivf_index.pq.M, ivf_index.pq.ksub, ivf_index.pq.dsub)
@@ -449,6 +549,7 @@ def train_pq(args):
         f.write(pack('i', codebooks.shape[1]))
         f.write(pack('i', codebooks.shape[2]))
         f.write(codebooks.tobytes())
+        f.write(pack('B', disttype))
 
     if args.quan_test == 0 and len(args.output_quan_vector_file) == 0 and len(args.output_rec_vector_file) == 0:
         if os.path.exists(args.output_truth):
@@ -541,7 +642,12 @@ def train_opq(args):
     data = data.astype(np.float32)
     args.data_type = 'float32'
     faiss.omp_set_num_threads(args.T)
-    faiss_index = faiss.index_factory(len(data[0]), f"OPQ{subvector_num},PQ{subvector_num}x{subvector_bits}", faiss.METRIC_L2)
+
+    dist_method = faiss.METRIC_L2
+    if args.D != 'l2':
+        dist_method = faiss.METRIC_INNER_PRODUCT
+
+    faiss_index = faiss.index_factory(len(data[0]), f"OPQ{subvector_num},PQ{subvector_num}x{subvector_bits}", dist_method)
 
     print('Training the index with doc embeddings')
     t1 = time.perf_counter()
@@ -557,6 +663,13 @@ def train_opq(args):
         rtype = np.uint8(2)
     elif args.data_type == 'float32':
         rtype = np.uint8(3)
+
+    disttype = np.uint8(0) # L2
+    if args.D == 'cosine':
+        disttype = np.uint8(1)
+    elif args.D == 'ip':
+        disttype = np.uint8(2)
+    print ('dist type:' + str(disttype))
 
     if isinstance(faiss_index, faiss.IndexPreTransform):
         vt = faiss.downcast_VectorTransform(faiss_index.chain.at(0))
@@ -581,6 +694,7 @@ def train_opq(args):
             f.write(pack('i', codebooks.shape[1]))
             f.write(pack('i', codebooks.shape[2]))
             f.write(codebooks.tobytes())
+            f.write(pack('B', disttype))
             f.write(rotate_matrix.tobytes())
 
     if args.quan_test == 0 and len(args.output_quan_vector_file) == 0 and len(args.output_rec_vector_file) == 0:
