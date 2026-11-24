@@ -10,7 +10,6 @@
 #include <mutex>
 #include <shared_mutex>
 #include <atomic>
-#include <unordered_map>
 #include <omp.h>
 #include "inc/Core/VectorIndex.h"
 
@@ -162,22 +161,10 @@ namespace SPTAG
         template <typename T, typename R>
         float RefineCenters(const Dataset<T>& data, KmeansArgs<T>& args)
         {
-            const bool decodeShift = args._M == DistCalcMethod::InnerProduct && args.m_pQuantizer;
-            std::vector<R> firstCenter(decodeShift ? args._RD : 0);
-            std::vector<R> secondCenter(decodeShift ? args._RD : 0);
-            auto centerShift = [&](const T* first, const T* second) {
-                if (decodeShift) {
-                    // Packed bytes are not coordinates for measuring centroid movement.
-                    args.m_pQuantizer->ReconstructVector(reinterpret_cast<const uint8_t*>(first), firstCenter.data());
-                    args.m_pQuantizer->ReconstructVector(reinterpret_cast<const uint8_t*>(second), secondCenter.data());
-                    return DistanceUtils::ComputeDistance(firstCenter.data(), secondCenter.data(), args._RD, DistCalcMethod::L2);
-                }
-                return DistanceUtils::ComputeDistance(first, second, args._D, DistCalcMethod::L2);
-            };
             int maxcluster = -1;
             SizeType maxCount = 0;
             for (int k = 0; k < args._DK; k++) {
-                if (args.counts[k] > maxCount && args.newCounts[k] > 0 && centerShift(data[args.clusterIdx[k]], args.centers + k * args._D) > 1e-6)
+                if (args.counts[k] > maxCount && args.newCounts[k] > 0 && DistanceUtils::ComputeDistance((T*)data[args.clusterIdx[k]], args.centers + k * args._D, args._D, DistCalcMethod::L2) > 1e-6)
                 {
                     maxcluster = k;
                     maxCount = args.counts[k];
@@ -211,9 +198,6 @@ namespace SPTAG
                     if (args._M == DistCalcMethod::Cosine) {
                         COMMON::Utils::Normalize(currCenters, args._RD, COMMON::Utils::GetBase<T>());
                     }
-                    else if (args._M == DistCalcMethod::InnerProduct) {
-                        COMMON::Utils::Normalize(currCenters, args._RD, COMMON::Utils::GetBase<R>());
-                    }
                     
                     if (args.m_pQuantizer) {
                         for (DimensionType j = 0; j < args._RD; j++) reconstructVector[j] = (R)(currCenters[j]);
@@ -223,7 +207,7 @@ namespace SPTAG
                         for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
                     }
                 }
-                diff += centerShift(TCenter, args.centers + k * args._D);
+                diff += DistanceUtils::ComputeDistance(TCenter, args.centers + k * args._D, args._D, DistCalcMethod::L2);
             }
             return diff;
         }
@@ -391,55 +375,6 @@ namespace SPTAG
         }
 
         template <typename T, typename R>
-        float AssignInnerProductRepresentatives(const Dataset<T>& data,
-            std::vector<SizeType>& indices, SizeType first, SizeType last, KmeansArgs<T>& args)
-        {
-            const int requestedClusters = args._DK;
-            std::vector<SizeType> representatives;
-            std::unordered_map<SizeType, int> representativeClusters;
-            for (int k = 0; k < requestedClusters; ++k) {
-                const SizeType id = args.clusterIdx[k];
-                if (id < 0) continue;
-                const int cluster = static_cast<int>(representatives.size());
-                if (!representativeClusters.emplace(id, cluster).second) continue;
-                representatives.push_back(id);
-                std::memcpy(args.centers + cluster * args._D, data[id], sizeof(T) * args._D);
-            }
-            args.ClearCounts();
-            args.ClearDists(MaxDist);
-            if (representatives.empty()) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "InnerProduct clustering has no representative.\n");
-                return MaxDist;
-            }
-            args._DK = static_cast<int>(representatives.size());
-            float distance = KmeansAssign<T, R>(data, indices, first, last, args, false, 0);
-
-            // An IP representative need not be its own nearest neighbor.
-            // Preserve its identity, vector and membership together.
-            for (SizeType i = first; i < last; ++i) {
-                auto representative = representativeClusters.find(indices[i]);
-                if (representative == representativeClusters.end()) continue;
-                const int cluster = representative->second;
-                const int previous = args.label[i];
-                if (previous == cluster) continue;
-                const float previousDistance = args.fComputeDistance(data[indices[i]],
-                    args.centers + previous * args._D, args._D);
-                const float currentDistance = args.fComputeDistance(data[indices[i]],
-                    args.centers + cluster * args._D, args._D);
-                --args.newCounts[previous];
-                ++args.newCounts[cluster];
-                args.newWeightedCounts[previous] -= previousDistance;
-                args.newWeightedCounts[cluster] += currentDistance;
-                distance += currentDistance - previousDistance;
-                args.label[i] = cluster;
-            }
-            for (int k = 0; k < args._K; ++k)
-                args.clusterIdx[k] = k < args._DK ? representatives[k] : -1;
-            args._DK = requestedClusters;
-            return distance;
-        }
-
-        template <typename T, typename R>
         float TryClustering(const Dataset<T>& data,
             std::vector<SizeType>& indices, const SizeType first, const SizeType last,
             KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
@@ -490,18 +425,13 @@ namespace SPTAG
             args.ClearCounts();
             args.ClearDists(MaxDist);
             currDist = KmeansAssign<T, R>(data, indices, first, last, args, false, 0);
-            if (args._M == DistCalcMethod::InnerProduct) {
-                currDist = AssignInnerProductRepresentatives<T, R>(data, indices, first, last, args);
+            for (int k = 0; k < args._DK; k++) {
+                if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
             }
-            else {
-                for (int k = 0; k < args._DK; k++) {
-                    if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
-                }
 
-                args.ClearCounts();
-                args.ClearDists(MaxDist);
-                currDist = KmeansAssign<T, R>(data, indices, first, last, args, false, 0);
-            }
+            args.ClearCounts();
+            args.ClearDists(MaxDist);
+            currDist = KmeansAssign<T, R>(data, indices, first, last, args, false, 0);
             std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
             SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)(), availableClusters = 0;
@@ -712,7 +642,15 @@ break;
                             }
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
-                            if (numClusters <= 1) {
+                            if (numClusters <= 1 && distMethod == DistCalcMethod::InnerProduct) {
+                                // With unnormalized IP, one high-norm center can attract distinct vectors.
+                                // Keep them as separate leaves instead of treating them as duplicates.
+                                for (SizeType j = item.first; j < item.last; ++j) {
+                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                    m_pTreeRoots.emplace_back(cid);
+                                }
+                            }
+                            else if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
                                 m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
@@ -852,7 +790,13 @@ break;
                                         int numClusters = KmeansClustering(data, localindices, item.first, item.last, localArgs,
                                             m_iSamples, m_fBalanceFactor, false, abort);
 
-                                        if (numClusters <= 1) {
+                                        if (numClusters <= 1 && distMethod == DistCalcMethod::InnerProduct) {
+                                            result.isLeaf = true;
+                                            for (SizeType j = item.first; j < item.last; ++j) {
+                                                SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                                result.childCenters.push_back(cid);
+                                            }
+                                        } else if (numClusters <= 1) {
                                             result.singleCluster = true;
                                             SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                             std::sort(localindices.begin() + item.first, localindices.begin() + end);

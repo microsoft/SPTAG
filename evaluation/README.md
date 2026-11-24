@@ -9,7 +9,6 @@ or existing data.
 
 | Record | Scope | Status |
 | --- | --- | --- |
-| [Normalized SIFT: RaBitQ4 L2/IP and OPQ64 IP](2026-11-18-sift10m-rabitq-ip/README.md) | Single-layer 1M build plus four 1M insertions, 10K queries, Recall5@20; README contains reproduction steps; [report](2026-11-18-sift10m-rabitq-ip/Report.md) | RaBitQ L2/repaired IP complete through 5M: 97.40%/97.31%, zero missing IDs. Repaired OPQ completes 1M: 95.79%, 1,448.0240 QPS; 2M-5M not run. One reproduction entry point, frozen models and Markdown results. |
 | [2026-11-09 SIFT10M FILEIO layer1 matched-binary run](2026-11-09-sift10m-fileio-layer1-matched/README.md) | Fresh run using the same measured95bcb20 executable/libraries/inputs as the other three profiles; [reproduce](2026-11-09-sift10m-fileio-layer1-matched/Reproduce.md) | Completed; 22 rounds, exact10M membership and100K metadata verified |
 | [2026-11-09 SIFT10M FILEIO layer2](2026-11-09-sift10m-fileio-layer2/README.md) | Same profile format, full query latency/QPS and insertion throughput; [reproduce](2026-11-09-sift10m-fileio-layer2/Reproduce.md) | Completed; exact10M verified after correcting the FILEIO telemetry validator |
 | [2026-11-09 SIFT10M TiKV layer1, pre-split128](2026-11-09-sift10m-tikv-layer1-presplit128/README.md) | 16 channels/8 CQ, 128 buckets per active key family, replica3; [reproduce](2026-11-09-sift10m-tikv-layer1-presplit128/Reproduce.md) | Completed; split/scatter readiness, all22 rounds and exact10M verified |

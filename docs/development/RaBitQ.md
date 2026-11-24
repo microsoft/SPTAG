@@ -64,7 +64,7 @@ Queries remain raw Float vectors and are prepared through the loaded `IQuantizer
 The official compact kernels require AVX2/FMA or AVX512 and pad dimensions to a
 multiple of 64. The adapter supports L2 and InnerProduct; cosine distance is
 intentionally unsupported. Measurement protocols and results belong to the
-[normalized RaBitQ4 L2/IP and OPQ64 IP evaluation](../../evaluation/2026-11-18-sift10m-rabitq-ip/README.md).
+[RaBitQ4 growth evaluation](../../evaluation/2026-11-18-sift10m-rabitq-ip/README.md).
 
 ## InnerProduct distance
 
@@ -112,12 +112,13 @@ comparisons and BKTree clustering dispatch the requested metric. Auto-tuning
 uses the same metric for ground truth and candidate scoring, and rejects
 Cosine rather than silently evaluating candidates with L2.
 
-This review baseline retains the original BKTree single-cluster behavior and
-SPANN split/merge/reassignment from `059c99ab`. The only BKTree change is IP
-SDC dispatch; no special IP leaves or forced balanced split are included.
-The evaluation explicitly normalizes both base and query vectors before
-training and encoding, while keeping quantizer-side `normalize=false`.
-Its initial1M result is not evidence of dynamic maintenance safety.
+For InnerProduct, a one-cluster BKTree partition is stored as an ordinary leaf,
+not a duplicate-vector group. Collinear vectors with different magnitudes can
+all choose the same IP center while having different query scores. Both serial
+and parallel tree builders retain those candidates; L2/Cosine grouping is
+unchanged. Rebuild previously created IP trees to obtain this correction.
+The [single-cluster discussion](SingleCluster_Assumption.md) separates the
+underlying assumption, counterexamples and fallback tradeoffs.
 
 The corrected code adds four bytes per vector: global 128-dimensional 4-bit
 codes grow from 84 to 88 bytes. Existing codes do not contain the exact residual
