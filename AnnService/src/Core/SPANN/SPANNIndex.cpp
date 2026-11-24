@@ -285,6 +285,7 @@ template <typename T> ErrorCode Index<T>::ResizeTopLayer(bool shrink, bool autom
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic resize timed out waiting for writes.\n");
             return ErrorCode::Fail;
         }
+        LayerReadLock mutationContext(m_checkPointLock, true, true);
         {
             LayerReadLock configuration(m_layerMutex, m_layerLockEnabled);
             auto validation = ValidateDynamicLayers();
@@ -297,7 +298,8 @@ template <typename T> ErrorCode Index<T>::ResizeTopLayer(bool shrink, bool autom
                 m_lastLayerResize != std::chrono::steady_clock::time_point{} &&
                 std::chrono::steady_clock::now() - m_lastLayerResize <
                     std::chrono::seconds(m_options.m_layerResizeCooldownSeconds)) return ErrorCode::Success;
-            if (automatic && ((shrink && (!m_options.m_enableDynamicLayerShrink || m_extraSearchers.size() <= 1)) ||
+            if (automatic && ((shrink && (!m_options.m_enableDynamicLayerShrink ||
+                m_extraSearchers.size() <= 1)) ||
                 (!shrink && GetHeadMemoryUsage() < m_options.m_headMemoryHighWatermark))) return ErrorCode::Success;
         }
         return shrink ? ShrinkTopLayerInternal(automatic) : GrowTopLayerInternal();
@@ -560,6 +562,11 @@ template <typename T> ErrorCode Index<T>::ShrinkTopLayerInternal(bool automatic)
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid routing IDs or vector size during shrinking.\n");
         return ErrorCode::Key_OverFlow;
     }
+    // The candidate is compact: deleted head slots must not inflate its per-vector estimate.
+    const auto headSlots = m_topIndex->GetNumSamples();
+    long double estimate = static_cast<long double>(GetHeadMemoryUsage()) * ids.size() /
+        (std::max)(SizeType{1}, headSlots);
+    if (automatic && estimate > m_options.m_headMemoryLowWatermark) return ErrorCode::Success;
     const long double minimumBytes = static_cast<long double>(ids.size()) *
         (GetValueSize() + 2 * sizeof(SizeType) + 2 * sizeof(void*));
     if (minimumBytes > m_options.m_headMemoryTarget) {
@@ -567,11 +574,6 @@ template <typename T> ErrorCode Index<T>::ShrinkTopLayerInternal(bool automatic)
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Promoted routing vectors exceed HeadMemoryTarget before construction.\n");
         return ErrorCode::MemoryOverFlow;
     }
-    // The candidate is compact: deleted head slots must not inflate its per-vector estimate.
-    const auto headSlots = m_topIndex->GetNumSamples();
-    const long double estimate = static_cast<long double>(GetHeadMemoryUsage()) * ids.size() /
-        (std::max)(SizeType{1}, headSlots);
-    if (automatic && estimate > m_options.m_headMemoryLowWatermark) return ErrorCode::Success;
     if (automatic) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "[DYNAMIC-LAYER] shrink eligible: routing=%zu estimated=%.0Lf low=%llu target=%llu.\n",

@@ -26,7 +26,8 @@ namespace
         std::vector<uint8_t> vectors;
         const int dimension;
 
-        explicit FileLayerFixture(int layers = 1, bool shared = true, int dimensions = 2, bool shrink = false)
+        explicit FileLayerFixture(int layers = 1, bool shared = true, int dimensions = 2, bool shrink = false,
+                                  int mergeThreshold = 10)
             : dimension(dimensions)
         {
             boost::filesystem::create_directory(directory);
@@ -61,6 +62,7 @@ namespace
             Set("MaxID", "10000");
             Set("EnableDynamicLayers", "true");
             Set("EnableDynamicLayerShrink", shrink ? "true" : "false");
+            Set("MergeThreshold", std::to_string(mergeThreshold));
             Set("HeadMemoryLowWatermark", "1");
             Set("HeadMemoryHighWatermark", "1000000");
             Set("HeadMemoryTarget", "2000");
@@ -156,7 +158,7 @@ namespace
             Wait();
         }
     };
-    void RunAutomaticLayerWorkload(int scale)
+    void RunAutomaticLayerWorkload(int scale, int mergeThreshold = 24)
     {
         constexpr int dimension = 32, k = 10, queryCount = 64;
         const int initial = 1024 * scale, total = 16384 * scale, remaining = 256 * scale;
@@ -204,7 +206,7 @@ namespace
         set("PostingPageLimit", "1");
         set("SearchPostingPageLimit", "1");
         set("BufferLength", "1");
-        set("MergeThreshold", "24");
+        set("MergeThreshold", std::to_string(mergeThreshold));
         set("InternalResultNum", "64");
         set("SearchInternalResultNum", "64");
         set("MaxCheck", "512");
@@ -850,6 +852,49 @@ BOOST_AUTO_TEST_CASE(ShrinkRejectsInvalidConfiguration)
     BOOST_REQUIRE(invalid.SetParameter("HeadMemoryLowWatermark", "1", "BuildSSDIndex") == ErrorCode::Success);
     BOOST_REQUIRE(invalid.SetParameter("LayerResizeCooldownSeconds", "-1", "BuildSSDIndex") == ErrorCode::Success);
     BOOST_CHECK(invalid.BuildIndex(vectors, 2, 2) == ErrorCode::FailedParseValue);
+}
+
+BOOST_AUTO_TEST_CASE(OrdinaryMergeHonorsConfiguredThreshold)
+{
+    for (const int threshold : {10, 32}) {
+        FileLayerFixture fixture(2, true, 2, false, threshold);
+        SPANN::ExtraWorkSpace workspace;
+        fixture.index->InitWorkSpace(&workspace);
+        auto base = std::dynamic_pointer_cast<SPANN::ExtraDynamicSearcher<uint8_t>>(fixture.index->GetDiskIndex());
+        BOOST_REQUIRE(base);
+        std::string posting;
+        for (SizeType id = 0; id < 21; ++id) {
+            posting.append(reinterpret_cast<const char*>(&id), sizeof(id));
+            posting.push_back(static_cast<char>(0xff));
+            posting.append(reinterpret_cast<const char*>(fixture.vectors.data() + id * fixture.dimension),
+                fixture.dimension);
+        }
+        BOOST_REQUIRE(base->GetWritePosting(&workspace, 0, posting, true) == ErrorCode::Success);
+        base->MergeAsync(0);
+        fixture.Wait();
+        BOOST_REQUIRE(base->MaintenanceStatus() == ErrorCode::Success);
+        std::vector<SizeType> routes, users;
+        BOOST_REQUIRE(fixture.index->GetHeadIndexMapping(1, routes) == ErrorCode::Success);
+        if (threshold == 10) BOOST_CHECK_EQUAL(routes.size(), 64);
+        else BOOST_CHECK_LT(routes.size(), 64);
+        BOOST_REQUIRE(fixture.index->GetHeadIndexMapping(0, users) == ErrorCode::Success);
+        BOOST_CHECK_EQUAL(users.size(), 64);
+        fixture.Check();
+        base.reset();
+        BOOST_REQUIRE(fixture.index->SaveIndex(fixture.directory.string()) == ErrorCode::Success);
+        fixture.Reload();
+        fixture.Check();
+    }
+}
+
+BOOST_AUTO_TEST_CASE(AutomaticOrdinaryMergeSmallWorkload)
+{
+    RunAutomaticLayerWorkload(1, 32);
+}
+
+BOOST_AUTO_TEST_CASE(AutomaticOrdinaryMergeLargerWorkload, *boost::unit_test::disabled())
+{
+    RunAutomaticLayerWorkload(4, 32);
 }
 
 BOOST_AUTO_TEST_CASE(AutomaticSmallWorkload)

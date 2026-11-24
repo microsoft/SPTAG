@@ -171,6 +171,21 @@ Deleted head slots are included in the estimate's denominator because rebuilding
 compacts them away; dividing their retained memory by only the live head count
 would inflate the estimate as merges retire heads and could prevent shrinking.
 
+The coordinator does not scan or merge postings. Routing retirement uses only
+the existing `MergeAsync` / `MergePostings` path and its ordinary reassignment.
+Enable `AsyncMergeInSearch` to let public queries schedule this maintenance.
+The existing `MergeThreshold` limits the source posting's effective length;
+it is not the posting capacity. A fixed higher threshold can make more sources
+eligible, but capacity, survivor selection, locks and reassignment are unchanged.
+Configure it before build/load because the posting searcher caches the value.
+Validate recall and merge/split work before selecting a production threshold.
+Query coverage and capacity can delay or prevent routing retirement; fewer
+live users do not guarantee that shrinking will occur.
+The low-watermark estimate and actual constructed-head target checks remain
+mandatory. There is no dedicated merge executor or candidate-scan budget.
+
+Shrinking does not reclaim retired posting files.
+
 Routing export reads complete postings, filters by the highest layer's current
 versions, deduplicates replicas and rejects missing or conflicting live vectors.
 Distributed maintenance version reads propagate backend errors rather than
