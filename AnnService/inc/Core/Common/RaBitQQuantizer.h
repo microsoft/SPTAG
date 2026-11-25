@@ -70,9 +70,14 @@ private:
     static constexpr std::uint32_t kLegacyModelVersion = 2U;
     static constexpr std::uint32_t kModelVersion = 3U;
     static constexpr std::uint32_t kLocalModelVersion = 4U;
+    static constexpr std::uint32_t kIPModelVersion = 5U;
+    static constexpr std::uint32_t kIPLocalModelVersion = 6U;
     static constexpr std::uint32_t kMaxLocalCentroids = 65536U;
     static constexpr std::size_t kCodeFactorCount = 5;
-    static constexpr std::size_t kQueryFactorCount = 2;
+    static constexpr std::size_t kIPCodeFactorCount = 6;
+    static constexpr std::size_t kIPAddFactorIndex = 5;
+    static constexpr std::size_t kQueryFactorCount = 2; // Squared residual norm and -0.5 * query sum.
+    static constexpr std::size_t kIPQueryFactorCount = 1; // Query/global-centroid dot product.
 
     ErrorCode Initialize(DimensionType p_dimension, int p_bits, bool p_normalize);
     ErrorCode LoadHeader(const ModelHeader& p_header);
@@ -81,6 +86,7 @@ private:
     const float* Centroid(std::uint32_t p_id) const;
     void Decode(const std::uint8_t* p_code, std::vector<float>& p_output) const;
     float ComputeL2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const;
+    float ComputeInnerProductDistance(const std::uint8_t* p_x, const std::uint8_t* p_y, bool p_adc) const;
     void PrepareInput(const float* p_input, std::vector<float>& p_output) const;
     void UnpackCode(const std::uint8_t* p_code, std::uint8_t* p_output) const;
     void ReadCodeFactors(const std::uint8_t* p_code,
@@ -94,7 +100,9 @@ private:
                              float& p_f_rescale) const;
     std::size_t PackedCodeBytes() const;
     std::size_t CodeBytes() const;
+    bool HasIPFactor() const { return m_codeFactorCount == kIPCodeFactorCount; }
 
+    std::size_t m_codeFactorCount = kIPCodeFactorCount;
     DimensionType m_dimension = 0;
     DimensionType m_padded_dimension = 0;
     int m_bits = 0;

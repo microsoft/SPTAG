@@ -33,6 +33,7 @@ ErrorCode EvaluateBits(const std::shared_ptr<RaBitQQuantizer>& p_quantizer,
                        const std::vector<std::vector<SizeType>>& p_truth,
                        int p_resultCount,
                        int p_threads,
+                       DistCalcMethod p_distance,
                        float& p_recall)
 {
     const DimensionType codeDimension = p_quantizer->GetNumSubvectors();
@@ -46,6 +47,7 @@ ErrorCode EvaluateBits(const std::shared_ptr<RaBitQQuantizer>& p_quantizer,
     }
 
     p_quantizer->SetEnableADC(true);
+    const auto distance = p_quantizer->DistanceCalcSelector<std::uint8_t>(p_distance);
     std::vector<float> queryRecalls(p_queries->Count(), 0.0F);
     std::atomic<SizeType> nextQuery(0);
     const int workerCount = max(1, min(p_threads, (int)(p_queries->Count())));
@@ -65,7 +67,7 @@ ErrorCode EvaluateBits(const std::shared_ptr<RaBitQQuantizer>& p_quantizer,
                 for (SPTAG::SizeType j = 0; j < p_base->Count(); j++)
                 {
                     const std::uint8_t* code = codes.data() + j * static_cast<std::size_t>(codeDimension);
-                    queryResult.AddPoint(j, p_quantizer->L2Distance(queryCode.data(), code));
+                    queryResult.AddPoint(j, distance(queryCode.data(), code, codeDimension));
                 }
                 queryResult.SortResult();
 
@@ -132,7 +134,7 @@ ErrorCode RaBitQAutoTuner<T>::Run(std::shared_ptr<VectorSet>& p_base,
             }
             const ErrorCode evaluation = EvaluateBits<T>(
                 candidate, p_base, queries, truth,
-                p_resultCount, p_threads, p_recall);
+                p_resultCount, p_threads, p_distance, p_recall);
             SPTAGLIB_LOG(
                 Helper::LogLevel::LL_Info,
                 "RaBitQ auto-tuning bits=%d Recall@%d=%.6f target=%.6f\n",

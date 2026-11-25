@@ -776,7 +776,8 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
-                    if (!theSameHead && m_headIndex->ComputeDistanceBetweenStoredVectors(headVec->c_str() + m_metaDataSize, args.centers + k * args._D) < Epsilon) {
+                    auto distCalc = COMMON::DistanceCalcSelector<ValueType>(DistCalcMethod::L2);
+                    if (!theSameHead && distCalc((const ValueType*)(headVec->c_str() + m_metaDataSize), args.centers + k * args._D, args._D) < Epsilon) {
                         newHeadsID[k] = headID;
                         newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
@@ -796,7 +797,7 @@ namespace SPTAG::SPANN {
                         m_stat.m_splitSameHeadCount.fetch_add(1, std::memory_order_relaxed);
                     }
                     else {
-                        newHeadVID = *((SizeType*)(postingP + args.clusterIdx[k] * m_vectorInfoSize));
+                        newHeadVID = *((SizeType *)(postingP + args.clusterIdx[k] * m_vectorInfoSize));
                         uint8_t version = *((uint8_t*)(postingP + args.clusterIdx[k] * m_vectorInfoSize + sizeof(SizeType)));
 
                         newHeadsID[k] = newHeadVID;

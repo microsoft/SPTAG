@@ -80,6 +80,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
 
 std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
 {
+    if (bytes.Length() < sizeof(QuantizerType) + sizeof(VectorValueType)) return nullptr;
     auto raw_bytes = bytes.Data();
     QuantizerType quantizerType = *(QuantizerType *)raw_bytes;
     raw_bytes += sizeof(QuantizerType);
@@ -111,7 +112,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             break;
         }
 
-        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success || bytes.Length() < ret->BufferSize())
             ret.reset();
         return ret;
     case QuantizerType::OPQQuantizer:
@@ -128,7 +129,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             break;
         }
 
-        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success || bytes.Length() < ret->BufferSize())
             ret.reset();
         return ret;
 #ifdef RABITQ
@@ -137,9 +138,8 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             return ret;
         }
         ret = std::make_shared<RaBitQQuantizer>();
-        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) {
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success || bytes.Length() < ret->BufferSize())
             ret.reset();
-        }
         return ret;
 #endif
     }

@@ -62,7 +62,7 @@ namespace SPTAG
                         fComputeDistance = [this](const T *pX, const T *pY, DimensionType length)->float {
                             return m_pQuantizer->L2DistanceSDC((const uint8_t*)pX, (const uint8_t*)pY);
                         };
-                    else 
+                    else
                         fComputeDistance = [this](const T *pX, const T *pY, DimensionType length)->float {
                             return m_pQuantizer->CosineDistanceSDC((const uint8_t*)pX, (const uint8_t*)pY);
                         };
@@ -639,16 +639,29 @@ break;
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
                             if (numClusters <= 1) {
-                                SizeType end = min(item.last + 1, (SizeType)localindices.size());
-                                std::sort(localindices.begin() + item.first, localindices.begin() + end);
-                                m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
-                                m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
-                                for (SizeType j = item.first + 1; j < end; j++) {
-                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
-                                    m_pTreeRoots.emplace_back(cid);
-                                    m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
+                                // Under IP, a single cluster does not imply duplicate vectors:
+                                // quantized reconstructions can have unequal norms even for normalized inputs.
+                                // Keep them as separate leaves instead of treating them as duplicates.
+                                if (distMethod != DistCalcMethod::L2)
+                                {
+                                    for (SizeType j = item.first; j < item.last; ++j) {
+                                        SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                        m_pTreeRoots.emplace_back(cid);
+                                    }
                                 }
-                                m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
+                                else
+                                {
+                                    SizeType end = min(item.last + 1, (SizeType)localindices.size());
+                                    std::sort(localindices.begin() + item.first, localindices.begin() + end);
+                                    m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
+                                    m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
+                                    for (SizeType j = item.first + 1; j < end; j++) {
+                                        SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                        m_pTreeRoots.emplace_back(cid);
+                                        m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
+                                    }
+                                    m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
+                                }
                             }
                             else {
                                 SizeType maxCount = 0;
@@ -779,13 +792,24 @@ break;
                                             m_iSamples, m_fBalanceFactor, false, abort);
 
                                         if (numClusters <= 1) {
-                                            result.singleCluster = true;
-                                            SizeType end = min(item.last + 1, (SizeType)localindices.size());
-                                            std::sort(localindices.begin() + item.first, localindices.begin() + end);
-                                            result.singleClusterCenter = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
-                                            for (SizeType j = item.first + 1; j < end; j++) {
-                                                SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
-                                                result.childCenters.push_back(cid);
+                                            if (distMethod != DistCalcMethod::L2) {
+                                                // Under IP, a single cluster does not imply duplicate vectors:
+                                                // quantized reconstructions can have unequal norms even for normalized inputs.
+                                                // Keep them as separate leaves instead of treating them as duplicates.
+                                                result.isLeaf = true;
+                                                for (SizeType j = item.first; j < item.last; ++j) {
+                                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                                    result.childCenters.push_back(cid);
+                                                }
+                                            } else {
+                                                result.singleCluster = true;
+                                                SizeType end = min(item.last + 1, (SizeType)localindices.size());
+                                                std::sort(localindices.begin() + item.first, localindices.begin() + end);
+                                                result.singleClusterCenter = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
+                                                for (SizeType j = item.first + 1; j < end; j++) {
+                                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                                    result.childCenters.push_back(cid);
+                                                }
                                             }
                                         } else {
                                             SizeType pos = item.first;

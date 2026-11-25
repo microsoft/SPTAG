@@ -36,7 +36,7 @@ constexpr SizeType kVectorCount = 96;
 constexpr DimensionType kDimension = 128;
 constexpr int kRaBitQBits = 3;
 constexpr DimensionType kRaBitQCodeBytes =
-    kDimension * kRaBitQBits / 8 + 5 * sizeof(float);
+    kDimension * kRaBitQBits / 8 + 6 * sizeof(float);
 constexpr const char* kQuantizerFile = "rabitq_global_quantizer_test.bin";
 constexpr const char* kQueryFile = "rabitq_global_query_test.fvecs";
 constexpr SizeType kSearchQueryCount = 16;
@@ -428,7 +428,7 @@ BOOST_AUTO_TEST_CASE(OfficialCompactRaBitQStoresRequestedBits)
         BOOST_REQUIRE(quantizer->Train(raw) == ErrorCode::Success);
         BOOST_CHECK_EQUAL(
             quantizer->GetNumSubvectors(),
-            kDimension * bits / 8 + 5 * sizeof(float));
+            kDimension * bits / 8 + 6 * sizeof(float));
 
         std::vector<std::uint8_t> code(quantizer->GetNumSubvectors());
         quantizer->QuantizeVector(raw->GetVector(0), code.data(), false);
@@ -571,7 +571,7 @@ BOOST_AUTO_TEST_CASE(RaBitQEncodedWidthMatchesSavedModel)
         dimension, bits, false);
     BOOST_REQUIRE(quantizer->Train(vectors) == ErrorCode::Success);
     BOOST_CHECK_EQUAL(
-        quantizer->GetNumSubvectors(), 128 * bits / 8 + 5 * sizeof(float));
+        quantizer->GetNumSubvectors(), 128 * bits / 8 + 6 * sizeof(float));
 
     const char* modelPath = "rabitq_width_model.bin";
     auto output = f_createIO();
@@ -701,7 +701,7 @@ BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsPreserveADCSDCAndPersistence)
             const auto globalSize = quantizer->BufferSize();
             BOOST_REQUIRE(quantizer->SetLocalCentroids(centers) == ErrorCode::Success);
             BOOST_CHECK_EQUAL(quantizer->LocalCentroidCount(), centerCount);
-            BOOST_CHECK_EQUAL(quantizer->GetNumSubvectors(), 128 * bits / 8 + 24);
+            BOOST_CHECK_EQUAL(quantizer->GetNumSubvectors(), 128 * bits / 8 + 28);
             BOOST_CHECK_EQUAL(quantizer->BufferSize(), globalSize + sizeof(std::uint32_t) +
                               centerCount * 128 * sizeof(float));
             auto codes = QuantizeVectors(raw, quantizer);
@@ -720,7 +720,7 @@ BOOST_AUTO_TEST_CASE(RaBitQLocalCentroidsPreserveADCSDCAndPersistence)
             BOOST_CHECK_EQUAL(otherBits->LocalCentroidCount(), centerCount);
             for (auto model : {loaded, memoryLoaded, std::static_pointer_cast<COMMON::IQuantizer>(clone)}) {
                 model->SetEnableADC(true);
-                BOOST_CHECK_EQUAL(model->QuantizeSize(), (128 + 2 + centerCount) * sizeof(float));
+                BOOST_CHECK_EQUAL(model->QuantizeSize(), (128 + 2 + centerCount + 1 + centerCount) * sizeof(float));
                 std::vector<std::uint8_t> query(model->QuantizeSize()), encoded(model->GetNumSubvectors());
                 model->QuantizeVector(raw->GetVector(0), query.data());
                 for (int i = 0; i < count; ++i) {
