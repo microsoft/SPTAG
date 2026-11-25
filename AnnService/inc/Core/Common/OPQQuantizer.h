@@ -169,7 +169,7 @@ namespace SPTAG
         ErrorCode OPQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
         {
             PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes);
-            raw_bytes += sizeof(DimensionType) + sizeof(int) + sizeof(DimensionType) + (sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            raw_bytes += PQQuantizer<OPQMatrixType>::BufferSize() - sizeof(VectorValueType) - sizeof(QuantizerType);
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
             m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
             std::memcpy(m_OPQMatrix.get(), raw_bytes, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim);

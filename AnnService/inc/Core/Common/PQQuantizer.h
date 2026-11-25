@@ -37,10 +37,6 @@ namespace SPTAG
 
             virtual float CosineDistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
-            virtual float InnerProductDistance(const std::uint8_t* pX, const std::uint8_t* pY) const override;
-
-            virtual float InnerProductDistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const override;
-
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const;
             
             virtual DimensionType QuantizeSize() const;
@@ -174,20 +170,6 @@ namespace SPTAG
                 out += m_DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
             }
             return m_base - out;
-        }
-
-        // For IP-configured PQ (also inherited by OPQ), the legacy Cosine
-        // methods sum dot-product tables and return m_base - dot, without normalization.
-        template <typename T>
-        float PQQuantizer<T>::InnerProductDistance(const std::uint8_t* pX, const std::uint8_t* pY) const
-        {
-            return CosineDistance(pX, pY);
-        }
-
-        template <typename T>
-        float PQQuantizer<T>::InnerProductDistanceSDC(const std::uint8_t* pX, const std::uint8_t* pY) const
-        {
-            return CosineDistanceSDC(pX, pY);
         }
 
         template <typename T>

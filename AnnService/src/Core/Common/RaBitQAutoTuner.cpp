@@ -105,8 +105,7 @@ ErrorCode RaBitQAutoTuner<T>::Run(std::shared_ptr<VectorSet>& p_base,
 {
     p_result = RaBitQAutoTuneResult();
 
-    if (p_queryNum <= 0 || p_resultCount <= 0 || p_threads <= 0 || p_targetRecall < 0.0F || p_targetRecall > 1.0F ||
-        (p_distance != DistCalcMethod::L2 && p_distance != DistCalcMethod::InnerProduct) || p_outputFolder.empty()) {
+    if (p_queryNum <= 0 || p_resultCount <= 0 || p_threads <= 0 || p_targetRecall < 0.0F || p_targetRecall > 1.0F || p_distance == DistCalcMethod::Undefined || p_outputFolder.empty()) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid RaBitQ query number, result counts, threads, target recall, distance type or output folder!\n");
         return ErrorCode::FailedParseValue;
     }

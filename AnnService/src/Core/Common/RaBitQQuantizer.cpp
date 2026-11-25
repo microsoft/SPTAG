@@ -215,24 +215,10 @@ float RaBitQQuantizer::ComputeL2Distance(
 
 float RaBitQQuantizer::CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                 "RaBitQ supports L2 and InnerProduct, not Cosine distance.\n");
-    return std::numeric_limits<float>::infinity();
-}
-
-float RaBitQQuantizer::CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
-{
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                 "RaBitQ supports L2 and InnerProduct, not Cosine distance.\n");
-    return std::numeric_limits<float>::infinity();
-}
-
-float RaBitQQuantizer::InnerProductDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const
-{
     return ComputeInnerProductDistance(p_x, p_y, m_enable_adc);
 }
 
-float RaBitQQuantizer::InnerProductDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
+float RaBitQQuantizer::CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const
 {
     return ComputeInnerProductDistance(p_x, p_y, false);
 }
@@ -807,28 +793,6 @@ std::size_t RaBitQQuantizer::CodeBytes() const
 {
     return PackedCodeBytes() + m_codeFactorCount * sizeof(float) +
         (m_localCentroids.empty() ? 0 : sizeof(std::uint32_t));
-}
-
-ErrorCode RaBitQQuantizer::LoadQuantizer(std::uint8_t* p_raw_bytes, std::size_t p_size)
-{
-    // The pointer-only interface requires a complete payload. Persisted ByteArrays
-    // must be checked before interpreting version 6 as a local model.
-    if (!p_raw_bytes || p_size < sizeof(ModelHeader)) return ErrorCode::FailedParseValue;
-    ModelHeader header{};
-    std::memcpy(&header, p_raw_bytes, sizeof(header));
-    if (LoadHeader(header) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-    std::uint64_t required = sizeof(header) +
-        (static_cast<std::uint64_t>(m_centroid.size()) + m_rotation.size()) * sizeof(float);
-    if (required > p_size) return ErrorCode::FailedParseValue;
-    if (header.version == kLocalModelVersion || header.version == kIPLocalModelVersion) {
-        if (p_size - required < sizeof(std::uint32_t)) return ErrorCode::FailedParseValue;
-        std::uint32_t count;
-        std::memcpy(&count, p_raw_bytes + required, sizeof(count));
-        if (count == 0 || count > kMaxLocalCentroids) return ErrorCode::FailedParseValue;
-        required += sizeof(count) + static_cast<std::uint64_t>(count) * m_padded_dimension * sizeof(float);
-        if (required > p_size) return ErrorCode::FailedParseValue;
-    }
-    return LoadQuantizer(p_raw_bytes);
 }
 
 } // namespace COMMON

@@ -30,8 +30,6 @@ public:
 
     float L2Distance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float L2DistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
-    float InnerProductDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
-    float InnerProductDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistance(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     float CosineDistanceSDC(const std::uint8_t* p_x, const std::uint8_t* p_y) const override;
     void QuantizeVector(const void* p_vector, std::uint8_t* p_output, bool p_adc = true) const override;
@@ -56,7 +54,6 @@ public:
     std::size_t LocalCentroidCount() const;
     bool Ready() const;
     bool Trained() const { return m_trained; }
-    ErrorCode LoadQuantizer(std::uint8_t* p_raw_bytes, std::size_t p_size);
 
 private:
     struct ModelHeader

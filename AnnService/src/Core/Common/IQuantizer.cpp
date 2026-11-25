@@ -112,7 +112,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             break;
         }
 
-        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success || bytes.Length() < ret->BufferSize())
             ret.reset();
         return ret;
     case QuantizerType::OPQQuantizer:
@@ -129,7 +129,7 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             break;
         }
 
-        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success || bytes.Length() < ret->BufferSize())
             ret.reset();
         return ret;
 #ifdef RABITQ
@@ -138,10 +138,8 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             return ret;
         }
         ret = std::make_shared<RaBitQQuantizer>();
-        if (std::static_pointer_cast<RaBitQQuantizer>(ret)->LoadQuantizer(
-                raw_bytes, bytes.Length() - sizeof(QuantizerType) - sizeof(VectorValueType)) != ErrorCode::Success) {
+        if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success || bytes.Length() < ret->BufferSize())
             ret.reset();
-        }
         return ret;
 #endif
     }
@@ -156,12 +154,6 @@ std::function<float(const std::uint8_t *, const std::uint8_t *, DimensionType)> 
     {
         return ([this](const std::uint8_t *pX, const std::uint8_t *pY, DimensionType length) {
             return L2Distance(pX, pY);
-        });
-    }
-    else if (p_method == SPTAG::DistCalcMethod::InnerProduct)
-    {
-        return ([this](const std::uint8_t *pX, const std::uint8_t *pY, DimensionType length) {
-            return InnerProductDistance(pX, pY);
         });
     }
     else
