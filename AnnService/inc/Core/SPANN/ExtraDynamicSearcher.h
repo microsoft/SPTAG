@@ -776,8 +776,8 @@ namespace SPTAG::SPANN {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
-                    auto distCalc = COMMON::DistanceCalcSelector<T>(DistCalcMethod::L2);
-                    if (!theSameHead && distCalc(headVec->c_str() + m_metaDataSize, args.centers + k * args._D, args._D) < Epsilon) {
+                    auto distCalc = COMMON::DistanceCalcSelector<ValueType>(DistCalcMethod::L2);
+                    if (!theSameHead && distCalc((const ValueType*)(headVec->c_str() + m_metaDataSize), args.centers + k * args._D, args._D) < Epsilon) {
                         newHeadsID[k] = headID;
                         newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
