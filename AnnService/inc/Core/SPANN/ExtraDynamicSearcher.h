@@ -408,6 +408,204 @@ namespace SPTAG::SPANN {
         }
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
+        void RebindHeadIndex(SPANN::Index<ValueType>* index, Options& options)
+        {
+            m_headIndex = index;
+            m_opt = &options;
+        }
+        ErrorCode MaintenanceStatus() const { return m_asyncStatus.load(); }
+
+        ErrorCode ExportRoutingVectors(const std::vector<SizeType>& globalIDs, ByteArray& vectors,
+                                       const std::chrono::steady_clock::time_point& deadline)
+        {
+            std::unordered_map<SizeType, size_t> offsets;
+            for (size_t i = 0; i < globalIDs.size(); ++i) offsets.emplace(globalIDs[i], i);
+            std::vector<uint8_t> found(globalIDs.size(), 0);
+            std::vector<int> observedVersion(globalIDs.size(), -1);
+            std::vector<SizeType> heads;
+            auto ret = m_headIndex->GetHeadIndexMapping(m_layer + 1, heads);
+            if (ret != ErrorCode::Success) return ret;
+            ExtraWorkSpace workspace;
+            m_headIndex->InitWorkSpace(&workspace);
+            if (workspace.m_diskRequests.empty() || workspace.m_diskRequests[0].m_status < 0) return ErrorCode::Fail;
+            vectors = ByteArray::Alloc(globalIDs.size() * m_vectorDataSize);
+            for (SizeType head : heads) {
+                if (head < 0 || head >= m_opt->m_maxID ||
+                    m_layer > ((std::numeric_limits<SizeType>::max)() - head) / m_opt->m_maxID) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Routing posting key overflow during shrinking.\n");
+                    return ErrorCode::Key_OverFlow;
+                }
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Timed out exporting routing layer %d.\n", m_layer);
+                    return ErrorCode::Fail;
+                }
+                std::string posting;
+                ret = GetWritePosting(&workspace, head, posting);
+                if (ret != ErrorCode::Success) return ret;
+                if (posting.empty() || posting.size() % m_vectorInfoSize != 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid routing posting for head %lld in layer %d.\n",
+                        static_cast<long long>(head), m_layer);
+                    return ErrorCode::DiskIOFail;
+                }
+                std::vector<SizeType> ids(posting.size() / m_vectorInfoSize);
+                for (size_t i = 0; i < ids.size(); ++i) {
+                    memcpy(&ids[i], posting.data() + i * m_vectorInfoSize, sizeof(SizeType));
+                    if (ids[i] < 0 || ids[i] >= m_opt->m_maxID) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid routing VID %lld in layer %d.\n",
+                            static_cast<long long>(ids[i]), m_layer);
+                        return ErrorCode::Key_OverFlow;
+                    }
+                }
+                std::vector<uint8_t> versions;
+                ret = m_versionMap->ReadVersionsForMaintenance(ids, versions);
+                if (ret != ErrorCode::Success) return ret;
+                if (versions.size() != ids.size()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Incomplete routing versions in layer %d.\n", m_layer);
+                    return ErrorCode::DiskIOFail;
+                }
+                for (size_t i = 0; i < ids.size(); ++i) {
+                    const char* record = posting.data() + i * m_vectorInfoSize;
+                    auto offset = offsets.find(ids[i]);
+                    const auto recordVersion = static_cast<uint8_t>(record[sizeof(SizeType)]);
+                    if (offset != offsets.end()) observedVersion[offset->second] = recordVersion;
+                    if (versions[i] == 0xfe || versions[i] != recordVersion) continue;
+                    if (offset == offsets.end()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unexpected live routing VID %lld in layer %d.\n",
+                            static_cast<long long>(ids[i]), m_layer);
+                        return ErrorCode::Fail;
+                    }
+                    auto* destination = vectors.Data() + offset->second * m_vectorDataSize;
+                    const char* source = record + m_metaDataSize;
+                    if (found[offset->second] && memcmp(destination, source, m_vectorDataSize) != 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Conflicting live routing copies for VID %lld.\n",
+                            static_cast<long long>(ids[i]));
+                        return ErrorCode::Fail;
+                    }
+                    memcpy(destination, source, m_vectorDataSize);
+                    found[offset->second] = 1;
+                }
+            }
+            auto missing = std::find(found.begin(), found.end(), 0);
+            if (missing != found.end()) {
+                const auto offset = static_cast<size_t>(missing - found.begin());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Routing layer %d is missing live VID %lld (current version=%u, observed version=%d); refusing to shrink.\n",
+                    m_layer, static_cast<long long>(globalIDs[offset]),
+                    static_cast<unsigned>(m_versionMap->GetVersion(globalIDs[offset])), observedVersion[offset]);
+                return ErrorCode::VectorNotFound;
+            }
+            return ErrorCode::Success;
+        }
+
+        ErrorCode BuildRoutingLayer(const std::shared_ptr<VectorSet>& vectors,
+                                    const std::vector<SizeType>& globalIDs, SizeType vectorCount)
+        {
+            std::vector<SizeType> heads;
+            auto ret = m_headIndex->GetHeadIndexMapping(m_layer + 1, heads);
+            if (ret != ErrorCode::Success) return ret;
+            if (m_postingSizeLimit <= 0 ||
+                heads.size() * static_cast<size_t>(m_postingSizeLimit) < globalIDs.size()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic layer has insufficient total routing posting capacity.\n");
+                return ErrorCode::MemoryOverFlow;
+            }
+            std::unordered_map<SizeType, std::string> postings;
+            for (SizeType head : heads) postings.emplace(head, std::string());
+            const uint8_t version = 0;
+            const auto append = [&](std::string& posting, SizeType vid, const void* vector) {
+                size_t offset = posting.size();
+                posting.resize(offset + m_vectorInfoSize);
+                Serialize(&posting[offset], vid, version, vector);
+            };
+            for (size_t i = 0; i < globalIDs.size(); ++i) {
+                auto found = postings.find(globalIDs[i]);
+                if (found != postings.end()) append(found->second, globalIDs[i], vectors->GetVector(static_cast<SizeType>(i)));
+            }
+
+            ExtraWorkSpace workspace;
+            m_headIndex->InitWorkSpace(&workspace);
+            if (workspace.m_diskRequests.empty() || workspace.m_diskRequests[0].m_status < 0) return ErrorCode::Fail;
+            std::vector<BasicResult> selections(m_opt->m_replicaCount);
+            size_t capacityFallbacks = 0;
+            for (size_t i = 0; i < globalIDs.size(); ++i) {
+                if (postings.count(globalIDs[i])) continue;
+                int replicaCount = 0;
+                bool needReassign;
+                ret = RNGSelection(&workspace, selections,
+                    static_cast<ValueType*>(vectors->GetVector(static_cast<SizeType>(i))), replicaCount, needReassign);
+                if (ret != ErrorCode::Success) return ret;
+                int written = 0;
+                for (int j = 0; j < replicaCount; ++j) {
+                    auto found = postings.find(selections[j].VID);
+                    if (found == postings.end()) continue;
+                    if (found->second.size() / m_vectorInfoSize >= static_cast<size_t>(m_postingSizeLimit)) continue;
+                    append(found->second, globalIDs[i], vectors->GetVector(static_cast<SizeType>(i)));
+                    ++written;
+                }
+                if (written == 0) {
+                    size_t candidates = (std::min)(heads.size(), static_cast<size_t>((std::max)(1, m_opt->m_internalResultNum)));
+                    while (true) {
+                        COMMON::QueryResultSet<ValueType> nearby(
+                            static_cast<ValueType*>(vectors->GetVector(static_cast<SizeType>(i))),
+                            static_cast<int>(candidates));
+                        ret = m_headIndex->SearchHeadIndex(nearby, m_layer + 1, &workspace);
+                        if (ret != ErrorCode::Success) return ret;
+                        for (int j = 0; j < nearby.GetResultNum(); ++j) {
+                            auto found = postings.find(nearby.GetResult(j)->VID);
+                            if (found == postings.end() ||
+                                found->second.size() / m_vectorInfoSize >= static_cast<size_t>(m_postingSizeLimit)) continue;
+                            append(found->second, globalIDs[i], vectors->GetVector(static_cast<SizeType>(i)));
+                            ++written;
+                            ++capacityFallbacks;
+                            break;
+                        }
+                        if (written != 0 || candidates == heads.size()) break;
+                        candidates = (std::min)(heads.size(), candidates * 2);
+                    }
+                }
+                if (written == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "Dynamic layer cannot place routing VID %lld without truncation; increase HeadMemoryTarget or PostingPageLimit.\n",
+                        (std::int64_t)globalIDs[i]);
+                    return ErrorCode::MemoryOverFlow;
+                }
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "[DYNAMIC-LAYER] capacity-aware fallback placed %llu routing vectors.\n",
+                (unsigned long long)capacityFallbacks);
+
+#ifdef TIKV
+            if (auto* versions = dynamic_cast<COMMON::TiKVVersionMap*>(m_versionMap.get())) {
+                ret = versions->InitializeRoutingLayer(vectorCount, globalIDs);
+                if (ret != ErrorCode::Success) return ret;
+            } else
+#endif
+            {
+                for (SizeType vid : globalIDs) {
+                    uint8_t liveVersion = version;
+                    m_versionMap->SetVersion(vid, liveVersion);
+                }
+            }
+            for (auto& posting : postings) {
+                if (posting.second.empty()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic routing posting %lld has no centroid.\n",
+                        (std::int64_t)posting.first);
+                    return ErrorCode::Fail;
+                }
+                ret = db->Put(DBKey(posting.first), posting.second, MaxTimeout, &workspace.m_diskRequests);
+                if (ret != ErrorCode::Success) return ret;
+                std::string stored;
+                ret = db->Get(DBKey(posting.first), &stored, MaxTimeout, &workspace.m_diskRequests);
+                if (ret != ErrorCode::Success) return ret;
+                if (stored != posting.second) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Dynamic routing posting verification failed for %lld.\n",
+                        (std::int64_t)posting.first);
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+            ret = m_versionMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer));
+            if (ret != ErrorCode::Success) return ret;
+            return LoadIndex(*m_opt) ? ErrorCode::Success : ErrorCode::Fail;
+        }
 
         bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, const void* currentHeadVec, bool isInSplitHead)
         {
@@ -1304,9 +1502,11 @@ namespace SPTAG::SPANN {
             std::unordered_map<SizeType, std::string> batchReassign;
             std::unordered_set<SizeType> batchReassignVids;
             size_t batchReassignCount = 0;
+            ErrorCode selectionStatus = ErrorCode::Success;
 
             // Helper lambda: run RNGSelection for a vector and add to batch
             auto tryBatchReassign = [&](uint8_t* vectorId, SizeType headPrev) {
+                if (selectionStatus != ErrorCode::Success) return;
                 SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                 ValueType* vectorData = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
@@ -1323,7 +1523,9 @@ namespace SPTAG::SPANN {
                 m_stat.m_reAssignNum++;
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount;
-                bool isNeedReassign = RNGSelection(p_exWorkSpace, selections, vectorData, replicaCount, headPrev);
+                bool isNeedReassign;
+                selectionStatus = RNGSelection(p_exWorkSpace, selections, vectorData, replicaCount, isNeedReassign, headPrev);
+                if (selectionStatus != ErrorCode::Success) return;
 
                 if (isNeedReassign && m_versionMap->GetVersion(vid) == version) {
                     if (!m_versionMap->IncVersion(vid, &version, version)) {
@@ -1476,11 +1678,14 @@ namespace SPTAG::SPANN {
             m_stat.m_splitReassignSampleCount.fetch_add(1, std::memory_order_relaxed);
             m_stat.m_splitReassignRecordSampleCount.fetch_add(1, std::memory_order_relaxed);
             m_stat.m_splitReassignTargetHeadSampleCount.fetch_add(1, std::memory_order_relaxed);
-            return ret;
+            return ret == ErrorCode::Success ? selectionStatus : ret;
         }
 
-        bool RNGSelection(ExtraWorkSpace* p_exWorkSpace, std::vector<BasicResult>& selections, ValueType* queryVector, int& replicaCount, SizeType checkHeadID = -1)
+        ErrorCode RNGSelection(ExtraWorkSpace* p_exWorkSpace, std::vector<BasicResult>& selections,
+                               ValueType* queryVector, int& replicaCount, bool& needReassign, SizeType checkHeadID = -1)
         {
+            replicaCount = 0;
+            needReassign = true;
             COMMON::QueryResultSet<ValueType> queryResults(queryVector, m_opt->m_internalResultNum, false, true);
             std::shared_ptr<std::uint8_t> rec_query;
             if (m_headIndex->m_pQuantizer) {
@@ -1488,9 +1693,9 @@ namespace SPTAG::SPANN {
                 m_headIndex->m_pQuantizer->ReconstructVector((const uint8_t*)queryResults.GetTarget(), rec_query.get());
                 queryResults.SetTarget((ValueType*)(rec_query.get()), m_headIndex->m_pQuantizer);
             }
-            m_headIndex->SearchHeadIndex(queryResults, m_layer + 1, p_exWorkSpace);
+            auto ret = m_headIndex->SearchHeadIndex(queryResults, m_layer + 1, p_exWorkSpace);
+            if (ret != ErrorCode::Success) return ret;
 
-            replicaCount = 0;
             for (int i = 0; i < queryResults.GetResultNum() && replicaCount < m_opt->m_replicaCount; ++i)
             {
                 BasicResult* queryResult = queryResults.GetResult(i);
@@ -1512,11 +1717,25 @@ namespace SPTAG::SPANN {
                 selections[replicaCount] = *queryResult;
 
                 if (queryResult->VID == checkHeadID) {
-                    return false;
+                    needReassign = false;
+                    return ErrorCode::Success;
                 }
                 ++replicaCount;
             }
-            return true;
+            if (replicaCount == 0) {
+                if (checkHeadID >= 0 && m_headIndex->ContainSample(checkHeadID, m_layer + 1)) {
+                    // Reassignment is optional while the current posting remains reachable.
+                    needReassign = false;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "Routing search found no candidates in layer %d; retaining assignment to head %lld without advancing its version.\n",
+                        m_layer, static_cast<long long>(checkHeadID));
+                    return ErrorCode::Success;
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Routing search found no candidates or live previous head in layer %d.\n", m_layer);
+                return ErrorCode::VectorNotFound;
+            }
+            return ErrorCode::Success;
         }
 
 
@@ -1745,7 +1964,10 @@ namespace SPTAG::SPANN {
             auto selectBegin = std::chrono::high_resolution_clock::now();
             std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
             int replicaCount;
-            bool isNeedReassign = RNGSelection(p_exWorkSpace, selections, (ValueType*)(vectorInfo->c_str() + m_metaDataSize), replicaCount, headPrev);
+            bool isNeedReassign;
+            auto selectionStatus = RNGSelection(p_exWorkSpace, selections,
+                (ValueType*)(vectorInfo->c_str() + m_metaDataSize), replicaCount, isNeedReassign, headPrev);
+            if (selectionStatus != ErrorCode::Success) return selectionStatus;
             auto selectEnd = std::chrono::high_resolution_clock::now();
             auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(selectEnd - selectBegin).count();
             m_stat.m_selectCost += elapsedMSeconds;
@@ -1790,16 +2012,24 @@ namespace SPTAG::SPANN {
 
         bool LoadIndex(Options& p_opt) override {
             m_opt = &p_opt;
+            const auto loadVersions = [&](const std::string& path) {
+                auto ret = m_versionMap->Load(path, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load layer %d version map %s: %d.\n",
+                        m_layer, path.c_str(), static_cast<int>(ret));
+                }
+                return ret == ErrorCode::Success;
+            };
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %lld, Capacity: %lld\n", (std::int64_t)(m_opt->m_datasetRowsInBlock), (std::int64_t)(m_opt->m_datasetCapacity));
             std::string versionmapPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
             if (m_opt->m_recovery) {
                 versionmapPath = m_opt->m_persistentBufferPath + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading version map\n");
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (!loadVersions(versionmapPath)) return false;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             }
             else if (m_opt->m_storage == Storage::ROCKSDBIO || m_opt->m_storage == Storage::TIKVIO) {
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (!loadVersions(versionmapPath)) return false;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
@@ -1872,7 +2102,7 @@ namespace SPTAG::SPANN {
                 if (ret != ErrorCode::Success)
                     return false;
 		    } else {
-                m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                if (!loadVersions(versionmapPath)) return false;
             } 
 	    }
             if (m_opt->m_update) {
@@ -2001,7 +2231,7 @@ namespace SPTAG::SPANN {
                     queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
-                if (m_opt->m_asyncMergeInSearch && realNum <= m_mergeThreshold) MergeAsync(curPostingID); // TODO: Control merge
+                if (m_opt->m_asyncMergeInSearch && m_headIndex->AllowSearchMaintenance() && realNum <= m_mergeThreshold) MergeAsync(curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
@@ -2849,7 +3079,10 @@ namespace SPTAG::SPANN {
                 uint8_t version = m_versionMap->GetVersion(VID);
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
-                RNGSelection(p_exWorkSpace, selections, (ValueType*)(p_vectorSet->GetVector(v)), replicaCount);
+                bool needReassign;
+                auto selectionStatus = RNGSelection(p_exWorkSpace, selections,
+                    (ValueType*)(p_vectorSet->GetVector(v)), replicaCount, needReassign);
+                if (selectionStatus != ErrorCode::Success) return selectionStatus;
 
                 std::string appendPosting(m_vectorInfoSize, '\0');
                 Serialize((char*)(appendPosting.c_str()), VID, version, p_vectorSet->GetVector(v));
@@ -3114,9 +3347,15 @@ namespace SPTAG::SPANN {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - waitStart).count();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Checkpoint: layer %d background jobs done (waited %lld s)\n", m_layer, (long long)elapsed);
             }
+            if (m_asyncStatus != ErrorCode::Success &&
+                (m_opt->m_enableDynamicLayers || !m_opt->m_layerStoragePrefixes.empty())) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot checkpoint dynamic layer %d after failed maintenance: %d.\n",
+                    m_layer, static_cast<int>(m_asyncStatus.load()));
+                return m_asyncStatus.load();
+            }
             if (m_asyncStatus != ErrorCode::Success) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Checkpoint: resetting transient async error (code=%d) for layer %d\n",
-                             (int)m_asyncStatus, m_layer);
+                             (int)m_asyncStatus.load(), m_layer);
                 m_asyncStatus = ErrorCode::Success;
             }
             std::string p_persistenMap = prefix + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
@@ -3126,7 +3365,8 @@ namespace SPTAG::SPANN {
             if ((ret = m_versionMap->Save(p_persistenMap)) != ErrorCode::Success)
                 return ret;
 
-            if (!m_opt->m_shareDB) {
+            if (!m_opt->m_shareDB ||
+                m_headIndex->LayerStoragePrefix(m_layer) != m_headIndex->LayerStoragePrefix(0)) {
                 if ((ret = db->Checkpoint(prefix)) != ErrorCode::Success)
                     return ret;
             }
@@ -3165,7 +3405,7 @@ namespace SPTAG::SPANN {
         std::chrono::microseconds m_hardLatencyLimit = std::chrono::microseconds(2000);
 
         int m_mergeThreshold = 10;
-        ErrorCode m_asyncStatus = ErrorCode::Success;
+        std::atomic<ErrorCode> m_asyncStatus{ErrorCode::Success};
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;

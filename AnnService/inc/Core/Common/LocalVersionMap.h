@@ -62,6 +62,18 @@ namespace SPTAG
                 if (iter == m_label.end()) return 0xfe;
                 return iter->second; 
             }
+            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
+            {
+                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
+            }
+            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions,
+                                  VersionReadPolicy) override
+            {
+                // Count is sparse membership size, not an upper bound on global VIDs.
+                versions.resize(vids.size());
+                for (size_t i = 0; i < vids.size(); ++i)
+                    versions[i] = vids[i] < 0 ? 0xfe : GetVersion(vids[i]);
+            }
             void SetVersion(SizeType& key, uint8_t& version) override { 
                 m_label.insert_or_assign(std::forward<SizeType>(key), std::forward<uint8_t>(version));
             }

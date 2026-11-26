@@ -69,7 +69,7 @@ namespace SPTAG
 
             SizeType m_addCountForRebuild;
             float m_fDeletePercentageForRefine;
-            std::mutex m_dataAddLock; // protect data and graph
+            mutable std::mutex m_dataAddLock; // protect data and graph
             std::shared_timed_mutex m_dataDeleteLock;
             COMMON::LabelSet m_deletedID;
             
@@ -132,6 +132,7 @@ namespace SPTAG
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
                 buffersize->push_back(m_pSamples.BufferSize());
                 buffersize->push_back(m_pTrees.BufferSize());

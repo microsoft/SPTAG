@@ -466,5 +466,6 @@ FodyWeavers.xsd
 
 # SPTAG benchmark generated artifacts
 *perftest_*
-/benchmark-output/
+/benchmark-output/*
+!/benchmark-output/sift11m-auto-lifecycle/
 /quickstart-output/

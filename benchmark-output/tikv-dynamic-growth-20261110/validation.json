@@ -1,0 +1,154 @@
+{
+  "status": "passed",
+  "scope": "Small synthetic functional validation on a real single-host three-replica TiKV cluster; not a SIFT5M-to-10M benchmark",
+  "source_commit": "c0b527e826f75168b42c57f5ee1ffee65cc0a7b3",
+  "binary_sha256": "c4535e86b1e4d61769566610db580401bc56cc345ae0c815b0d8714c29d5ac5e",
+  "attempt_directory": "attempts/20261110T020831Z",
+  "pd_nodes": 3,
+  "tikv_nodes": 3,
+  "replica_validation": {
+    "regions_before": 5,
+    "regions_after": 5,
+    "voters_per_region": 3,
+    "pending_or_down_peers": 0,
+    "evidence": ["regions-before.json", "regions-after.json"]
+  },
+  "default_regressions": {
+    "selector": "DynamicLayerTest:TiKVIOTest",
+    "cases": 14,
+    "status": "passed",
+    "integration_suite_excluded": true
+  },
+  "real_cluster_test": {
+    "selector": "TiKVDynamicLayerIntegrationTest/RealTiKVGrowthAndReload",
+    "status": "passed",
+    "dimension": 128,
+    "initial_vectors": 64,
+    "first_insert_batch": 64,
+    "subsequent_insert_batch": 8,
+    "total_inserted_vectors": 136,
+    "deleted_vid": 64,
+    "final_live_vectors": 135,
+    "checks": [
+      "Posting overflow creates new heads and triggers automatic growth",
+      "Posting layers change from one to two",
+      "Replacement head remains within the configured memory target",
+      "Queries continue during insertion and growth without errors",
+      "Insertion continues after growth",
+      "Every retained vector is its exact nearest neighbor",
+      "The deleted VID is excluded from search",
+      "Enumerated live IDs exactly match the expected set before and after reload",
+      "Layer storage prefixes and topology survive save/reload",
+      "Reloaded index Check() succeeds"
+    ],
+    "configurations": [
+      {
+        "distributed_version_map": false,
+        "old_head_vectors": 67,
+        "old_head_memory_estimate_bytes": 14070,
+        "new_head_vectors": 6,
+        "new_head_memory_estimate_bytes": 1470,
+        "base_vectors_at_growth": 128,
+        "concurrent_queries": 105,
+        "concurrent_query_errors": 0
+      },
+      {
+        "distributed_version_map": true,
+        "old_head_vectors": 67,
+        "old_head_memory_estimate_bytes": 14070,
+        "new_head_vectors": 6,
+        "new_head_memory_estimate_bytes": 1470,
+        "base_vectors_at_growth": 128,
+        "concurrent_queries": 432,
+        "concurrent_query_errors": 0
+      }
+    ]
+  },
+  "timeout_seconds": 3600,
+  "timeout_triggered": false,
+  "workload_elapsed_seconds_including_cluster_startup": 17.110374065930955,
+  "elapsed_seconds_including_cleanup": 48.26208375394344,
+  "cleanup": {
+    "owned_containers_stopped": 6,
+    "all_exit_codes_zero": true,
+    "oom_killed": false,
+    "database_index_and_logs_retained": true,
+    "removed_only_our_failed_attempt_reservation": "attempts/20261110T015918Z/cluster/tikv1/tikv/space_placeholder_file",
+    "reservation_bytes_released": 76187717386
+  },
+  "large_scale_launch_evidence": {
+    "status_at_recording": "running; no full-scale success claimed",
+    "attempt_directory": "large-attempts/20261110T024436Z",
+    "source_commit": "f315a88e1cfff7a015e488e973be18ad6d0ac307",
+    "current_phase_at_recording": "building initial real SIFT5M index",
+    "three_replicas_presplit_and_balanced": true,
+    "posting_buckets": 128,
+    "version0_buckets": 128,
+    "initial_5m_payload_byte_for_byte_verified": true,
+    "initial_5m_payload_sha256": "2265a6e6400657a9beac8e5bb6810d3f2b806fa0cbaac67cd855d522bf45e8f5",
+    "phase_timeout_seconds": 3600,
+    "memory_high_watermark_bytes": 209715200,
+    "replacement_head_target_bytes": 25165824,
+    "excluded_attempt": "large-attempts/20261110T024118Z: stopped after detecting INI whitespace caused random-data fallback; not a valid SIFT measurement",
+    "progress_file": "large-attempts/20261110T024436Z/status.json"
+  },
+  "latest_large_attempt": {
+    "status_at_recording": "failed: disk safety stop during first insertion batch; full-scale growth not validated",
+    "attempt_directory": "large-attempts/20261110T025741Z",
+    "progress_file": "large-attempts/20261110T025741Z/status.json",
+    "source_commit": "3ac50cc71f1b3a62806c4aa22faa2b48c5e1fdcd",
+    "binary_sha256": "8d828bfce5856fea004900d97a45fc4c3d4515b108d67b38d9be4ffa5a82f156",
+    "completed_initial_build": {
+      "vectors": 5000000,
+      "posting_layers": 1,
+      "recall5": 0.9776,
+      "independent_reload_and_exact_live_id_enumeration": "passed: IDs exactly [0,5000000)"
+    },
+    "first_insert_batch": {
+      "status": "incomplete; not a successful batch",
+      "last_reported_progress_percent": 34,
+      "last_reported_vector_count": 5339981,
+      "failure": "Available storage fell below the unchanged 250 GiB safety floor",
+      "automatic_local_checkpoint_resume": false
+    },
+    "shutdown": {
+      "all_six_owned_nodes_stopped": true,
+      "tikv1_exit_code": 137,
+      "tikv1_oom_killed": false,
+      "other_five_exit_codes": 0,
+      "clean_shutdown": false,
+      "note": "The cluster stop exceeded its grace period for tikv1; this is recorded as a failure, not successful shutdown"
+    },
+    "disk_diagnostics": {
+      "owned_attempt_gib_before_reservation_cleanup_approximately": 311,
+      "tikv1_raft_engine_gib_approximately": 42,
+      "owned_regenerable_reservation_bytes_released_after_all_nodes_stopped": 228563152158,
+      "database_index_and_logs_retained": true,
+      "free_space_gib_after_own_cleanup_approximately": 466
+    },
+    "previous_attempt": {
+      "attempt_directory": "large-attempts/20261110T024436Z",
+      "benchmark_exit_successful": true,
+      "saved_base_vectors": 5000000,
+      "recall5": 0.9772,
+      "failure": "Build-only benchmark output had a trailing comma; strict JSON parsing correctly stopped the driver",
+      "insertion_batches_started": 0,
+      "fix": "Only emit the result comma when an insertion section follows"
+    },
+    "focused_regressions_after_fix": {
+      "command": "python3 benchmark-output/tikv-dynamic-growth-20261110/test_runner.py -v",
+      "tests": 4,
+      "status": "passed",
+      "benchmark_insert_counts_checked": [0, 1000],
+      "other_checks": ["all seven exact-truth slices", "INI path whitespace", "reject random fallback even when the child exits zero"]
+    }
+  },
+  "limitations": [
+    "The full TiKV run stopped below the disk safety floor during its first 1M insertion batch; large-scale automatic growth and final 10M quality remain unverified",
+    "The initial 500 GiB disk-space blocker was resolved by user-approved removal of exactly three old reservation files; the corrected run started with approximately 593 GiB free",
+    "No SIFT recall or TiKV throughput claim follows from the synthetic functional test",
+    "No node-restart, power-loss, or multi-host fault-tolerance test",
+    "Earlier fixture attempts were corrected for missing posting overflow and differing local/distributed Count semantics; ordinary regression filters were isolated from the external-cluster suite",
+    "One immediate rerun failed port preflight with address already in use; the subsequent clean-cluster attempt passed"
+  ]
+}

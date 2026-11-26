@@ -22,8 +22,10 @@ namespace SPTAG
 		public:
 			SPANNResultIterator(const Index<T>* p_spannIndex, const VectorIndex* p_index, const void* p_target,
 				std::unique_ptr<SPANN::ExtraWorkSpace> p_extraWorkspace,
-				int p_batch, int p_maxCheck): ResultIterator(p_index, p_target, false, p_batch, nullptr, p_maxCheck),
+				int p_batch, int p_maxCheck,
+                std::shared_lock<LayerMutex> p_topologyLock = {}): ResultIterator(p_index, p_target, false, p_batch, nullptr, p_maxCheck),
 				m_spannIndex(p_spannIndex),
+                m_topologyLock(std::move(p_topologyLock)),
                 m_extraWorkspace(std::move(p_extraWorkspace)), 
 				m_errorCode(ErrorCode::Success)
 		    {
@@ -37,6 +39,7 @@ namespace SPTAG
 
 			virtual std::shared_ptr<QueryResult> Next(int batch)
 			{
+                LayerReadLock context(m_spannIndex->m_layerMutex, m_topologyLock.owns_lock(), true);
 				if (m_queryResult == nullptr) {
 					m_queryResult = std::make_unique<QueryResult>(m_target, batch, true);
 				}
@@ -77,15 +80,18 @@ namespace SPTAG
 
 			virtual void Close()
 			{
+                LayerReadLock context(m_spannIndex->m_layerMutex, m_topologyLock.owns_lock(), true);
 				ResultIterator::Close();
 			   if (m_extraWorkspace != nullptr) {
 				   m_spannIndex->SearchIndexIterativeEnd(std::move(m_extraWorkspace));
 				   m_extraWorkspace = nullptr;
 			   }
+               if (m_topologyLock.owns_lock()) m_topologyLock.unlock();
 			}
 
 		private:
 			const Index<T>* m_spannIndex;
+            std::shared_lock<LayerMutex> m_topologyLock;
 			std::unique_ptr<QueryResult> m_headQueryResult;
 			std::unique_ptr<SPANN::ExtraWorkSpace> m_extraWorkspace;
             ErrorCode m_errorCode;
