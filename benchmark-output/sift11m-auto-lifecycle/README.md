@@ -4,6 +4,69 @@
 
 ### Current policy: existing ordinary merge only
 
+### 2026-11-26: unlimited-duration 5M result -- shrinking not accepted
+
+Run `sift-20261125-5m-ordinary32-unlimited` used fresh full-size growth
+calibration, `MergeThreshold=32`, `DisableReassign=false`, and
+`--phase-timeout-seconds 0`. The formal workload was
+4.5M -> 5.5M -> 4.5M, deleting 20 fixed-seed random batches of 50K users.
+No manual merge or resize was used. Search budgets and Recall@5 >=0.95
+acceptance were unchanged.
+
+The frozen head-memory thresholds were high **269779125**, target
+**264383542**, and low **253592377** bytes.
+
+| Formal checkpoint | Live users | Layers | Routing heads | Recall@5 round 1 / 2 |
+| --- | ---: | ---: | ---: | --- |
+| Initial, before query maintenance | 4500000 | 1 | 905124 | 0.96726 / 0.96670 |
+| Insert batch 10 | 5000000 | 2 | 779104 | 0.96618 / 0.96614 |
+| Insert batch 20 | 5500000 | 2 | 783877 | 0.96576 / 0.96582 |
+| Delete batch 10 | 5000000 | 2 | 782219 | 0.96464 / 0.96480 |
+| Delete batch 20 | 4500000 | 2 | 779134 | 0.96430 / 0.96424 |
+| Final convergence sweep 112 | 4500000 | 2 | 775071 | Not separately evaluated |
+
+Each recall checkpoint used two rounds of 10000 native queries, Top5, with
+zero deleted-result hits. All deletion batches completed, but the final
+15-minute convergence window still ended with two layers. The test exited
+**201** with:
+
+```text
+Random deletion to the final count did not trigger shrink with the frozen memory thresholds
+```
+
+The formal phase ran about **19h 47m 35s**. This was neither an eight-hour
+wall-clock stop nor a resource-guard stop: the monitored minimum free disk
+was about **30.13 GiB** and peak sampled RSS about **6.46 GiB**. Routing heads
+fell by only **8806 (1.12%)** from the insertion peak to the last convergence
+snapshot. Longer execution completed the deletions, but did not establish
+automatic shrinking under this workload and frozen configuration.
+
+**Accepted observations:** automatic growth 1 -> 2, completed random deletion,
+and recall above 0.95. **Not accepted:** shrinking 2 -> 1 and final one-layer
+reload; the reload block was not reached. Disabling the outer phase deadline
+does not disable internal maintenance/resize/convergence deadlines.
+
+The retained local run directory contains `metrics.jsonl`, `status.json`,
+`formal-resources.csv`, `formal.log`, calibration/configuration snapshots and
+the failed formal index. These generated files are not committed. The
+runner's unlimited/explicit deadline behavior and retained disk guard are
+covered by the 13 passing focused Python tests.
+
+### Running the ordinary-merge lifecycle
+
+To run the 5M lifecycle without the default eight-hour phase deadline:
+
+```bash
+python3 run_experiment.py --run-id UNIQUE_5M_RUN_ID --pivot-count 5000000 \
+  --merge-threshold 32 --growth-calibration --discard-growth-index \
+  --phase-timeout-seconds 0
+```
+
+`--phase-timeout-seconds` overrides each calibration/formal phase's wall-clock
+limit; zero means unlimited. Omitting it preserves the existing defaults.
+Disk/RSS guards and the driver's maintenance, resize and convergence deadlines
+remain active. This starts fresh, not from an interrupted deletion checkpoint.
+
 For a bounded real-SIFT mechanism check, use:
 
 ```bash

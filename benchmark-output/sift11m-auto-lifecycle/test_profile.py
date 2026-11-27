@@ -118,6 +118,36 @@ class GrowthThresholdTest(unittest.TestCase):
 
 
 class DiskGuardTest(unittest.TestCase):
+    def test_unlimited_formal_phase_can_run_beyond_eight_hours(self):
+        child = mock.Mock()
+        child.pid = 1234
+        child.poll.side_effect = [None, 0, 0]
+        child.returncode = 0
+        with tempfile.TemporaryDirectory(prefix="sptag-unlimited-deadline-") as directory:
+            with mock.patch("run_experiment.subprocess.Popen", return_value=child), \
+                    mock.patch("run_experiment.shutil.disk_usage", return_value=mock.Mock(free=100 * GIB)), \
+                    mock.patch("run_experiment.time.monotonic", side_effect=[0, 36001]), \
+                    mock.patch("run_experiment.pathlib.Path.read_text", return_value="VmRSS: 1024 kB\nVmHWM: 1024 kB\n"), \
+                    mock.patch("run_experiment.time.sleep"):
+                run_phase(pathlib.Path(directory), "formal",
+                          {"high": 1000, "target": 980, "low": 940},
+                          pivot=5_000_000, merge_threshold=32, phase_timeout_seconds=0)
+        child.terminate.assert_not_called()
+
+    def test_explicit_formal_deadline_overrides_default(self):
+        child = mock.Mock()
+        child.pid = 1234
+        child.poll.return_value = None
+        with tempfile.TemporaryDirectory(prefix="sptag-explicit-deadline-") as directory:
+            with mock.patch("run_experiment.subprocess.Popen", return_value=child), \
+                    mock.patch("run_experiment.shutil.disk_usage", return_value=mock.Mock(free=100 * GIB)), \
+                    mock.patch("run_experiment.time.monotonic", side_effect=[0, 901]):
+                with self.assertRaisesRegex(TimeoutError, "formal exceeded its wall-clock deadline"):
+                    run_phase(pathlib.Path(directory), "formal",
+                              {"high": 1000, "target": 980, "low": 940},
+                              pivot=5_000_000, phase_timeout_seconds=900)
+        child.terminate.assert_called_once()
+
     def test_small_workload_stops_after_ten_minutes(self):
         child = mock.Mock()
         child.pid = 1234
@@ -155,7 +185,7 @@ class DiskGuardTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "disk free 29.00 GiB below 30 GiB guard"):
                     run_phase(pathlib.Path(directory), "growth-calibration",
                               {"high": 1000, "target": 980, "low": 940},
-                              pivot=5_000_000, merge_threshold=32)
+                              pivot=5_000_000, merge_threshold=32, phase_timeout_seconds=0)
         child.terminate.assert_called_once()
         child.wait.assert_called_once_with(timeout=30)
 

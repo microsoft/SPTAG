@@ -27,7 +27,7 @@ def interrupt(signum, frame):
 
 
 def run_phase(directory, mode, thresholds, test_case="AutomaticLifecycle", calibration_index=None,
-              pivot=10_000_000, merge_threshold=10):
+              pivot=10_000_000, merge_threshold=10, phase_timeout_seconds=None):
     output = directory / f"{mode}-index"
     environment = os.environ.copy()
     environment.update({
@@ -50,13 +50,17 @@ def run_phase(directory, mode, thresholds, test_case="AutomaticLifecycle", calib
     command = [str(REPO / "Release/SPTAGTest"), f"--run_test=SiftLifecycleTest/{test_case}",
                "--log_level=test_suite", "--color_output=no"]
     disk_floor = (20 if pivot == 16384 else 30) * GIB
+    deadline = phase_timeout_seconds
+    if deadline is None:
+        deadline = 600 if pivot == 16384 else (2 if mode == "pilot" else 8) * 3600
     started = time.monotonic()
     with (directory / f"{mode}.log").open("w") as log, (directory / f"{mode}-resources.csv").open("w") as memory:
         writer = csv.writer(memory)
         writer.writerow(["elapsed_seconds", "rss_kib", "peak_rss_kib", "disk_free_bytes"])
         process = subprocess.Popen(command, cwd=REPO, env=environment, stdout=log, stderr=subprocess.STDOUT)
         atomic_json(directory / "status.json", {"phase": mode, "pid": process.pid, "state": "running",
-                                              "thresholds": thresholds, "started_unix": time.time()})
+                                              "thresholds": thresholds, "started_unix": time.time(),
+                                              "phase_timeout_seconds": deadline})
         print(f"Started {mode}: pid={process.pid}, log={log.name}", flush=True)
         try:
             while process.poll() is None:
@@ -67,8 +71,7 @@ def run_phase(directory, mode, thresholds, test_case="AutomaticLifecycle", calib
                         f"Stopping experiment: disk free {free / GIB:.2f} GiB below "
                         f"{disk_floor / GIB:.0f} GiB guard"
                     )
-                deadline = 600 if pivot == 16384 else (2 if mode == "pilot" else 8) * 3600
-                if elapsed > deadline:
+                if deadline > 0 and elapsed > deadline:
                     raise TimeoutError(f"{mode} exceeded its wall-clock deadline")
                 status = pathlib.Path(f"/proc/{process.pid}/status")
                 try:
@@ -131,7 +134,11 @@ def main():
                         help="Calibrate and test the ordinary-merge lifecycle at 1/10 chosen scale")
     parser.add_argument("--discard-growth-index", action="store_true",
                         help="Remove only this run's successful growth-calibration index before formal build")
+    parser.add_argument("--phase-timeout-seconds", type=int, default=None,
+                        help="Override each phase's wall-clock limit; 0 disables it, retaining resource guards")
     args = parser.parse_args()
+    if args.phase_timeout_seconds is not None and args.phase_timeout_seconds < 0:
+        parser.error("--phase-timeout-seconds must be non-negative")
     if args.merge_pilot_only and not args.growth_calibration:
         raise ValueError("merge-pilot-only requires growth-calibration")
     if args.merge_pilot_only and args.pivot_count == 16384:
@@ -207,8 +214,10 @@ def main():
             "calibration": ("same acceptance scale growth; high=measured pivot head bytes; target=0.98*high; "
                             "low=0.94*high (deletion-side hypothesis)" if args.growth_calibration else
                             "1/10 scale; high=10*pilot head bytes at 1M; target=0.98*high; low=0.94*high"),
-            "pilot_timeout_seconds": 600 if small else 7200,
-            "formal_timeout_seconds": 600 if small else 28800,
+            "pilot_timeout_seconds": (args.phase_timeout_seconds if args.phase_timeout_seconds is not None
+                                      else 600 if small else 7200),
+            "formal_timeout_seconds": (args.phase_timeout_seconds if args.phase_timeout_seconds is not None
+                                       else 600 if small else 28800),
             "disk_stop_bytes": (20 if small else 30) * GIB,
             "disk_monitor_interval_seconds": 1,
         })
@@ -216,7 +225,8 @@ def main():
             growth_mode = "pilot" if args.merge_pilot_only else "growth-calibration"
             growth_index = run_phase(directory, growth_mode,
                                      {"high": 10**12, "target": 9 * 10**11, "low": 8 * 10**11},
-                                     pivot=args.pivot_count, merge_threshold=args.merge_threshold)
+                                     pivot=args.pivot_count, merge_threshold=args.merge_threshold,
+                                     phase_timeout_seconds=args.phase_timeout_seconds)
             metrics_name = "pilot-metrics.jsonl" if args.merge_pilot_only else "growth-metrics.jsonl"
             snapshots = [json.loads(line) for line in (directory / metrics_name).read_text().splitlines()]
             thresholds = thresholds_from_growth(snapshots, args.pivot_count // 10 if args.merge_pilot_only else args.pivot_count)
@@ -233,7 +243,8 @@ def main():
                 raise RuntimeError(f"At least {required_free} GiB free required before formal build")
             print(f"Frozen measured-growth thresholds: {thresholds}", flush=True)
             run_phase(directory, "merge-pilot" if args.merge_pilot_only else "formal", thresholds,
-                      pivot=args.pivot_count, merge_threshold=args.merge_threshold)
+                      pivot=args.pivot_count, merge_threshold=args.merge_threshold,
+                      phase_timeout_seconds=args.phase_timeout_seconds)
             atomic_json(directory / "status.json", {"state": "passed", "phase": "complete", "thresholds": thresholds})
             return
         if args.fullscale_calibration_run:
@@ -249,7 +260,7 @@ def main():
                 raise ValueError("Invalid full-scale calibration thresholds")
             atomic_json(directory / "frozen-thresholds.json", thresholds)
             print(f"Frozen full-scale thresholds: {thresholds}", flush=True)
-            run_phase(directory, "formal", thresholds)
+            run_phase(directory, "formal", thresholds, phase_timeout_seconds=args.phase_timeout_seconds)
             atomic_json(directory / "status.json", {"state": "passed", "phase": "complete", "thresholds": thresholds})
             return
         calibration = directory
@@ -261,7 +272,8 @@ def main():
             if recorded.get("baseline_profile_sha256") != profile_hash:
                 raise ValueError("Calibration profile differs from matched configuration; recalibrate from scratch")
         else:
-            run_phase(directory, "pilot", {"high": 10**12, "target": 9 * 10**11, "low": 8 * 10**11})
+            run_phase(directory, "pilot", {"high": 10**12, "target": 9 * 10**11, "low": 8 * 10**11},
+                      phase_timeout_seconds=args.phase_timeout_seconds)
         snapshots = [json.loads(line) for line in (calibration / "pilot-metrics.jsonl").read_text().splitlines()]
         if not any(row.get("phase") == "complete" and row.get("live") == 1100000 and row.get("layers") == 1
                    for row in snapshots):
@@ -276,7 +288,7 @@ def main():
             shutil.copy2(calibration / "pilot-metrics.jsonl", directory / "pilot-metrics.jsonl")
         atomic_json(directory / "frozen-thresholds.json", thresholds)
         print(f"Frozen formal thresholds: {thresholds}", flush=True)
-        run_phase(directory, "formal", thresholds)
+        run_phase(directory, "formal", thresholds, phase_timeout_seconds=args.phase_timeout_seconds)
         atomic_json(directory / "status.json", {"state": "passed", "phase": "complete", "thresholds": thresholds})
     except BaseException as error:
         status_path = directory / "status.json"
