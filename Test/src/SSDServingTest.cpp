@@ -784,11 +784,14 @@ BOOST_AUTO_TEST_CASE(RequestBuffersFollowStorageLayout)
     auto checkLayout = [&](const char* storage, bool blockIO, int postings, int pages) {
         index.SetParameter("Storage", storage, "BuildSSDIndex");
         index.SetParameter("SearchInternalResultNum", std::to_string(postings).c_str(), "BuildSSDIndex");
+        index.SetParameter("PostingPageLimit", std::to_string(pages - 3).c_str(), "BuildSSDIndex");
+        index.SetParameter("SearchPostingPageLimit", std::to_string(pages - 3).c_str(), "BuildSSDIndex");
         index.InitWorkSpace(&workspace, true);
         BOOST_CHECK_EQUAL(workspace.m_blockIO, blockIO);
         const int requestsPerPosting = blockIO ? pages : 1;
         BOOST_REQUIRE_EQUAL(workspace.m_diskRequests.size(), postings * requestsPerPosting);
         for (int posting = 0; posting < postings; ++posting) {
+            BOOST_CHECK_EQUAL(workspace.m_pageBuffers[posting].GetPageSize(), pages << SPTAG::PageSizeEx);
             auto* buffer = reinterpret_cast<char*>(workspace.m_pageBuffers[posting].GetBuffer());
             for (int page = 0; page < requestsPerPosting; ++page) {
                 auto& request = workspace.m_diskRequests[posting * requestsPerPosting + page];
@@ -803,6 +806,9 @@ BOOST_AUTO_TEST_CASE(RequestBuffersFollowStorageLayout)
     checkLayout("STATIC", false, 32, 15);
     checkLayout("STATIC", false, 64, 15);
     checkLayout("FILEIO", true, 64, 15);
+    checkLayout("FILEIO", true, 64, 7);
+    checkLayout("STATIC", false, 64, 15);
+    checkLayout("FILEIO", true, 32, 6);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

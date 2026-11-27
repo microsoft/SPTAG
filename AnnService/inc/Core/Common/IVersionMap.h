@@ -76,6 +76,12 @@ namespace SPTAG
                     }
                 }
             }
+
+            virtual ErrorCode ReadVersionsForMaintenance(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions)
+            {
+                BatchGetVersions(vids, versions, VersionReadPolicy::BypassCacheNoFill);
+                return ErrorCode::Success;
+            }
         };
     }
 }

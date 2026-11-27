@@ -429,6 +429,9 @@ namespace SPTAG {
         {
             ExtraWorkSpace() {}
 
+            std::weak_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_workspaceOwner;
+            int m_workspaceId = -1;
+
             ~ExtraWorkSpace() {
                 if (m_callback) {
                     m_callback();
@@ -457,8 +460,15 @@ namespace SPTAG {
             }
 
             void Clear(int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
-                if (p_internalResultNum > m_pageBuffers.size() || p_maxPages > m_pageBuffers[0].GetPageSize()) {
+                const size_t requests = static_cast<size_t>(p_internalResultNum) *
+                    (p_blockIO ? (p_maxPages >> PageSizeEx) : 1);
+                const bool pageSizeChanged = !m_pageBuffers.empty() &&
+                    p_maxPages != m_pageBuffers[0].GetPageSize();
+                if (m_pageBuffers.empty() || p_internalResultNum > m_pageBuffers.size() ||
+                    pageSizeChanged || p_blockIO != m_blockIO ||
+                    m_diskRequests.size() != requests) {
                     m_postingIDs.reserve(p_internalResultNum);
+                    if (pageSizeChanged) m_pageBuffers.clear();
                     m_pageBuffers.resize(p_internalResultNum);
                     for (int pi = 0; pi < p_internalResultNum; pi++) {
                         m_pageBuffers[pi].ReservePageBuffer(p_maxPages);

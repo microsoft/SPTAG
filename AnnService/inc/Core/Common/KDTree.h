@@ -142,6 +142,7 @@ break;
 
             inline std::uint64_t BufferSize() const 
             { 
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 return sizeof(int) + sizeof(SizeType) * m_iTreeNumber + 
                     sizeof(SizeType) + sizeof(KDTNode) * m_pTreeRoots.size();
             }

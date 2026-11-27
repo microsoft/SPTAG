@@ -20,6 +20,11 @@ Use a matching ID width when saving/loading. Whole-index checkpoint consistency
 still requires the calling workflow's synchronization; per-operation map
 locking does not make an entire multi-step checkpoint atomic.
 
+`Count()` is the number of stored entries, not the largest global VID plus one.
+Batch version lookup uses sparse membership just like individual lookup; a live
+VID larger than `Count()` must not be filtered out. This matters when upper
+posting layers contain only a subset of the corpus's global IDs.
+
 Earlier user documentation described a segmented atomic bitmap and a different
 TBB-accessor implementation. That description does not match this branch's
 `LocalVersionMap` and is not a current compatibility or performance claim.

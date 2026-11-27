@@ -7,6 +7,7 @@
 #include "inc/Core/Common.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
+#include <algorithm>
 #include <string>
 
 namespace SPTAG {
@@ -214,6 +215,25 @@ namespace SPTAG {
             int m_resumeLayer;
             SizeType m_maxID;
             bool m_shareDB;
+            bool m_enableDynamicLayers;
+            bool m_enableDynamicLayerShrink;
+            std::uint64_t m_headMemoryHighWatermark;
+            std::uint64_t m_headMemoryTarget;
+            std::uint64_t m_headMemoryLowWatermark;
+            int m_maxLayers;
+            int m_layerResizeTimeoutSeconds;
+            int m_layerResizeCooldownSeconds;
+            std::string m_layerStoragePrefixes;
+
+            int GetIOThreadCount() const
+            {
+                const int threads = (std::max)(m_searchThreadNum, m_iSSDNumberOfThreads);
+                if (m_storage == Storage::STATIC) return threads;
+                const int layers = m_storage == Storage::FILEIO && m_enableDynamicLayers
+                    ? (std::max)(m_layers, m_maxLayers) : m_layers;
+                return (std::max)(m_ioThreads, 2 * threads +
+                    (layers + 1) * (m_insertThreadNum + m_reassignThreadNum + m_appendThreadNum));
+            }
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
@@ -299,6 +319,20 @@ namespace SPTAG {
                     ;
                 }
                 else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildSSDIndex")) {
+                    const bool memoryParameter =
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryHighWatermark") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryLowWatermark") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "HeadMemoryTarget");
+                    const bool resizeParameter = memoryParameter ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayers") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "EnableDynamicLayerShrink") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "LayerResizeCooldownSeconds") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "MaxLayers") ||
+                        Helper::StrUtils::StrEqualIgnoreCase(p_param, "LayerResizeTimeoutSeconds");
+                    if (memoryParameter && std::strchr(p_value, '-')) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid nonnegative memory parameter %s=%s.\n", p_param, p_value);
+                        return ErrorCode::FailedParseValue;
+                    }
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \
     if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
@@ -307,6 +341,11 @@ namespace SPTAG {
         if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \
             VarName = tmp; \
+        } \
+        else if (resizeParameter) \
+        { \
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Invalid dynamic-layer parameter %s=%s.\n", RepresentStr, p_value); \
+            return ErrorCode::FailedParseValue; \
         } \
     }
 

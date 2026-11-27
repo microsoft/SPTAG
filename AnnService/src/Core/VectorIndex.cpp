@@ -333,6 +333,9 @@ void VectorIndex::BuildMetaMapping(bool p_checkDeleted)
 
 ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteArray> &p_indexBlobs, std::vector<SizeType>* p_mapping)
 {
+    std::unique_ptr<SaveOperationGuard> operation;
+    auto guardStatus = AcquireSaveGuard(operation);
+    if (guardStatus != ErrorCode::Success) return guardStatus;
     if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
         return ErrorCode::EmptyIndex;
 
@@ -386,6 +389,9 @@ ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteAr
 
 ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<SizeType>* p_mapping)
 {
+    std::unique_ptr<SaveOperationGuard> operation;
+    auto guardStatus = AcquireSaveGuard(operation);
+    if (guardStatus != ErrorCode::Success) return guardStatus;
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SaveIndex(%s) begin...ready:%d GetNumSamples():%d GetNumDeleted():%d\n",
                  p_folderPath.c_str(), m_bReady, GetNumSamples(), GetNumDeleted());
     if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
@@ -402,7 +408,8 @@ ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<Si
             return ErrorCode::Fail;
         }
 
-        SetParameter("IndexDirectory", p_folderPath, "Base");
+        if ((ret = SetParameter("IndexDirectory", p_folderPath, "Base")) != ErrorCode::Success)
+            return ret;
         auto configFile = SPTAG::f_createIO();
         if (configFile == nullptr || !configFile->Initialize((p_folderPath + FolderSep + "indexloader.ini").c_str(), std::ios::out))
             return ErrorCode::FailedCreateFile;
@@ -476,6 +483,9 @@ ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<Si
 
 ErrorCode VectorIndex::SaveIndexToFile(const std::string &p_file, IAbortOperation *p_abort, std::vector<SizeType>* p_mapping)
 {
+    std::unique_ptr<SaveOperationGuard> operation;
+    auto guardStatus = AcquireSaveGuard(operation);
+    if (guardStatus != ErrorCode::Success) return guardStatus;
     if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
         return ErrorCode::EmptyIndex;
 
