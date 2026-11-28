@@ -94,7 +94,7 @@ namespace SPTAG
                 return m_pageBuffer.get();
             }
 
-            std::size_t GetPageSize()
+            std::size_t GetPageSize() const
             {
                 return m_pageBufferSize;
             }
@@ -104,9 +104,14 @@ namespace SPTAG
                 m_availableSize = p_size;
             }
 
-            std::size_t GetAvailableSize()
+            std::size_t GetAvailableSize() const
             {
                 return m_availableSize;
+            }
+
+            bool IsUnique() const
+            {
+                return m_pageBuffer.use_count() <= 1;
             }
 
         private:

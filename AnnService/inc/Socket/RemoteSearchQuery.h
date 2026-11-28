@@ -91,7 +91,44 @@ struct RemoteSearchResult
     std::vector<IndexSearchResult> m_allIndexResults;
 };
 
+enum class TenantOperation : std::uint8_t
+{
+    Create = 1,
+    Delete = 2,
+    Insert = 3,
+    DeleteVector = 4,
+    Search = 5
+};
 
+struct RemoteTenantRequest
+{
+    TenantOperation operation = TenantOperation::Search;
+    std::string tenant;
+    VectorValueType valueType = VectorValueType::Undefined;
+    DistCalcMethod metric = DistCalcMethod::Undefined;
+    IndexAlgoType headIndexAlgo = IndexAlgoType::Undefined;
+    DimensionType dimension = 0;
+    SizeType count = 0;
+    SizeType vectorID = -1;
+    SizeType k = 0;
+    ByteArray vectors;
+
+    bool Valid() const;
+    bool Write(ByteArray &body) const;
+    bool Read(const std::uint8_t *body, std::size_t size);
+};
+
+struct RemoteTenantResult
+{
+    ErrorCode status = ErrorCode::Fail;
+    SizeType firstID = -1;
+    SizeType count = 0;
+    std::vector<BasicResult> results;
+
+    const char *StatusName() const;
+    bool Write(ByteArray &body) const;
+    bool Read(const std::uint8_t *body, std::size_t size);
+};
 
 } // namespace SPTAG
 } // namespace Socket

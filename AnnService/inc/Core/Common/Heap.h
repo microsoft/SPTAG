@@ -19,10 +19,22 @@ namespace SPTAG
 
             void Resize(int size)
             {
+                if (!m_reuseStorage || size > m_capacity)
+                {
+                    heap.reset(new T[size + 1]); // heap uses 1-based indexing
+                    m_capacity = size;
+                }
                 length = size;
-                heap.reset(new T[length + 1]);  // heap uses 1-based indexing
                 count = 0;
                 lastlevel = int(pow(2.0, floor(log2((float)size))));
+            }
+            void EnableStorageReuse()
+            {
+                m_reuseStorage = true;
+            }
+            std::size_t StorageBytes() const
+            {
+                return heap ? sizeof(T) * (m_capacity + 1) : 0;
             }
             ~Heap() { heap.reset(); }
             inline int size() { return count; }
@@ -87,6 +99,8 @@ namespace SPTAG
             int length;
             int count; // Number of element in the heap
             int lastlevel;
+            int m_capacity = 0;
+            bool m_reuseStorage = false;
             // Reorganizes the heap (a parent is smaller than its children) starting with a node.
 
             void heapify()

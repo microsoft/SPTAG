@@ -4,6 +4,7 @@
 #ifndef _SPTAG_HELPER_CONCURRENTSET_H_
 #define _SPTAG_HELPER_CONCURRENTSET_H_
 
+#include "inc/Core/Common/ResidentHashMap.h"
 #include <mutex>
 #include <shared_mutex>
 

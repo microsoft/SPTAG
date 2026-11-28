@@ -117,6 +117,9 @@ void SearchService::RunSocketMode()
                                                                   Socket::Packet p_packet) {
         boost::asio::post(*m_threadPool, std::bind(&SearchService::SearchHanlder, this, p_srcID, std::move(p_packet)));
     });
+    handlerMap->emplace(Socket::PacketType::TenantRequest, [this](Socket::ConnectionID source, Socket::Packet packet) {
+        boost::asio::post(*m_threadPool, std::bind(&SearchService::TenantHandler, this, source, std::move(packet)));
+    });
 
     m_socketServer.reset(new Socket::Server(m_serviceContext->GetServiceSettings()->m_listenAddr,
                                             m_serviceContext->GetServiceSettings()->m_listenPort, handlerMap,
@@ -139,9 +142,75 @@ void SearchService::RunSocketMode()
     m_ioContext.run();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
 
-    m_socketServer.reset();
     m_threadPool->stop();
     m_threadPool->join();
+    m_socketServer.reset();
+#ifdef MULTITENANT
+    if (auto *manager = m_serviceContext->GetTenantManager())
+    {
+        auto status = manager->Close();
+        if (status != ErrorCode::Success)
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Tenant shutdown checkpoint failed: %d\n",
+                         static_cast<int>(status));
+    }
+#endif
+}
+
+void SearchService::TenantHandler(Socket::ConnectionID connectionID, Socket::Packet packet)
+{
+    Socket::RemoteTenantResult result;
+    Socket::RemoteTenantRequest request;
+    if (!request.Read(packet.Body(), packet.Header().m_bodyLength))
+    {
+        result.status = ErrorCode::FailedParseValue;
+    }
+    else
+    {
+        result.status = ErrorCode::Socket_UnsupportedRequest;
+#ifdef MULTITENANT
+        if (auto *manager = m_serviceContext->GetTenantManager())
+        {
+            switch (request.operation)
+            {
+            case Socket::TenantOperation::Create:
+                result.status = manager->Create(request.tenant, request.valueType, request.dimension, request.metric,
+                                                request.vectors, request.count, request.headIndexAlgo);
+                break;
+            case Socket::TenantOperation::Delete:
+                result.status = manager->DeleteTenant(request.tenant);
+                break;
+            case Socket::TenantOperation::Insert:
+                result.status = manager->Insert(request.tenant, request.vectors, request.count, result.firstID,
+                                                request.valueType, request.dimension);
+                if (result.status == ErrorCode::Success)
+                    result.count = request.count;
+                break;
+            case Socket::TenantOperation::DeleteVector:
+                result.status = manager->DeleteVector(request.tenant, request.vectorID);
+                break;
+            case Socket::TenantOperation::Search:
+                result.status = manager->Search(request.tenant, request.vectors, request.k, result.results,
+                                                request.valueType, request.dimension);
+                if (result.status == ErrorCode::Success)
+                    result.count = static_cast<SizeType>(result.results.size());
+                break;
+            }
+        }
+#endif
+    }
+    ByteArray body;
+    if (!result.Write(body))
+        return;
+    Socket::Packet response;
+    response.Header().m_packetType = Socket::PacketType::TenantResponse;
+    response.Header().m_connectionID = connectionID;
+    response.Header().m_resourceID = packet.Header().m_resourceID;
+    response.Header().m_bodyLength = static_cast<std::uint32_t>(body.Length());
+    response.AllocateBuffer(response.Header().m_bodyLength);
+    memcpy(response.Body(), body.Data(), body.Length());
+    response.Header().WriteBuffer(response.HeaderBuffer());
+    // Tenant requests always reply to their originating connection, never a caller-selected route.
+    m_socketServer->SendPacket(connectionID, std::move(response), nullptr);
 }
 
 void SearchService::RunInteractiveMode()

@@ -7,13 +7,13 @@
 #include "CommonUtils.h"
 #include "DistanceUtils.h"
 #include "IQuantizer.h"
-#include <iostream>
-#include <fstream>
-#include <limits>
-#include <memory>
+#include "ResidentMetadata.h"
 #include <cassert>
 #include <cstring>
-
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <memory>
 
 namespace SPTAG
 {
@@ -88,12 +88,14 @@ namespace SPTAG
             DimensionType m_DimPerSubvector;
             int m_BlockSize;
             bool m_EnableADC;
-            DistCalcMethod m_distCalcMethod;
+            DistCalcMethod m_distCalcMethod = DistCalcMethod::L2;
             const int m_base = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>();
 
             inline int m_DistIndexCalc(int i, int j, int k) const;
             void InitializeDistanceTables();
 
+            ResidentArrayOwner m_codebookOwner;
+            ResidentArrayOwner m_distanceOwner;
             std::unique_ptr<T[]> m_codebooks;
             std::unique_ptr<const float[]> m_DistanceTables;
         };
@@ -104,8 +106,21 @@ namespace SPTAG
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, int KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks)), m_EnableADC(EnableADC)
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, int KsPerSubvector, DimensionType DimPerSubvector,
+                                    bool EnableADC, std::unique_ptr<T[]> &&Codebooks)
+            : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector),
+              m_BlockSize(0), m_EnableADC(EnableADC)
         {
+            if (m_NumSubvectors <= 0 || m_KsPerSubvector <= 0 || m_DimPerSubvector <= 0 ||
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_KsPerSubvector, m_KsPerSubvector), m_NumSubvectors) >
+                    static_cast<uint64_t>((std::numeric_limits<int>::max)()) ||
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_NumSubvectors, m_KsPerSubvector), m_DimPerSubvector) >
+                    static_cast<uint64_t>((std::numeric_limits<int>::max)()))
+                throw std::invalid_argument("Invalid PQ resident array dimensions");
+            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+            m_codebookOwner.Adopt(
+                m_codebooks, std::move(Codebooks),
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_NumSubvectors, m_KsPerSubvector), m_DimPerSubvector));
             InitializeDistanceTables();
         }
 
@@ -293,7 +308,15 @@ namespace SPTAG
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
-            m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            if (m_NumSubvectors <= 0 || m_KsPerSubvector <= 0 || m_DimPerSubvector <= 0 ||
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_KsPerSubvector, m_KsPerSubvector), m_NumSubvectors) >
+                    static_cast<uint64_t>((std::numeric_limits<int>::max)()) ||
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_NumSubvectors, m_KsPerSubvector), m_DimPerSubvector) >
+                    static_cast<uint64_t>((std::numeric_limits<int>::max)()))
+                return ErrorCode::FailedParseValue;
+            m_codebookOwner.Allocate(
+                m_codebooks,
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_NumSubvectors, m_KsPerSubvector), m_DimPerSubvector));
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
@@ -318,7 +341,15 @@ namespace SPTAG
             m_DimPerSubvector = *(DimensionType*)raw_bytes;
             raw_bytes += sizeof(DimensionType);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
-            m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            if (m_NumSubvectors <= 0 || m_KsPerSubvector <= 0 || m_DimPerSubvector <= 0 ||
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_KsPerSubvector, m_KsPerSubvector), m_NumSubvectors) >
+                    static_cast<uint64_t>((std::numeric_limits<int>::max)()) ||
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_NumSubvectors, m_KsPerSubvector), m_DimPerSubvector) >
+                    static_cast<uint64_t>((std::numeric_limits<int>::max)()))
+                return ErrorCode::FailedParseValue;
+            m_codebookOwner.Allocate(
+                m_codebooks,
+                ResidentMultiplyBytes(ResidentMultiplyBytes(m_NumSubvectors, m_KsPerSubvector), m_DimPerSubvector));
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             std::memcpy(m_codebooks.get(), raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             raw_bytes += sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector;
@@ -379,35 +410,42 @@ namespace SPTAG
             return m_BlockSize * i + j * m_KsPerSubvector + k;
         }
 
-        template <typename T>
-        void PQQuantizer<T>::InitializeDistanceTables()
+        template <typename T> void PQQuantizer<T>::InitializeDistanceTables()
         {
-            auto temp_m_DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
             auto Dist = COMMON::DistanceCalcSelector<T>(m_distCalcMethod);
-
-            for (int i = 0; i < m_NumSubvectors; i++) {
-                int baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
-                for (int j = 0; j < m_KsPerSubvector; j++) {
-                    for (int k = 0; k < m_KsPerSubvector; k++) {
-                        if (m_distCalcMethod == DistCalcMethod::L2)
+            m_distanceOwner.Allocate(
+                m_DistanceTables, ResidentMultiplyBytes(m_BlockSize, m_NumSubvectors), [&](float *table) {
+                    for (int i = 0; i < m_NumSubvectors; i++)
+                    {
+                        int baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
+                        for (int j = 0; j < m_KsPerSubvector; j++)
                         {
-                            temp_m_DistanceTables[m_DistIndexCalc(i, j, k)] = Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
-                        }
-                        else
-                        {
-                            temp_m_DistanceTables[m_DistIndexCalc(i, j, k)] = m_base - Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                            for (int k = 0; k < m_KsPerSubvector; k++)
+                            {
+                                if (m_distCalcMethod == DistCalcMethod::L2)
+                                {
+                                    table[m_DistIndexCalc(i, j, k)] =
+                                        Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector],
+                                             &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                                }
+                                else
+                                {
+                                    table[m_DistIndexCalc(i, j, k)] =
+                                        m_base -
+                                        Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector],
+                                             &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                                }
+                            }
                         }
                     }
-                }
-            }
-            m_DistanceTables = std::move(temp_m_DistanceTables);
+                });
         }
 
-        template <typename T>
-        float* PQQuantizer<T>::GetL2DistanceTables() {
+        template <typename T> float *PQQuantizer<T>::GetL2DistanceTables()
+        {
             return (float*)(m_DistanceTables.get());
         }
- 
+
         template<typename T>
         T* PQQuantizer<T>::GetCodebooks() {
           return (T*)(m_codebooks.get());

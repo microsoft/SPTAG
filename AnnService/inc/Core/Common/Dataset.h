@@ -4,6 +4,8 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
+#include "ResidentMemory.h"
+#include "ResidentMetadata.h"
 #include "inc/Core/VectorIndex.h"
 
 namespace SPTAG
@@ -11,299 +13,417 @@ namespace SPTAG
     namespace COMMON
     {
         // structure to save Data and Graph
-        /*
-        template <typename T>
-        class Dataset
+    struct DatasetBuffer
+    {
+        ResidentMemory::Allocation charge;
+        char *data = nullptr;
+        size_t bytes = 0;
+
+        ~DatasetBuffer()
         {
-        private:
-            std::string name = "Data";
-            SizeType rows = 0;
-            DimensionType cols = 1;
-            T* data = nullptr;
-            bool ownData = false;
-            SizeType incRows = 0;
-            SizeType maxRows;
-            SizeType rowsInBlock;
-            SizeType rowsInBlockEx;
-            std::vector<T*> incBlocks;
+            ALIGN_FREE(data);
+            charge.Reset();
+        }
 
-        public:
-            Dataset() {}
+        static std::shared_ptr<DatasetBuffer> Allocate(const std::shared_ptr<ResidentMemory::Account> &account,
+                                                       size_t bytes)
+        {
+            auto result = std::allocate_shared<DatasetBuffer>(ResidentAllocator<DatasetBuffer>(account));
+            result->charge = ResidentMemory::Charge(account, bytes);
+            result->bytes = bytes;
+            result->data = static_cast<char *>(ALIGN_ALLOC(bytes));
+            if (!result->data && bytes)
+                throw std::bad_alloc();
+            return result;
+        }
+    };
 
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool shareOwnership_ = true)
-            {
-                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, shareOwnership_);
-            }
-            ~Dataset()
-            {
+    using DatasetBlocks =
+        std::vector<std::shared_ptr<DatasetBuffer>, ResidentAllocator<std::shared_ptr<DatasetBuffer>>>;
+
+    /*
+    template <typename T>
+    class Dataset
+    {
+    private:
+        std::string name = "Data";
+        SizeType rows = 0;
+        DimensionType cols = 1;
+        T* data = nullptr;
+        bool ownData = false;
+        SizeType incRows = 0;
+        SizeType maxRows;
+        SizeType rowsInBlock;
+        SizeType rowsInBlockEx;
+        std::vector<T*> incBlocks;
+
+    public:
+        Dataset() {}
+
+        Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool
+    shareOwnership_ = true)
+        {
+            Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, shareOwnership_);
+        }
+        ~Dataset()
+        {
+            if (ownData) ALIGN_FREE(data);
+            for (T* ptr : incBlocks) ALIGN_FREE(ptr);
+            incBlocks.clear();
+        }
+        void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ =
+    nullptr, bool shareOwnership_ = true)
+        {
+            if (data != nullptr) {
                 if (ownData) ALIGN_FREE(data);
                 for (T* ptr : incBlocks) ALIGN_FREE(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool shareOwnership_ = true)
+
+            rows = rows_;
+            cols = cols_;
+            data = data_;
+            if (data_ == nullptr || !shareOwnership_)
             {
-                if (data != nullptr) {
-                    if (ownData) ALIGN_FREE(data);
-                    for (T* ptr : incBlocks) ALIGN_FREE(ptr);
-                    incBlocks.clear();
-                }
-
-                rows = rows_;
-                cols = cols_;
-                data = data_;
-                if (data_ == nullptr || !shareOwnership_)
-                {
-                    ownData = true;
-                    data = (T*)ALIGN_ALLOC(((size_t)rows) * cols * sizeof(T));
-                    if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
-                    else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
-                }
-                maxRows = capacity_;
-                rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
-                rowsInBlock = (1 << rowsInBlockEx) - 1;
-                incBlocks.reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock) >> rowsInBlockEx);
+                ownData = true;
+                data = (T*)ALIGN_ALLOC(((size_t)rows) * cols * sizeof(T));
+                if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
+                else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
             }
-            void SetName(const std::string& name_) { name = name_; }
-            const std::string& Name() const { return name; }
+            maxRows = capacity_;
+            rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
+            rowsInBlock = (1 << rowsInBlockEx) - 1;
+            incBlocks.reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock) >> rowsInBlockEx);
+        }
+        void SetName(const std::string& name_) { name = name_; }
+        const std::string& Name() const { return name; }
 
-            void SetR(SizeType R_)
-            {
-                if (R_ >= rows)
-                    incRows = R_ - rows;
-                else
-                {
-                    rows = R_;
-                    incRows = 0;
-                }
-            }
-            inline SizeType R() const { return rows + incRows; }
-            inline DimensionType C() const { return cols; }
-            inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() * C(); }
-
-            inline const T* At(SizeType index) const
-            {
-                if (index < R() && index >= 0)
-                {
-                    if (index >= rows) {
-                        SizeType incIndex = index - rows;
-                        return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
-                    }
-                    return data + ((size_t)index) * cols;
-                }
-                else
-                {
-                    std::ostringstream oss;
-                    oss << "Index out of range in Dataset. Index: " << index << " Size: " << R();
-                    throw std::out_of_range(oss.str());
-                }
-            }
-
-            T* operator[](SizeType index)
-            {
-                return (T*)At(index);
-            }
-
-            const T* operator[](SizeType index) const
-            {
-                return At(index);
-            }
-
-            ErrorCode AddBatch(SizeType num, const T* pData = nullptr)
-            {
-                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
-
-                SizeType written = 0;
-                while (written < num) {
-                    SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
-                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)ALIGN_ALLOC(sizeof(T) * (rowsInBlock + 1) * cols);
-                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
-                        std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
-                        incBlocks.push_back(newBlock);
-                    }
-                    SizeType curBlockPos = ((incRows + written) & rowsInBlock);
-                    SizeType toWrite = min(rowsInBlock + 1 - curBlockPos, num - written);
-                    if (pData != nullptr) std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
-                    written += toWrite;
-                }
-                incRows += written;
-                return ErrorCode::Success;
-            }
-
-            ErrorCode Save(std::shared_ptr<Helper::DiskIO> p_out) const
-            {
-                SizeType CR = R();
-                IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&CR);
-                IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&cols);
-                IOBINARY(p_out, WriteBinary, sizeof(T) * cols * rows, (char*)data);
-
-                SizeType blocks = (incRows >> rowsInBlockEx);
-                for (int i = 0; i < blocks; i++)
-                    IOBINARY(p_out, WriteBinary, sizeof(T) * cols * (rowsInBlock + 1), (char*)incBlocks[i]);
-
-                SizeType remain = (incRows & rowsInBlock);
-                if (remain > 0) IOBINARY(p_out, WriteBinary, sizeof(T) * cols * remain, (char*)incBlocks[blocks]);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, cols);
-                return ErrorCode::Success;
-            }
-
-            ErrorCode Save(std::string sDataPointsFileName) const
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
-                auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-                return Save(ptr);
-            }
-
-            ErrorCode Load(std::shared_ptr<Helper::DiskIO> pInput, SizeType blockSize, SizeType capacity)
-            {
-                IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&rows);
-                IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&cols);
-
-                Initialize(rows, cols, blockSize, capacity);
-                IOBINARY(pInput, ReadBinary, sizeof(T) * cols * rows, (char*)data);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
-                return ErrorCode::Success;
-            }
-
-            ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
-                auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-                return Load(ptr, blockSize, capacity);
-            }
-
-            // Functions for loading models from memory mapped files
-            ErrorCode Load(char* pDataPointsMemFile, SizeType blockSize, SizeType capacity)
-            {
-                SizeType R;
-                DimensionType C;
-                R = *((SizeType*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(SizeType);
-
-                C = *((DimensionType*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(DimensionType);
-
-                Initialize(R, C, blockSize, capacity, (T*)pDataPointsMemFile);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
-                return ErrorCode::Success;
-            }
-
-            ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
-            {
-                SizeType R = (SizeType)(indices.size());
-                data.Initialize(R, cols, rowsInBlock + 1, static_cast<SizeType>(incBlocks.capacity() * (rowsInBlock + 1)));
-                for (SizeType i = 0; i < R; i++) {
-                    std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
-                }
-                return ErrorCode::Success;
-            }
-
-            ErrorCode Refine(const std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskIO> output) const
-            {
-                SizeType R = (SizeType)(indices.size());
-                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&R);
-                IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&cols);
-
-                for (SizeType i = 0; i < R; i++) {
-                    IOBINARY(output, WriteBinary, sizeof(T) * cols, (char*)At(indices[i]));
-                }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s (%d,%d) Finish!\n", name.c_str(), R, cols);
-                return ErrorCode::Success;
-            }
-
-            ErrorCode Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
-                auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-                return Refine(indices, ptr);
-            }
-        };
-        */
-        template <typename T>
-        class Dataset
+        void SetR(SizeType R_)
         {
-        private:
-            std::string name = "Data";
-            SizeType rows = 0;
-            DimensionType cols = 1;
-            char* data = nullptr;
-            bool ownData = false;
-            SizeType incRows = 0;
-            SizeType maxRows = MaxSize;
-            SizeType rowsInBlock = 1024 * 1024;
-            SizeType rowsInBlockEx = 20;
-            std::shared_ptr<std::vector<char*>> incBlocks;
-
-            DimensionType colStart = 0;
-            DimensionType mycols = 0;
-
-            uint8_t defaultValue = -1;
-
-        public:
-            Dataset() {}
-
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, const void* data_ = nullptr, bool shareOwnership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1)
+            if (R_ >= rows)
+                incRows = R_ - rows;
+            else
             {
-                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, shareOwnership_, incBlocks_, colStart_, rowEnd_);
-            }
-            ~Dataset()
-            {
-                if (ownData) ALIGN_FREE(data);
-                if (incBlocks != nullptr) {
-                    for (char* ptr : *incBlocks) ALIGN_FREE(ptr);
-                    incBlocks->clear();
-                }
-            }
-
-            ErrorCode Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, const void* data_ = nullptr, bool shareOwnership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1)
-            {
-                if (data != nullptr) {
-                    if (ownData) ALIGN_FREE(data);
-                }
-                rows = rows_;
-
-                if (incBlocks != nullptr)
-                {
-                    for (char *ptr : *incBlocks)
-                        ALIGN_FREE(ptr);
-                    incBlocks->clear();
-                }
+                rows = R_;
                 incRows = 0;
-                
-                if (rowEnd_ >= colStart_) cols = rowEnd_;
-                else cols = cols_ * sizeof(T);
-                data = (char*)data_;
+            }
+        }
+        inline SizeType R() const { return rows + incRows; }
+        inline DimensionType C() const { return cols; }
+        inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() *
+    C(); }
+
+        inline const T* At(SizeType index) const
+        {
+            if (index < R() && index >= 0)
+            {
+                if (index >= rows) {
+                    SizeType incIndex = index - rows;
+                    return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
+                }
+                return data + ((size_t)index) * cols;
+            }
+            else
+            {
+                std::ostringstream oss;
+                oss << "Index out of range in Dataset. Index: " << index << " Size: " << R();
+                throw std::out_of_range(oss.str());
+            }
+        }
+
+        T* operator[](SizeType index)
+        {
+            return (T*)At(index);
+        }
+
+        const T* operator[](SizeType index) const
+        {
+            return At(index);
+        }
+
+        ErrorCode AddBatch(SizeType num, const T* pData = nullptr)
+        {
+            if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
+
+            SizeType written = 0;
+            while (written < num) {
+                SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
+                if (curBlockIdx >= (SizeType)incBlocks.size()) {
+                    T* newBlock = (T*)ALIGN_ALLOC(sizeof(T) * (rowsInBlock + 1) * cols);
+                    if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                    std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
+                    incBlocks.push_back(newBlock);
+                }
+                SizeType curBlockPos = ((incRows + written) & rowsInBlock);
+                SizeType toWrite = min(rowsInBlock + 1 - curBlockPos, num - written);
+                if (pData != nullptr) std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData +
+    ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T)); written += toWrite;
+            }
+            incRows += written;
+            return ErrorCode::Success;
+        }
+
+        ErrorCode Save(std::shared_ptr<Helper::DiskIO> p_out) const
+        {
+            SizeType CR = R();
+            IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&CR);
+            IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&cols);
+            IOBINARY(p_out, WriteBinary, sizeof(T) * cols * rows, (char*)data);
+
+            SizeType blocks = (incRows >> rowsInBlockEx);
+            for (int i = 0; i < blocks; i++)
+                IOBINARY(p_out, WriteBinary, sizeof(T) * cols * (rowsInBlock + 1), (char*)incBlocks[i]);
+
+            SizeType remain = (incRows & rowsInBlock);
+            if (remain > 0) IOBINARY(p_out, WriteBinary, sizeof(T) * cols * remain, (char*)incBlocks[blocks]);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, cols);
+            return ErrorCode::Success;
+        }
+
+        ErrorCode Save(std::string sDataPointsFileName) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+            auto ptr = f_createIO();
+            if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out))
+    return ErrorCode::FailedCreateFile; return Save(ptr);
+        }
+
+        ErrorCode Load(std::shared_ptr<Helper::DiskIO> pInput, SizeType blockSize, SizeType capacity)
+        {
+            IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&rows);
+            IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&cols);
+
+            Initialize(rows, cols, blockSize, capacity);
+            IOBINARY(pInput, ReadBinary, sizeof(T) * cols * rows, (char*)data);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
+            return ErrorCode::Success;
+        }
+
+        ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
+            auto ptr = f_createIO();
+            if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return
+    ErrorCode::FailedOpenFile; return Load(ptr, blockSize, capacity);
+        }
+
+        // Functions for loading models from memory mapped files
+        ErrorCode Load(char* pDataPointsMemFile, SizeType blockSize, SizeType capacity)
+        {
+            SizeType R;
+            DimensionType C;
+            R = *((SizeType*)pDataPointsMemFile);
+            pDataPointsMemFile += sizeof(SizeType);
+
+            C = *((DimensionType*)pDataPointsMemFile);
+            pDataPointsMemFile += sizeof(DimensionType);
+
+            Initialize(R, C, blockSize, capacity, (T*)pDataPointsMemFile);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
+            return ErrorCode::Success;
+        }
+
+        ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
+        {
+            SizeType R = (SizeType)(indices.size());
+            data.Initialize(R, cols, rowsInBlock + 1, static_cast<SizeType>(incBlocks.capacity() * (rowsInBlock + 1)));
+            for (SizeType i = 0; i < R; i++) {
+                std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
+            }
+            return ErrorCode::Success;
+        }
+
+        ErrorCode Refine(const std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskIO> output) const
+        {
+            SizeType R = (SizeType)(indices.size());
+            IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&R);
+            IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&cols);
+
+            for (SizeType i = 0; i < R; i++) {
+                IOBINARY(output, WriteBinary, sizeof(T) * cols, (char*)At(indices[i]));
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s (%d,%d) Finish!\n", name.c_str(), R, cols);
+            return ErrorCode::Success;
+        }
+
+        ErrorCode Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(),
+    sDataPointsFileName.c_str()); auto ptr = f_createIO(); if (ptr == nullptr ||
+    !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+            return Refine(indices, ptr);
+        }
+    };
+    */
+    template <typename T> class Dataset
+    {
+      private:
+        ResidentStringOwners<1> m_nameOwner;
+        std::string name = "Data";
+        SizeType rows = 0;
+        DimensionType cols = 1;
+        char *data = nullptr;
+        std::shared_ptr<ResidentMemory::Account> m_account = ResidentMemory::CurrentAccount();
+        std::shared_ptr<DatasetBuffer> m_backing;
+        SizeType incRows = 0;
+        SizeType maxRows = MaxSize;
+        SizeType rowsInBlock = 1024 * 1024;
+        SizeType rowsInBlockEx = 20;
+        std::shared_ptr<DatasetBlocks> incBlocks;
+
+        DimensionType colStart = 0;
+        DimensionType mycols = 0;
+
+        uint8_t defaultValue = -1;
+
+      public:
+        Dataset()
+        {
+        }
+        Dataset(const Dataset &other) : m_nameOwner(other.m_account)
+        {
+            *this = other;
+        }
+        Dataset &operator=(const Dataset &other)
+        {
+            if (this == &other)
+                return *this;
+            m_nameOwner.Bind(other.m_account);
+            m_nameOwner.Assign(name, other.name);
+            rows = other.rows;
+            cols = other.cols;
+            data = other.data;
+            m_account = other.m_account;
+            m_backing = other.m_backing;
+            incRows = other.incRows;
+            maxRows = other.maxRows;
+            rowsInBlock = other.rowsInBlock;
+            rowsInBlockEx = other.rowsInBlockEx;
+            incBlocks = other.incBlocks;
+            colStart = other.colStart;
+            mycols = other.mycols;
+            defaultValue = other.defaultValue;
+            return *this;
+        }
+
+        Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_,
+                const void *data_ = nullptr, bool shareOwnership_ = true,
+                std::shared_ptr<DatasetBlocks> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1)
+        {
+            Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, shareOwnership_, incBlocks_, colStart_, rowEnd_);
+        }
+        ~Dataset() = default;
+
+        ErrorCode Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_,
+                             const void *data_ = nullptr, bool shareOwnership_ = true,
+                             std::shared_ptr<DatasetBlocks> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1)
+        {
+            if (rows_ < 0 || cols_ <= 0 || rowsInBlock_ <= 0 || capacity_ < rows_)
+                return ErrorCode::FailedParseValue;
+            const auto rowBytes =
+                rowEnd_ >= colStart_ ? static_cast<size_t>(rowEnd_) : static_cast<size_t>(cols_) * sizeof(T);
+            if (rowBytes > static_cast<size_t>((std::numeric_limits<DimensionType>::max)()) ||
+                (rows_ && rowBytes > (std::numeric_limits<size_t>::max)() / static_cast<size_t>(rows_)))
+                return ErrorCode::MemoryOverFlow;
+            auto account = m_account ? m_account : ResidentMemory::CurrentAccount();
+            m_nameOwner.Bind(account);
+            m_nameOwner.Assign(name, name);
+            std::shared_ptr<DatasetBuffer> backing;
+            const auto blockExponent = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
+            if (blockExponent >= 31)
+                return ErrorCode::MemoryOverFlow;
+            const auto blockMask = (1 << blockExponent) - 1;
+            try
+            {
                 if (data_ == nullptr || !shareOwnership_)
                 {
-                    ownData = true;
-                    data = (char*)ALIGN_ALLOC(((size_t)rows) * cols);
-                    if (data == nullptr)
-                    {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot allocate %zu memory for dataset!\n",
-                                     ((size_t)rows) * cols);
-                        return ErrorCode::MemoryOverFlow;
-                    }
-                    if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols);
-                    else std::memset(data, defaultValue, ((size_t)rows) * cols);
+                    backing = DatasetBuffer::Allocate(account, static_cast<size_t>(rows_) * rowBytes);
+                    if (data_)
+                        std::memcpy(backing->data, data_, static_cast<size_t>(rows_) * rowBytes);
+                    else if (rows_)
+                        std::memset(backing->data, defaultValue, static_cast<size_t>(rows_) * rowBytes);
                 }
-                maxRows = capacity_;
-                rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
-                rowsInBlock = (1 << rowsInBlockEx) - 1;
-                incBlocks = incBlocks_;
-                if (incBlocks == nullptr) incBlocks.reset(new std::vector<char*>());
-                incBlocks->reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock) >> rowsInBlockEx);
-
-                colStart = colStart_;
-                mycols = cols_;
-                return ErrorCode::Success;
+                if (!incBlocks_)
+                    incBlocks_ =
+                        std::allocate_shared<DatasetBlocks>(ResidentAllocator<DatasetBlocks>(account),
+                                                            ResidentAllocator<std::shared_ptr<DatasetBuffer>>(account));
+                incBlocks_->reserve((static_cast<std::int64_t>(capacity_) + blockMask) >> blockExponent);
             }
+            catch (const std::bad_alloc &)
+            {
+                return ErrorCode::MemoryOverFlow;
+            }
+            m_account = std::move(account);
+            m_backing = std::move(backing);
+            data = m_backing ? m_backing->data : static_cast<char *>(const_cast<void *>(data_));
+            rows = rows_;
+            incRows = 0;
+            cols = static_cast<DimensionType>(rowBytes);
+            maxRows = capacity_;
+            rowsInBlockEx = blockExponent;
+            rowsInBlock = blockMask;
+            incBlocks = std::move(incBlocks_);
+            colStart = colStart_;
+            mycols = cols_;
+            return ErrorCode::Success;
+        }
 
-            bool IsReady() const { return data != nullptr; }
+        template <typename U>
+        ErrorCode InitializeSharedView(const Dataset<U> &source, DimensionType columns, DimensionType offset)
+        {
+            if (offset < 0 || static_cast<size_t>(offset) + static_cast<size_t>(columns) * sizeof(T) >
+                                  static_cast<size_t>(source.cols))
+                return ErrorCode::FailedParseValue;
+            auto status = Initialize(source.rows, columns, source.rowsInBlock + 1, source.maxRows, source.data, true,
+                                     source.incBlocks, offset, source.cols);
+            if (status == ErrorCode::Success)
+            {
+                m_account = source.m_account;
+                m_backing = source.m_backing;
+                incRows = source.incRows;
+            }
+            return status;
+        }
 
-            void SetName(const std::string& name_) { name = name_; }
+        uint64_t AllocatedBackingBytes() const
+        {
+            uint64_t result = m_backing ? m_backing->bytes : 0;
+            if (incBlocks)
+                for (const auto &block : *incBlocks)
+                    result += block->bytes;
+            return result;
+        }
+
+        uint64_t ResidentGrowthBytes(SizeType target) const
+        {
+            if (target < 0 || target > maxRows || !incBlocks)
+                return (std::numeric_limits<uint64_t>::max)();
+            if (colStart != 0)
+                return 0;
+            const auto additional = (std::max<int64_t>)(0, static_cast<int64_t>(target) - rows);
+            const auto blocks = static_cast<uint64_t>((additional + rowsInBlock) >> rowsInBlockEx);
+            if (blocks <= incBlocks->size())
+                return 0;
+            const auto blockBytes =
+                ResidentAddBytes(ResidentMultiplyBytes(static_cast<uint64_t>(rowsInBlock) + 1, cols),
+                                 ResidentSharedBytes<DatasetBuffer>());
+            auto result = ResidentMultiplyBytes(blocks - incBlocks->size(), blockBytes);
+            if (blocks > incBlocks->capacity())
+                result = ResidentAddBytes(result,
+                                          ResidentAllocator<std::shared_ptr<DatasetBuffer>>::AllocationBytes(blocks));
+            return result;
+        }
+
+        template <typename> friend class Dataset;
+
+        bool IsReady() const
+        {
+            return data != nullptr; }
+
+        void SetName(const std::string &name_)
+        {
+            m_nameOwner.Assign(name, name_);
+        }
             void SetDefaultValue(uint8_t value) { defaultValue = value; }
             
             const std::string& Name() const { return name; }
@@ -323,12 +443,14 @@ namespace SPTAG
             inline const DimensionType& C() const { return mycols; }
             inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() * C(); }
 
-#define GETITEM(index) \
-            if (index >= rows) { \
-            SizeType incIndex = index - rows; \
-            return (T*)((*incBlocks)[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols + colStart); \
-            } \
-            return (T*)(data + ((size_t)index) * cols + colStart); \
+#define GETITEM(index)                                                                                             \
+            if (index >= rows)                                                                                         \
+            {                                                                                                          \
+                SizeType incIndex = index - rows;                                                                      \
+                return (T *)((*incBlocks)[incIndex >> rowsInBlockEx]->data +                                           \
+                             ((size_t)(incIndex & rowsInBlock)) * cols + colStart);                                    \
+            }                                                                                                          \
+            return (T *)(data + ((size_t)index) * cols + colStart);
 
             inline const T* At(SizeType index) const
             {
@@ -345,37 +467,63 @@ namespace SPTAG
                 GETITEM(index)
             }
 
-            inline const T* operator[](SizeType index) const
-            {
-                GETITEM(index)
-            }
+            inline const T *operator[](SizeType index) const {GETITEM(index)}
 
 #undef GETITEM
 
-            ErrorCode AddBatch(SizeType num, const T* pData = nullptr)
+            ErrorCode AddBatch(SizeType num, const T *pData = nullptr)
             {
-                if (colStart != 0) return ErrorCode::Success;
-                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
+                if (colStart != 0)
+                    return ErrorCode::Success;
+                if (num < 0 || R() > maxRows - num)
+                    return ErrorCode::MemoryOverFlow;
+                auto status = ReserveRows(R() + num);
+                if (status != ErrorCode::Success)
+                    return status;
 
                 SizeType written = 0;
-                while (written < num) {
+                while (written < num)
+                {
                     SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
-                    if (curBlockIdx >= (SizeType)(incBlocks->size())) {
-                        char* newBlock = (char*)ALIGN_ALLOC(((size_t)rowsInBlock + 1) * cols);
-                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
-                        std::memset(newBlock, defaultValue, ((size_t)rowsInBlock + 1) * cols);
-                        incBlocks->push_back(newBlock);
-                    }
                     SizeType curBlockPos = ((incRows + written) & rowsInBlock);
                     SizeType toWrite = min(rowsInBlock + 1 - curBlockPos, num - written);
-                    if (pData) {
-                        for (int i = 0; i < toWrite; i++) {
-                            std::memcpy((*incBlocks)[curBlockIdx] + ((size_t)curBlockPos + i) * cols + colStart, pData + ((size_t)written + i) * mycols, mycols * sizeof(T));
+                    if (pData)
+                    {
+                        for (int i = 0; i < toWrite; i++)
+                        {
+                            std::memcpy((*incBlocks)[curBlockIdx]->data + ((size_t)curBlockPos + i) * cols + colStart,
+                                        pData + ((size_t)written + i) * mycols, mycols * sizeof(T));
                         }
                     }
                     written += toWrite;
                 }
                 incRows += written;
+                return ErrorCode::Success;
+            }
+
+            ErrorCode ReserveRows(SizeType target)
+            {
+                if (target < 0 || target > maxRows || !incBlocks)
+                    return ErrorCode::MemoryOverFlow;
+                if (colStart != 0)
+                    return ErrorCode::Success;
+                const auto additional = (std::max<int64_t>)(0, static_cast<int64_t>(target) - rows);
+                const auto blocks = (additional + rowsInBlock) >> rowsInBlockEx;
+                try
+                {
+                    if (static_cast<size_t>(blocks) > incBlocks->capacity())
+                        incBlocks->reserve(static_cast<size_t>(blocks));
+                    while (incBlocks->size() < static_cast<size_t>(blocks))
+                    {
+                        auto block = DatasetBuffer::Allocate(m_account, (static_cast<size_t>(rowsInBlock) + 1) * cols);
+                        std::memset(block->data, defaultValue, (static_cast<size_t>(rowsInBlock) + 1) * cols);
+                        incBlocks->push_back(std::move(block));
+                    }
+                }
+                catch (const std::bad_alloc &)
+                {
+                    return ErrorCode::MemoryOverFlow;
+                }
                 return ErrorCode::Success;
             }
 
@@ -471,7 +619,7 @@ namespace SPTAG
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return Refine(indices, ptr);
             }
-        };
+    };
 
         template <typename V, typename VV>
         class SizeTypeConcurrentMap {
@@ -624,10 +772,9 @@ namespace SPTAG
             DimensionType totalC = ALIGN_ROUND(sizeof(T) * VC + sizeof(SizeType) * pNeighborhoodSize);
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "OPT TotalC: %d\n", totalC);
-            char* data = (char*)ALIGN_ALLOC(((size_t)totalC) * VR);
-            std::shared_ptr<std::vector<char*>> incBlocks(new std::vector<char*>());
-
-            pVectors.Initialize(VR, VC, blockSize, capacity, data, true, incBlocks, 0, totalC);
+            auto status = pVectors.Initialize(VR, VC, blockSize, capacity, nullptr, true, nullptr, 0, totalC);
+            if (status != ErrorCode::Success)
+                return status;
             pVectors.SetName("Opt" + pVectors.Name());
             for (SizeType i = 0; i < VR; i++) {
                 IOBINARY(pVectorsInput, ReadBinary, sizeof(T) * VC, (char*)(pVectors.At(i)));
@@ -637,7 +784,9 @@ namespace SPTAG
             IOBINARY(pGraphInput, ReadBinary, sizeof(DimensionType), (char*)&GC);
             if (GR != VR || GC != pNeighborhoodSize) return ErrorCode::DiskIOFail;
 
-            pGraph.Initialize(GR, GC, blockSize, capacity, data, false, incBlocks, sizeof(T) * VC, totalC);
+            status = pGraph.InitializeSharedView(pVectors, GC, sizeof(T) * VC);
+            if (status != ErrorCode::Success)
+                return status;
             pGraph.SetName("Opt" + pGraph.Name());
             for (SizeType i = 0; i < VR; i++) {
                 IOBINARY(pGraphInput, ReadBinary, sizeof(SizeType) * GC, (char*)(pGraph.At(i)));

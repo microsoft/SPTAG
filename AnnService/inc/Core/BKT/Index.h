@@ -38,20 +38,29 @@ namespace SPTAG
         class Index : public VectorIndex
         {
             class RebuildJob : public Helper::ThreadPool::Job {
-            public:
-                RebuildJob(COMMON::Dataset<T>* p_data, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph, 
-                    DistCalcMethod p_distMethod) : m_data(p_data), m_tree(p_tree), m_graph(p_graph), m_distMethod(p_distMethod) {}
-                
+                COMMON::ResidentMemory::Scope::Context m_memory = COMMON::ResidentMemory::Scope::Capture();
+
+              public:
+                RebuildJob(COMMON::Dataset<T> *p_data, COMMON::BKTree *p_tree,
+                           COMMON::RelativeNeighborhoodGraph *p_graph, DistCalcMethod p_distMethod, SizeType rows)
+                    : m_data(p_data), m_tree(p_tree), m_graph(p_graph), m_distMethod(p_distMethod), m_rows(rows)
+                {
+                }
+
                 void exec(void* p_workSpace, IAbortOperation* p_abort) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot support job.exec(workspace, abort)!\n");
                 }
 
                 void exec(IAbortOperation* p_abort) {
+                    COMMON::ResidentMemory::Scope memory(m_memory);
+                    std::lock_guard<std::mutex> rebuild(m_tree->RebuildLock());
                     COMMON::BKTree newTrees(*m_tree);
-                    newTrees.BuildTrees<T>(*m_data, m_distMethod, 1, nullptr, nullptr, false, p_abort);
+                    std::vector<SizeType> indices(m_rows);
+                    std::iota(indices.begin(), indices.end(), 0);
+                    newTrees.BuildTrees<T>(*m_data, m_distMethod, 1, &indices, nullptr, false, p_abort);
 
                     std::unique_lock<std::shared_timed_mutex> lock(*(m_tree->m_lock));
-                    const std::unordered_map<SizeType, SizeType>* idmap = &(m_tree->GetSampleMap());
+                    const auto *idmap = &(m_tree->GetSampleMap());
                     for (auto iter = idmap->begin(); iter != idmap->end(); iter++) {
                         if (iter->first < 0)
                         {
@@ -60,7 +69,7 @@ namespace SPTAG
                     }
                     m_tree->SwapTree(newTrees);
 
-                    const std::unordered_map<SizeType, SizeType>* newidmap = &(m_tree->GetSampleMap());
+                    const auto *newidmap = &(m_tree->GetSampleMap());
                     for (auto iter = newidmap->begin(); iter != newidmap->end(); iter++) {
                         if (iter->first < 0)
                         {
@@ -73,6 +82,7 @@ namespace SPTAG
                 COMMON::BKTree* m_tree;
                 COMMON::RelativeNeighborhoodGraph* m_graph;
                 DistCalcMethod m_distMethod;
+                SizeType m_rows;
             };
 
         private:
@@ -85,6 +95,14 @@ namespace SPTAG
             // Graph structure
             COMMON::RelativeNeighborhoodGraph m_pGraph;
 
+            COMMON::ResidentStringOwners<4> m_fileNames;
+            template <typename TField, typename U> void AssignParameter(TField &field, U &&value)
+            {
+                if constexpr (std::is_same_v<TField, std::string>)
+                    m_fileNames.Assign(field, std::string(std::forward<U>(value)));
+                else
+                    field = std::forward<U>(value);
+            }
             std::string m_sBKTFilename;
             std::string m_sGraphFilename;
             std::string m_sDataPointsFilename;
@@ -108,13 +126,13 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
-            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
+            bool m_instanceWorkspaces = false;
+            std::shared_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
-        public:
+          public:
             Index()
             {
-#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
-                VarName = DefaultValue; \
+#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) AssignParameter(VarName, DefaultValue);
 
 #include "inc/Core/BKT/ParameterDefinitionList.h"
 #undef DefineBKTParameter
@@ -122,7 +140,8 @@ namespace SPTAG
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod));
                 m_iBaseSquare = (m_iDistCalcMethod != DistCalcMethod::L2) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
-                m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>();
+                m_workSpaceFactory = std::allocate_shared<COMMON::ThreadLocalWorkSpaceFactory<COMMON::WorkSpace>>(
+                    COMMON::ResidentAllocator<COMMON::ThreadLocalWorkSpaceFactory<COMMON::WorkSpace>>());
             }
 
             ~Index() {}
@@ -210,6 +229,49 @@ namespace SPTAG
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams,
                                   IAbortOperation *p_abort, std::vector<SizeType> *p_mapping);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
+            ErrorCode UseInstanceWorkspaces() override
+            {
+                m_workSpaceFactory = std::allocate_shared<COMMON::WorkerWorkSpaceFactory>(
+                    COMMON::ResidentAllocator<COMMON::WorkerWorkSpaceFactory>(), m_iMaxCheck,
+                    m_pGraph.m_iMaxCheckForRefineGraph, m_iHashTableExp);
+                m_instanceWorkspaces = true;
+                return ErrorCode::Success;
+            }
+            uint64_t ResidentGrowthBytes(SizeType count) const override
+            {
+                if (count < 0 || static_cast<int64_t>(m_pSamples.R()) + count > m_iDataCapacity)
+                    return (std::numeric_limits<uint64_t>::max)();
+                const auto target = m_pSamples.R() + count;
+                auto result = m_pSamples.ResidentGrowthBytes(target);
+                result = COMMON::ResidentAddBytes(result, m_pGraph.ResidentGrowthBytes(target));
+                result = COMMON::ResidentAddBytes(result, m_deletedID.ResidentGrowthBytes(target));
+                const auto trees = COMMON::ResidentMultiplyBytes(2, m_pTrees.ResidentPeakBytes(target));
+                // Every append has end <= target and sizePerTree() >= 0. No append
+                // can enqueue a rebuild below this threshold, even during a cascade.
+                if (trees == (std::numeric_limits<uint64_t>::max)() || target >= m_addCountForRebuild)
+                    return COMMON::ResidentAddBytes(result, trees);
+                return result;
+            }
+            ErrorCode GetUpdateStatus() const override
+            {
+                return m_threadPool.hasFailed() ? ErrorCode::Fail : ErrorCode::Success;
+            }
+            ErrorCode DrainUpdates() override
+            {
+                while (!m_threadPool.allClear())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                return GetUpdateStatus();
+            }
+            ErrorCode PrepareResidentGrowth(SizeType count) override
+            {
+                return ResidentGrowthBytes(count) == (std::numeric_limits<uint64_t>::max)() ? ErrorCode::MemoryOverFlow
+                                                                                            : ErrorCode::Success;
+            }
+            ErrorCode PrepareResidentReads() override
+            {
+                return ErrorCode::Success;
+            }
+
             ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
             {
                 SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();

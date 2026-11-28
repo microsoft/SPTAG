@@ -4,14 +4,16 @@
 #ifndef _SPTAG_COMMON_KDTREE_H_
 #define _SPTAG_COMMON_KDTREE_H_
 
-#include <vector>
-#include <string>
+#include <numeric>
 #include <shared_mutex>
+#include <string>
+#include <vector>
 
 #include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "QueryResultSet.h"
+#include "ResidentMemory.h"
 #include "WorkSpace.h"
 
 namespace SPTAG
@@ -30,11 +32,22 @@ namespace SPTAG
         class KDTree
         {
         public:
-            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000), m_lock(new std::shared_timed_mutex), m_bOldVersion(false), m_pQuantizer(nullptr) {}
+          KDTree()
+              : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000),
+                m_lock(std::allocate_shared<std::shared_timed_mutex>(ResidentAllocator<std::shared_timed_mutex>())),
+                m_bOldVersion(false), m_pQuantizer(nullptr)
+          {
+          }
 
-            KDTree(const KDTree& other) : m_iTreeNumber(other.m_iTreeNumber),
-                m_numTopDimensionKDTSplit(other.m_numTopDimensionKDTSplit),
-                m_iSamples(other.m_iSamples), m_lock(new std::shared_timed_mutex), m_bOldVersion(other.m_bOldVersion), m_pQuantizer(other.m_pQuantizer) {}
+          KDTree(const KDTree &other)
+              : m_iTreeNumber(other.m_iTreeNumber), m_pTreeStart(other.m_pTreeStart.get_allocator()),
+                m_pTreeRoots(other.m_pTreeRoots.get_allocator()),
+                m_numTopDimensionKDTSplit(other.m_numTopDimensionKDTSplit), m_iSamples(other.m_iSamples),
+                m_lock(std::allocate_shared<std::shared_timed_mutex>(
+                    ResidentAllocator<std::shared_timed_mutex>(other.m_pTreeStart.get_allocator().Account()))),
+                m_bOldVersion(other.m_bOldVersion), m_pQuantizer(other.m_pQuantizer)
+          {
+          }
             ~KDTree() {}
 
             inline const KDTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
@@ -47,15 +60,33 @@ namespace SPTAG
                 return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); 
             }
 
-            template <typename T>
-            void Rebuild(const Dataset<T>& data, IAbortOperation* abort)
+            template <typename T> void Rebuild(const Dataset<T> &data, IAbortOperation *abort, SizeType rowLimit = -1)
             {
+                std::lock_guard<std::mutex> rebuild(m_rebuildLock);
                 COMMON::KDTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, 1, nullptr, abort);
+                std::vector<SizeType> indices;
+                if (rowLimit >= 0)
+                {
+                    indices.resize(rowLimit);
+                    std::iota(indices.begin(), indices.end(), 0);
+                }
+                newTrees.BuildTrees<T>(data, 1, rowLimit >= 0 ? &indices : nullptr, abort);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
                 m_pTreeStart.swap(newTrees.m_pTreeStart);
+            }
+
+            uint64_t ResidentPeakBytes(SizeType rows) const
+            {
+                if (rows < 0 || m_iTreeNumber <= 0)
+                    return (std::numeric_limits<uint64_t>::max)();
+                const auto nodes = ResidentMultiplyBytes(rows, m_iTreeNumber);
+                if (nodes > static_cast<uint64_t>(MaxSize))
+                    return (std::numeric_limits<uint64_t>::max)();
+                auto result = ResidentAllocator<KDTNode>::AllocationBytes(nodes);
+                result = ResidentAddBytes(result, ResidentAllocator<SizeType>::AllocationBytes(m_iTreeNumber));
+                return ResidentAddBytes(result, ResidentSharedBytes<std::shared_timed_mutex>());
             }
 
             template <typename T>
@@ -472,14 +503,15 @@ break;
             }
 
         private:
-            std::vector<SizeType> m_pTreeStart;
-            std::vector<KDTNode> m_pTreeRoots;
+          std::mutex m_rebuildLock;
+          ResidentVector<SizeType> m_pTreeStart;
+          ResidentVector<KDTNode> m_pTreeRoots;
 
         public:
-            std::unique_ptr<std::shared_timed_mutex> m_lock;
-            int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
-            bool m_bOldVersion;
-            std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
+          std::shared_ptr<std::shared_timed_mutex> m_lock;
+          int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
+          bool m_bOldVersion;
+          std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
         };
     }
 }

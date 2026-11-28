@@ -828,7 +828,12 @@ namespace SPTAG
                 return postingListFullData;
             }
 
-            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::Dataset<SizeType>& p_headToLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) {
+            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader> &p_reader,
+                            std::shared_ptr<VectorIndex> p_headIndex, Options &p_opt,
+                            COMMON::Dataset<SizeType> &p_headToLocal,
+                            COMMON::ResidentHashMap<SizeType, SizeType> &p_headGlobaltoLocal,
+                            COMMON::Dataset<SizeType> &p_localToGlobal, SizeType upperBound = -1)
+            {
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex + "_" + std::to_string(m_layer);
                 if (outputFile.empty())
                 {

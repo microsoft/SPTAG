@@ -62,7 +62,8 @@ namespace SPTAG
 
             virtual void RebuildNeighbors(VectorIndex* index, const SizeType node, SizeType* nodes, const BasicResult* queryResults, const int numResults) = 0;
 
-            virtual float GraphAccuracyEstimation(VectorIndex* index, const SizeType samples, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+            virtual float GraphAccuracyEstimation(VectorIndex *index, const SizeType samples,
+                                                  const ResidentHashMap<SizeType, SizeType> *idmap = nullptr)
             {
                 std::vector<DimensionType> correct(samples, 0);
                 std::vector<std::thread> mythreads;
@@ -129,13 +130,13 @@ namespace SPTAG
 
 #if defined(GPU)
             template <typename T>
-            void BuildInitKNNGraphParallel(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
+            void BuildInitKNNGraphParallel(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap)
             {
                 BuildInitKNNGraph<T>(index, idmap);
             }
 
             template <typename T>
-            void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
+            void BuildInitKNNGraph(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap)
             {
                 SizeType initSize;
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
@@ -144,7 +145,7 @@ namespace SPTAG
                 buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 
                 if (idmap != nullptr) {
-                    std::unordered_map<SizeType, SizeType>::const_iterator iter;
+                    ResidentHashMap<SizeType, SizeType>::iterator iter;
                     for (SizeType i = 0; i < m_iGraphSize; i++) {
                         for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
                             if ((iter = idmap->find(m_pNeighborhoodGraph[i][j])) != idmap->end())
@@ -330,7 +331,7 @@ break;
             }
 
             template <typename T>
-            void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
+            void BuildInitKNNGraph(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap)
             {
                 COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
                 std::vector<SizeType> TptreeDataIndices(m_iGraphSize);
@@ -430,7 +431,7 @@ break;
             }
 
             template <typename T>
-            void BuildInitKNNGraphParallel(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
+            void BuildInitKNNGraphParallel(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap)
             {
 
                 COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
@@ -586,7 +587,7 @@ break;
 #endif
 
             template <typename T>
-            void BuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+            void BuildGraph(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap = nullptr)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
@@ -631,7 +632,7 @@ break;
             }
 
             template <typename T>
-            void RebuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+            void RebuildGraph(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap = nullptr)
             {
                 std::vector<int> indegree(m_iGraphSize, 0);
 
@@ -741,7 +742,7 @@ break;
             }
 
             template <typename T>
-            void RefineGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+            void RefineGraph(VectorIndex *index, const ResidentHashMap<SizeType, SizeType> *idmap = nullptr)
             {
                 for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
@@ -823,8 +824,10 @@ break;
             }
 
             template <typename T>
-            ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::shared_ptr<Helper::DiskIO> output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+            ErrorCode RefineGraph(VectorIndex *index, std::vector<SizeType> &indices,
+                                  std::vector<SizeType> &reverseIndices, std::shared_ptr<Helper::DiskIO> output,
+                                  NeighborhoodGraph *newGraph,
+                                  const ResidentHashMap<SizeType, SizeType> *idmap = nullptr)
             {
                 std::shared_ptr<NeighborhoodGraph> tmp;
                 if (newGraph == nullptr) {
@@ -859,7 +862,7 @@ break;
                                 index->RefineSearchIndex(query, false);
                                 RebuildNeighbors(index, indices[i], outnodes, query.GetResults(), m_iCEF + 1);
 
-                                std::unordered_map<SizeType, SizeType>::const_iterator iter;
+                                ResidentHashMap<SizeType, SizeType>::iterator iter;
                                 for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                                 {
                                     if (outnodes[j] >= 0 && outnodes[j] < reverseIndices.size())
@@ -994,6 +997,11 @@ break;
             }
 
             inline SizeType R() const { return m_iGraphSize; }
+            uint64_t ResidentGrowthBytes(SizeType target) const
+            {
+                return ResidentAddBytes(m_pNeighborhoodGraph.ResidentGrowthBytes(target),
+                                        m_dataUpdateLock.ResidentGrowthBytes());
+            }
 
             inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
 

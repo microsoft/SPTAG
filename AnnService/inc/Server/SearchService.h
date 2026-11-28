@@ -39,6 +39,8 @@ private:
 
     void SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
 
+    void TenantHandler(Socket::ConnectionID connectionID, Socket::Packet packet);
+
     void SearchHanlderCallback(std::shared_ptr<SearchExecutionContext> p_exeContext,
                                Socket::Packet p_srcPacket);
 

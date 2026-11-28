@@ -69,6 +69,8 @@ namespace SPTAG
             template <typename O>
             inline void m_VectorMatrixMultiply(OPQMatrixType* mat, const OPQMatrixType* vec, O* mat_vec) const;
 
+            ResidentArrayOwner m_matrixOwner;
+            ResidentArrayOwner m_transposeOwner;
             std::unique_ptr<OPQMatrixType[]> m_OPQMatrix;
             std::unique_ptr<OPQMatrixType[]> m_OPQMatrix_T;
         };
@@ -79,14 +81,23 @@ namespace SPTAG
         }
 
         template <typename T>
-        OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, int KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks)), m_matrixDim(NumSubvectors * DimPerSubvector)
+        OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, int KsPerSubvector, DimensionType DimPerSubvector,
+                                      bool EnableADC, std::unique_ptr<T[]> &&Codebooks,
+                                      std::unique_ptr<OPQMatrixType[]> &&OPQMatrix)
+            : PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC,
+                                          std::move(Codebooks)),
+              m_matrixDim(NumSubvectors * DimPerSubvector)
         {
+            if (ResidentMultiplyBytes(m_matrixDim, m_matrixDim) >
+                static_cast<uint64_t>((std::numeric_limits<int>::max)()))
+                throw std::invalid_argument("Invalid OPQ resident matrix dimensions");
+            m_matrixOwner.Adopt(m_OPQMatrix, std::move(OPQMatrix), ResidentMultiplyBytes(m_matrixDim, m_matrixDim));
             m_InitMatrixTranspose();
         }
 
         template <typename T>
         void OPQQuantizer<T>::m_InitMatrixTranspose() {
-            m_OPQMatrix_T = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
+            m_transposeOwner.Allocate(m_OPQMatrix_T, ResidentMultiplyBytes(m_matrixDim, m_matrixDim));
             for (int i = 0; i < m_matrixDim; i++) {
                 for (int j = 0; j < m_matrixDim; j++) {
                     m_OPQMatrix_T[i * m_matrixDim + j] = m_OPQMatrix[j * m_matrixDim + i];
@@ -157,7 +168,10 @@ namespace SPTAG
                 return code;
             }
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
-            m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
+            if (ResidentMultiplyBytes(m_matrixDim, m_matrixDim) >
+                static_cast<uint64_t>((std::numeric_limits<int>::max)()))
+                return ErrorCode::FailedParseValue;
+            m_matrixOwner.Allocate(m_OPQMatrix, ResidentMultiplyBytes(m_matrixDim, m_matrixDim));
             IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read OPQ Matrix.\n");
 
@@ -168,10 +182,15 @@ namespace SPTAG
         template <typename T>
         ErrorCode OPQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
         {
-            PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes);
+            const auto code = PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes);
+            if (code != ErrorCode::Success)
+                return code;
             raw_bytes += PQQuantizer<OPQMatrixType>::BufferSize() - sizeof(VectorValueType) - sizeof(QuantizerType);
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
-            m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
+            if (ResidentMultiplyBytes(m_matrixDim, m_matrixDim) >
+                static_cast<uint64_t>((std::numeric_limits<int>::max)()))
+                return ErrorCode::FailedParseValue;
+            m_matrixOwner.Allocate(m_OPQMatrix, ResidentMultiplyBytes(m_matrixDim, m_matrixDim));
             std::memcpy(m_OPQMatrix.get(), raw_bytes, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim);
             raw_bytes += sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim;
 

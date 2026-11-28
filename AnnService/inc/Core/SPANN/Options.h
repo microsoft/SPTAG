@@ -5,8 +5,10 @@
 #define _SPTAG_SPANN_OPTIONS_H_
 
 #include "inc/Core/Common.h"
-#include "inc/Helper/StringConvert.h"
+#include "inc/Core/Common/ResidentMetadata.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Helper/KeyValueIO.h"
+#include "inc/Helper/StringConvert.h"
 #include <string>
 
 namespace SPTAG {
@@ -14,7 +16,21 @@ namespace SPTAG {
 
         class Options
         {
-        public:
+            COMMON::ResidentStringOwners<31> m_residentStrings;
+
+          public:
+            // Public fields remain available for unmanaged configuration staging.
+            // Resident Index options are private; internal string writes must
+            // use Assign rather than bypassing their ownership admission.
+            template <typename T, typename U> void Assign(T &field, U &&value)
+            {
+                if constexpr (std::is_same_v<T, std::string>)
+                    m_residentStrings.Assign(field, std::string(std::forward<U>(value)));
+                else
+                    field = std::forward<U>(value);
+            }
+            // Runtime-only injection; never serialized in index configuration.
+            std::shared_ptr<Helper::KeyValueIO> m_postingStore;
             VectorValueType m_valueType;
             DistCalcMethod m_distCalcMethod;
             IndexAlgoType m_indexAlgoType;
@@ -215,100 +231,129 @@ namespace SPTAG {
             SizeType m_maxID;
             bool m_shareDB;
 
-            Options() {
-#define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
-                VarName = DefaultValue; \
+            Options()
+            {
+#define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, DefaultValue);
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineBasicParameter
 
-#define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
-                VarName = DefaultValue; \
+#define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, DefaultValue);
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSelectHeadParameter
 
-#define DefineBuildHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
-                VarName = DefaultValue; \
+#define DefineBuildHeadParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, DefaultValue);
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineBuildHeadParameter
 
-#define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \
-                VarName = DefaultValue; \
+#define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, DefaultValue);
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
             }
 
-            ~Options() {}
-
-            ErrorCode SetParameter(const char* p_section, const char* p_param, const char* p_value)
+            // Copies are configuration staging. Assignment into a resident
+            // Options retains its destination account and admits each string.
+            Options(const Options &other) : m_residentStrings(nullptr)
             {
-                if (nullptr == p_section || nullptr == p_param || nullptr == p_value) return ErrorCode::Fail;
+                *this = other;
+            }
+            Options &operator=(const Options &other)
+            {
+                if (this == &other)
+                    return *this;
+                m_postingStore = other.m_postingStore;
+#define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, other.VarName);
+#define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, other.VarName);
+#define DefineBuildHeadParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, other.VarName);
+#define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) Assign(VarName, other.VarName);
+#include "inc/Core/SPANN/ParameterDefinitionList.h"
+#undef DefineBasicParameter
+#undef DefineSelectHeadParameter
+#undef DefineBuildHeadParameter
+#undef DefineSSDParameter
+                return *this;
+            }
+            ~Options()
+            {
+            }
 
-                if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "Base")) {
-#define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
-    { \
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
-        VarType tmp; \
-        if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
-        { \
-            VarName = tmp; \
-        } \
-    } else \
+            ErrorCode SetParameter(const char *p_section, const char *p_param, const char *p_value)
+            {
+                if (nullptr == p_section || nullptr == p_param || nullptr == p_value)
+                    return ErrorCode::Fail;
+
+                if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "Base"))
+                {
+#define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr)                                     \
+            if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr))                                           \
+            {                                                                                                          \
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value);          \
+                VarType tmp;                                                                                           \
+                if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp))                                           \
+                {                                                                                                      \
+                    Assign(VarName, std::move(tmp));                                                                   \
+                }                                                                                                      \
+            }                                                                                                          \
+            else
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineBasicParameter
 
                     ;
                 }
-                else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "SelectHead")) {
-#define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
-    { \
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
-        VarType tmp; \
-        if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
-        { \
-            VarName = tmp; \
-        } \
-    } else \
+                else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "SelectHead"))
+                {
+#define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr)                                \
+            if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr))                                           \
+            {                                                                                                          \
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value);          \
+                VarType tmp;                                                                                           \
+                if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp))                                           \
+                {                                                                                                      \
+                    Assign(VarName, std::move(tmp));                                                                   \
+                }                                                                                                      \
+            }                                                                                                          \
+            else
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSelectHeadParameter
 
                     ;
                 }
-                else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildHead")) {
-#define DefineBuildHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
-    { \
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
-        VarType tmp; \
-        if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
-        { \
-            VarName = tmp; \
-        } \
-    } else \
+                else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildHead"))
+                {
+#define DefineBuildHeadParameter(VarName, VarType, DefaultValue, RepresentStr)                                 \
+            if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr))                                           \
+            {                                                                                                          \
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value);          \
+                VarType tmp;                                                                                           \
+                if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp))                                           \
+                {                                                                                                      \
+                    Assign(VarName, std::move(tmp));                                                                   \
+                }                                                                                                      \
+            }                                                                                                          \
+            else
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineBuildHeadParameter
 
                     ;
                 }
-                else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildSSDIndex")) {
-#define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
-    { \
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
-        VarType tmp; \
-        if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
-        { \
-            VarName = tmp; \
-        } \
-    }
+                else if (Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildSSDIndex"))
+                {
+#define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr)                                       \
+            if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr))                                           \
+            {                                                                                                          \
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value);          \
+                VarType tmp;                                                                                           \
+                if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp))                                           \
+                {                                                                                                      \
+                    Assign(VarName, std::move(tmp));                                                                   \
+                }                                                                                                      \
+            }
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
@@ -317,7 +362,7 @@ namespace SPTAG {
                 }
                 return ErrorCode::Success;
             }
-            
+
             std::string GetParameter(const char* p_section, const char* p_param) const
             {
                 if (nullptr == p_section || nullptr == p_param) return std::string();

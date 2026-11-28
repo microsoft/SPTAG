@@ -4,19 +4,21 @@
 #ifndef _SPTAG_COMMON_BKTREE_H_
 #define _SPTAG_COMMON_BKTREE_H_
 
+#include "inc/Core/VectorIndex.h"
+#include <atomic>
+#include <mutex>
+#include <numeric>
+#include <omp.h>
+#include <shared_mutex>
 #include <stack>
 #include <string>
 #include <vector>
-#include <mutex>
-#include <shared_mutex>
-#include <atomic>
-#include <omp.h>
-#include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "QueryResultSet.h"
 #include "WorkSpace.h"
 #include "Dataset.h"
+#include "ResidentHashMap.h"
 #include "DistanceUtils.h"
 
 namespace SPTAG
@@ -534,16 +536,26 @@ break;
         class BKTree
         {
         public:
-            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_fBalanceFactor(-1.0f), m_bfs(0), m_lock(new std::shared_timed_mutex), m_pQuantizer(nullptr) {}
-            
-            BKTree(const BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
-                                   m_iBKTKmeansK(other.m_iBKTKmeansK), 
-                                   m_iBKTLeafSize(other.m_iBKTLeafSize),
-                                   m_iSamples(other.m_iSamples),
-                                   m_fBalanceFactor(other.m_fBalanceFactor),
-                                   m_lock(new std::shared_timed_mutex),
-                                   m_pQuantizer(other.m_pQuantizer),
-                                   m_bfs(0) {}
+          BKTree()
+              : m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_fBalanceFactor(-1.0f),
+                m_bfs(0),
+                m_lock(std::allocate_shared<std::shared_timed_mutex>(ResidentAllocator<std::shared_timed_mutex>())),
+                m_pQuantizer(nullptr)
+          {
+          }
+
+          BKTree(const BKTree &other)
+              : m_iTreeNumber(other.m_iTreeNumber), m_pTreeStart(other.m_pTreeStart.get_allocator()),
+                m_pTreeRoots(other.m_pTreeRoots.get_allocator()),
+                m_pSampleCenterMap(0, std::hash<SizeType>(), std::equal_to<SizeType>(),
+                                   other.m_pSampleCenterMap.get_allocator()),
+                m_iBKTKmeansK(other.m_iBKTKmeansK), m_iBKTLeafSize(other.m_iBKTLeafSize), m_iSamples(other.m_iSamples),
+                m_fBalanceFactor(other.m_fBalanceFactor),
+                m_lock(std::allocate_shared<std::shared_timed_mutex>(
+                    ResidentAllocator<std::shared_timed_mutex>(other.m_pTreeStart.get_allocator().Account()))),
+                m_pQuantizer(other.m_pQuantizer), m_bfs(0)
+          {
+          }
             ~BKTree() {}
 
             inline const BKTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
@@ -556,7 +568,10 @@ break;
                 return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); 
             }
 
-            inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
+            inline const ResidentHashMap<SizeType, SizeType> &GetSampleMap() const
+            {
+                return m_pSampleCenterMap;
+            }
 
             inline void SwapTree(BKTree& newTrees)
             {
@@ -564,10 +579,29 @@ break;
                 m_pTreeStart.swap(newTrees.m_pTreeStart);
                 m_pSampleCenterMap.swap(newTrees.m_pSampleCenterMap);
             }
+            std::mutex &RebuildLock()
+            {
+                return m_rebuildLock;
+            }
+
+            uint64_t ResidentPeakBytes(SizeType rows) const
+            {
+                if (rows < 0 || m_iTreeNumber <= 0 || m_iTreeNumber > 127)
+                    return (std::numeric_limits<uint64_t>::max)();
+                const auto nodes = ResidentMultiplyBytes(2 * (static_cast<uint64_t>(rows) + 1), m_iTreeNumber);
+                if (nodes > static_cast<uint64_t>(MaxSize))
+                    return (std::numeric_limits<uint64_t>::max)();
+                ResidentHashMap<SizeType, SizeType> empty;
+                auto result = ResidentAllocator<BKTNode>::AllocationBytes(nodes);
+                result = ResidentAddBytes(result, ResidentAllocator<SizeType>::AllocationBytes(m_iTreeNumber));
+                result = ResidentAddBytes(result, empty.GrowthBytes(2 * static_cast<uint64_t>(rows)));
+                return ResidentAddBytes(result, ResidentSharedBytes<std::shared_timed_mutex>());
+            }
 
             template <typename T>
             void Rebuild(const Dataset<T>& data, DistCalcMethod distMethod, IAbortOperation* abort)
             {
+                std::lock_guard<std::mutex> rebuild(m_rebuildLock);
                 BKTree newTrees(*this);
                 newTrees.BuildTrees<T>(data, distMethod, 1, nullptr, nullptr, false, abort);
 
@@ -602,6 +636,8 @@ break;
                 else {
                     localindices.assign(indices->begin(), indices->end());
                 }
+                m_pTreeStart.reserve(m_pTreeStart.size() + m_iTreeNumber);
+                m_pTreeRoots.reserve(m_pTreeRoots.size() + 2 * (localindices.size() + 1) * m_iTreeNumber);
                 KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod, m_pQuantizer);
 
                 if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
@@ -717,6 +753,8 @@ break;
                     localindices.assign(indices->begin(), indices->end());
                 }
 
+                m_pTreeStart.reserve(m_pTreeStart.size() + m_iTreeNumber);
+                m_pTreeRoots.reserve(m_pTreeRoots.size() + 2 * (localindices.size() + 1) * m_iTreeNumber);
                 // Create a shared KmeansArgs for DynamicFactorSelect (uses all threads)
                 KmeansArgs<T> sharedArgs(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod, m_pQuantizer);
 
@@ -1079,16 +1117,17 @@ break;
             }
 
         private:
-            std::vector<SizeType> m_pTreeStart;
-            std::vector<BKTNode> m_pTreeRoots;
-            std::unordered_map<SizeType, SizeType> m_pSampleCenterMap;
+          std::mutex m_rebuildLock;
+          ResidentVector<SizeType> m_pTreeStart;
+          ResidentVector<BKTNode> m_pTreeRoots;
+          ResidentHashMap<SizeType, SizeType> m_pSampleCenterMap;
 
         public:
-            std::unique_ptr<std::shared_timed_mutex> m_lock;
-            int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples, m_bfs;
-            float m_fBalanceFactor;
-            std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
-            bool m_parallelBuild = false;
+          std::shared_ptr<std::shared_timed_mutex> m_lock;
+          int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples, m_bfs;
+          float m_fBalanceFactor;
+          std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
+          bool m_parallelBuild = false;
         };
     }
 }
